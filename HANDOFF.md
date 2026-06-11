@@ -6,7 +6,7 @@ Atualizado em: 11/06/2026
 
 O Hennder CRM, com o slogan "Inteligencia Comercial e Recompra", e um CRM comercial para uma loja dos segmentos agro e pet shop. O objetivo e usar os dados do ERP para identificar clientes sem compra, oportunidades de recompra, vendas cruzadas e clientes em risco, transformando essas informacoes em tarefas praticas para os vendedores.
 
-O sistema continua usando dados ficticios, mas agora possui dominio, services, contratos de integracao, backend mock e schema Supabase. O projeto Supabase e o repositorio GitHub ja foram criados, mas as credenciais ainda nao estao configuradas localmente e as migrations ainda precisam ser aplicadas. Ainda nao existe conexao real com ERP, WhatsApp Business API ou modelo de IA.
+O snapshot comercial continua usando dados ficticios no formato do Uniplus, mas o projeto ja possui dominio, services, contratos de integracao e Supabase remoto operacional. As migrations e o seed foram aplicados, e contatos, status de alertas, oportunidades e agenda ja persistem nas tabelas `crm_*`. Ainda nao existe conexao real com ERP, WhatsApp Business API ou modelo de IA.
 
 Repositorio: `https://github.com/ueddergomes100-prog/henndercrm`
 
@@ -38,6 +38,7 @@ IMPORTANTE: antes de escrever codigo de Next.js, seguir o `AGENTS.md`. Ele deter
 - Administrador e supervisor operam toda a base.
 - O vendedor recebe e altera apenas registros atribuidos a sua carteira.
 - A migration operacional prepara o vinculo futuro com Supabase Auth.
+- Contatos, status de alertas, oportunidades e agenda persistem no Supabase.
 
 ### Tema visual
 
@@ -249,15 +250,15 @@ Implementar em etapas:
 
 ## 9. Proxima ordem recomendada de trabalho
 
-1. Criar o projeto Supabase remoto e aplicar migrations e seed.
-2. Substituir as contas locais por Supabase Auth.
-3. Implementar provider de leitura do snapshot no Supabase.
-4. No computador com acesso ao ERP, implementar os repositorios PostgreSQL do Uniplus.
-6. Validar o SQL de extracao contra o schema real.
-7. Executar sincronizacao incremental e idempotente.
-8. Tratar devolucoes e regras especificas de status do Uniplus.
-9. Conectar WhatsApp Business e webhooks.
-10. Adicionar IA externa apenas depois que dados e historicos estiverem confiaveis.
+1. Substituir as contas locais por Supabase Auth.
+2. Implementar o provider de leitura do snapshot no Supabase.
+3. Revisar seguranca, RLS e fluxo de publicacao.
+4. Manter a integracao PostgreSQL com o Uniplus para a etapa final.
+5. No computador com acesso ao ERP, validar o SQL de extracao contra o schema real.
+6. Executar sincronizacao incremental e idempotente.
+7. Tratar devolucoes e regras especificas de status do Uniplus.
+8. Conectar WhatsApp Business e webhooks.
+9. Adicionar IA externa apenas depois que dados e historicos estiverem confiaveis.
 
 ## 10. Cuidados tecnicos
 
@@ -266,8 +267,10 @@ Implementar em etapas:
 - A interface ainda esta concentrada em `src/app/page.tsx`, mas tipos, dados e regras ja foram extraidos.
 - Separar os componentes visuais de forma incremental, preservando o comportamento aprovado.
 - Os numeros atuais sao demonstrativos, embora agora sejam calculados a partir do conjunto mock.
-- A persistencia operacional local fica em `.data/crm-workspace.json`.
-- O projeto remoto Supabase ainda nao foi configurado por falta de credenciais.
+- A persistencia operacional usa o Supabase quando `CRM_OPERATIONAL_PROVIDER=supabase`.
+- O fallback local continua disponivel em `.data/crm-workspace.json` com `CRM_OPERATIONAL_PROVIDER=local`.
+- O projeto remoto Supabase esta configurado; as credenciais ficam apenas em `.env.local`.
+- A chave secreta compartilhada durante a configuracao deve ser rotacionada antes da producao.
 - As contas atuais sao demonstrativas e devem migrar para Supabase Auth antes da producao.
 - O cadastro de alerta manual continua apenas visual; os status dos alertas calculados ja persistem.
 - Antes de continuar, rodar `npm run lint` e `npm run build`.
@@ -289,8 +292,12 @@ Na ultima alteracao:
 - Dominio, regras comerciais e services foram criados.
 - Contratos e repositorios mockados do Uniplus foram criados.
 - `UniplusSyncService` implementa regras de importacao e auditoria de vendas ignoradas.
-- Migration e seed Supabase foram criados.
+- Migrations e seed Supabase foram criados e aplicados no projeto remoto.
+- As 14 tabelas `crm_*` foram verificadas.
+- O bootstrap importou 19 vendas, auditou 3 ignoradas e gerou 15 alertas, 4 oportunidades e 5 eventos.
+- O CRUD remoto e o isolamento entre administrador e vendedor foram validados.
 - Rotas `/api/crm/snapshot` e `/api/crm/sync/preview` foram adicionadas.
+- A rota administrativa `/api/crm/bootstrap` inicializa a massa demonstrativa de forma idempotente.
 - Filtros de clientes, alertas, Carteira do Vendedor e Saude da Base foram implementados.
 - `npm run lint` e `npm run build` passaram apos essas alteracoes.
 

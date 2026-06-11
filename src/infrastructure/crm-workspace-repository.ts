@@ -11,11 +11,12 @@ import type {
   RepurchaseAlertStatus,
 } from "@/domain/crm/types";
 import { crmDemoService } from "@/services/crm-demo-service";
+import type { ICrmWorkspaceRepository } from "./crm-workspace-contract";
 
 const dataDirectory = path.join(process.cwd(), ".data");
 const dataFile = path.join(dataDirectory, "crm-workspace.json");
 
-export class CrmWorkspaceRepository {
+export class CrmWorkspaceRepository implements ICrmWorkspaceRepository {
   private writeQueue = Promise.resolve();
 
   async getWorkspace(): Promise<CrmWorkspace> {
@@ -35,7 +36,13 @@ export class CrmWorkspaceRepository {
     const workspace = await this.getWorkspace();
     const record = {
       ...input,
-      id: Math.max(0, ...workspace.contacts.map((contact) => contact.id)) + 1,
+      id:
+        Math.max(
+          0,
+          ...workspace.contacts
+            .map((contact) => Number(contact.id))
+            .filter(Number.isFinite),
+        ) + 1,
     };
     workspace.contacts.unshift(record);
     await this.save(workspace);

@@ -51,10 +51,21 @@ export class SupabaseRestClient {
     });
   }
 
+  async delete(table: string, filters: Record<string, QueryValue>): Promise<void> {
+    const query = Object.fromEntries(
+      Object.entries(filters).map(([key, value]) => [key, `eq.${value}`]),
+    );
+    await this.request<unknown[]>(table, {
+      method: "DELETE",
+      query,
+      prefer: "return=minimal",
+    });
+  }
+
   private async request<T>(
     table: string,
     options: {
-      method?: "GET" | "POST" | "PATCH";
+      method?: "GET" | "POST" | "PATCH" | "DELETE";
       query?: Record<string, QueryValue>;
       body?: unknown;
       prefer?: string;
@@ -77,12 +88,14 @@ export class SupabaseRestClient {
       cache: "no-store",
     });
 
+    const responseText = await response.text();
+
     if (!response.ok) {
-      const detail = await response.text();
+      const detail = responseText;
       throw new Error(`Supabase ${response.status}: ${detail}`);
     }
 
-    if (response.status === 204) return [] as T;
-    return response.json() as Promise<T>;
+    if (response.status === 204 || responseText.length === 0) return [] as T;
+    return JSON.parse(responseText) as T;
   }
 }

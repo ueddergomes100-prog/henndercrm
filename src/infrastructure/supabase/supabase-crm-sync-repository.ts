@@ -64,7 +64,9 @@ export class SupabaseCrmSyncRepository implements ICrmSyncTargetRepository {
       sales.map((sale) => ({
         uniplus_id: sale.id,
         cliente_id: clientIds.get(sale.clientId as number),
-        vendedor_id: sale.sellerId ? sellerIds.get(sale.sellerId) : null,
+        vendedor_id: sale.sellerId
+          ? sellerIds.get(sale.sellerId) ?? null
+          : null,
         data_venda: sale.soldAt,
         data_inclusao: sale.includedAt,
         data_alteracao: sale.changedAt,
@@ -88,9 +90,11 @@ export class SupabaseCrmSyncRepository implements ICrmSyncTargetRepository {
       items.map((item) => ({
         uniplus_id: item.id,
         venda_id: saleIds.get(item.saleId),
-        produto_id: item.productId ? productIds.get(item.productId) : null,
-        codigo_produto: item.productCode,
-        nome_produto: item.productName,
+        produto_id: item.productId
+          ? productIds.get(item.productId) ?? null
+          : null,
+        codigo_produto: item.productCode ?? null,
+        nome_produto: item.productName ?? "",
         quantidade: item.quantity,
         valor_estimado: roundCurrency((productPrices.get(item.productId as number) ?? 0) * item.quantity),
       })),
@@ -100,9 +104,20 @@ export class SupabaseCrmSyncRepository implements ICrmSyncTargetRepository {
 
   async saveIgnoredSales(ignoredSales: IgnoredSale[]) {
     if (ignoredSales.length === 0) return;
+    const existing = await this.client.select<{ uniplus_venda_id: number | null }>(
+      "crm_vendas_ignoradas",
+      { select: "uniplus_venda_id" },
+    );
+    const existingIds = new Set(
+      existing.flatMap((row) =>
+        row.uniplus_venda_id === null ? [] : [row.uniplus_venda_id],
+      ),
+    );
+    const newRows = ignoredSales.filter((sale) => !existingIds.has(sale.saleId));
+    if (newRows.length === 0) return;
     await this.client.insert(
       "crm_vendas_ignoradas",
-      ignoredSales.map((sale) => ({
+      newRows.map((sale) => ({
         uniplus_venda_id: sale.saleId,
         motivo: sale.reason,
         dados: sale.data,
@@ -126,25 +141,25 @@ function mapClient(client: UniplusClient) {
   const quality = calculateRegistrationQuality(client);
   return {
     uniplus_id: client.id,
-    codigo: client.code,
+    codigo: client.code ?? null,
     nome: client.name,
-    razao_social: client.legalName,
-    cpf_cnpj: client.document,
-    telefone: client.phone,
-    celular: client.mobile,
-    whatsapp: client.whatsapp,
-    email: client.email,
-    endereco: client.address,
-    bairro: client.neighborhood,
-    cidade_id: client.cityId,
-    estado_id: client.stateId,
-    cep: client.zipCode,
-    data_cadastro: client.registeredAt,
-    data_ultima_compra: client.lastPurchaseAt,
+    razao_social: client.legalName ?? null,
+    cpf_cnpj: client.document ?? null,
+    telefone: client.phone ?? null,
+    celular: client.mobile ?? null,
+    whatsapp: client.whatsapp ?? null,
+    email: client.email ?? null,
+    endereco: client.address ?? null,
+    bairro: client.neighborhood ?? null,
+    cidade_id: client.cityId ?? null,
+    estado_id: client.stateId ?? null,
+    cep: client.zipCode ?? null,
+    data_cadastro: client.registeredAt ?? null,
+    data_ultima_compra: client.lastPurchaseAt ?? null,
     inativo: client.inactive,
-    categoria_cliente_id: client.categoryId,
-    classificacao_cliente_id: client.classificationId,
-    ciclo_compras: client.purchaseCycleDays,
+    categoria_cliente_id: client.categoryId ?? null,
+    classificacao_cliente_id: client.classificationId ?? null,
+    ciclo_compras: client.purchaseCycleDays ?? null,
     qualidade_cadastro_score: quality.score,
     qualidade_cadastro_status: quality.status,
   };
@@ -153,16 +168,16 @@ function mapClient(client: UniplusClient) {
 function mapProduct(product: UniplusProduct) {
   return {
     uniplus_id: product.id,
-    codigo: product.code,
+    codigo: product.code ?? null,
     nome: product.name,
-    tipo: product.type,
-    departamento: product.department,
-    fabricante_id: product.manufacturerId,
-    fornecedor: product.supplier,
+    tipo: product.type ?? null,
+    departamento: product.department ?? null,
+    fabricante_id: product.manufacturerId ?? null,
+    fornecedor: product.supplier ?? null,
     preco: product.price,
-    data_ultima_venda: product.lastSaleAt,
-    data_ultima_compra: product.lastPurchaseAt,
-    tipo_produto: product.productType,
+    data_ultima_venda: product.lastSaleAt ?? null,
+    data_ultima_compra: product.lastPurchaseAt ?? null,
+    tipo_produto: product.productType ?? null,
     utiliza_crm: product.usesCrm,
     recompra_ativa: product.usesCrm,
     dias_recompra_padrao: null,
@@ -173,11 +188,11 @@ function mapSeller(seller: UniplusSeller) {
   return {
     uniplus_id: seller.id,
     nome: seller.name,
-    email: seller.email,
-    celular: seller.mobile,
-    whatsapp: seller.whatsapp,
+    email: seller.email ?? null,
+    celular: seller.mobile ?? null,
+    whatsapp: seller.whatsapp ?? null,
     supervisor: seller.supervisor,
     inativo: seller.inactive,
-    perfil_id: seller.profileId,
+    perfil_id: seller.profileId ?? null,
   };
 }

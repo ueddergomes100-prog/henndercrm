@@ -6,7 +6,7 @@ CRM comercial para lojas dos segmentos agro e pet shop, com foco em recuperaçã
 
 Repositório: [github.com/ueddergomes100-prog/henndercrm](https://github.com/ueddergomes100-prog/henndercrm)
 
-Esta etapa funciona com dados fictícios no formato do ERP Uniplus. O banco local do ERP é tratado como uma fonte estritamente somente leitura. A persistência definitiva foi modelada para Supabase PostgreSQL, mas nenhuma credencial real é necessária para executar a demonstração.
+Esta etapa usa dados comerciais fictícios no formato do ERP Uniplus. O banco local do ERP é tratado como uma fonte estritamente somente leitura. O Supabase PostgreSQL remoto já está configurado para persistir contatos, status de alertas, oportunidades e eventos da agenda.
 
 ## Arquitetura
 
@@ -137,31 +137,31 @@ As migrations criam:
 
 Também são criados índices, constraints, triggers de `updated_at`, cálculo automático de qualidade cadastral e Row Level Security. A segunda migration adiciona perfis `administrador`, `supervisor` e `vendedor`, além das políticas de agenda.
 
-Para preparar um projeto Supabase:
+Para preparar outro projeto Supabase:
 
 1. Crie o projeto.
 2. Aplique a migration pelo SQL Editor ou Supabase CLI.
 3. Execute `supabase/seed.sql`.
 4. Copie `.env.example` para `.env.local`.
 5. Preencha `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` e `SUPABASE_SECRET_KEY`.
-6. Troque `CRM_DATA_PROVIDER` para `supabase` quando o provider de leitura for ativado.
+6. Defina `CRM_OPERATIONAL_PROVIDER=supabase` para persistir as operações no banco remoto.
+7. Troque `CRM_DATA_PROVIDER` para `supabase` quando o provider do snapshot comercial for implementado.
 
-Sem credenciais remotas, as operações são persistidas em `.data/crm-workspace.json`, ignorado pelo Git. Esse modo permite validar o CRM completo antes da conexão com o PostgreSQL do ERP.
+Com `CRM_OPERATIONAL_PROVIDER=local`, as operações são persistidas em `.data/crm-workspace.json`, ignorado pelo Git. Com `CRM_OPERATIONAL_PROVIDER=supabase`, contatos, status de alertas, oportunidades e agenda são gravados nas tabelas `crm_*`.
 
 Nunca exponha `SUPABASE_SECRET_KEY` no navegador.
 
-O projeto Supabase já foi criado. Ainda falta configurar localmente:
+O projeto Supabase do Hennder CRM já está configurado:
 
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
-- `SUPABASE_SECRET_KEY`
-- senha ou acesso autenticado para aplicar as migrations
+- As duas migrations e o seed foram aplicados.
+- As 14 tabelas `crm_*` foram verificadas no banco remoto.
+- O bootstrap demonstrativo importou 19 vendas e auditou 3 vendas ignoradas.
+- Foram gerados 15 alertas, 4 oportunidades e 5 eventos de agenda.
+- O escopo por perfil de usuário e o CRUD operacional foram validados.
 
-Depois disso, aplique em ordem:
+O bootstrap pode ser reexecutado por um administrador em `POST /api/crm/bootstrap`. A operação é idempotente para a massa demonstrativa.
 
-1. `supabase/migrations/202606110001_crm_schema.sql`
-2. `supabase/migrations/202606110002_crm_operacional.sql`
-3. `supabase/seed.sql`
+As credenciais reais ficam somente em `.env.local`, que é ignorado pelo Git. Como a chave secreta foi compartilhada durante a configuração, ela deve ser rotacionada antes da publicação em produção.
 
 ## Regras comerciais
 
@@ -223,9 +223,9 @@ ticket médio * ciclos de compra estimados como perdidos
 
 ## Próximos passos
 
-1. Criar o projeto Supabase remoto e aplicar migrations/seed.
-2. Substituir as contas locais por Supabase Auth.
-3. Criar o provider de leitura do snapshot a partir do Supabase.
-4. Implementar os repositórios PostgreSQL reais no computador com acesso ao Uniplus.
+1. Substituir as contas locais por Supabase Auth.
+2. Consolidar o snapshot comercial no Supabase sem alterar a interface.
+3. Manter a integração PostgreSQL com o Uniplus para a etapa final.
+4. Validar o schema real do ERP e implementar os repositórios somente leitura.
 5. Executar sincronização incremental e idempotente.
 6. Integrar WhatsApp Business somente após consentimento, templates e webhooks.

@@ -253,7 +253,7 @@ export interface CrmAgendaEvent {
 }
 
 export interface CrmContactRecord {
-  id: number;
+  id: number | string;
   customerId: string;
   customerName: string;
   outcome: ContactOutcome;

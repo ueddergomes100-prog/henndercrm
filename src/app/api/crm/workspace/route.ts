@@ -6,7 +6,7 @@ import type {
   CrmSessionUser,
   RepurchaseAlertStatus,
 } from "@/domain/crm/types";
-import { crmWorkspaceRepository } from "@/infrastructure/crm-workspace-repository";
+import { getCrmWorkspaceRepository } from "@/infrastructure/crm-workspace-provider";
 import { CRM_SESSION_COOKIE, readSessionToken } from "@/lib/crm-auth";
 import { crmDemoService } from "@/services/crm-demo-service";
 
@@ -27,7 +27,7 @@ type WorkspaceAction =
 export async function GET() {
   const user = await requireUser();
   if (user instanceof Response) return user;
-  const workspace = await crmWorkspaceRepository.getWorkspace();
+  const workspace = await getCrmWorkspaceRepository().getWorkspace();
   if (user.role !== "vendedor" || !user.sellerId) return Response.json(workspace);
 
   const snapshot = crmDemoService.getSnapshot();
@@ -65,45 +65,46 @@ export async function POST(request: Request) {
 
   try {
     const command = (await request.json()) as WorkspaceAction;
-    const denied = await denyUnauthorizedChange(user, command);
+    const repository = getCrmWorkspaceRepository();
+    const denied = await denyUnauthorizedChange(user, command, repository);
     if (denied) return denied;
 
     switch (command.action) {
       case "create_contact":
         return Response.json(
-          await crmWorkspaceRepository.createContact(command.record),
+          await repository.createContact(command.record),
           { status: 201 },
         );
       case "update_alert":
         return Response.json(
-          await crmWorkspaceRepository.updateAlertStatus(command.id, command.status),
+          await repository.updateAlertStatus(command.id, command.status),
         );
       case "create_agenda":
         return Response.json(
-          await crmWorkspaceRepository.createAgendaEvent(command.event),
+          await repository.createAgendaEvent(command.event),
           { status: 201 },
         );
       case "update_agenda":
         return Response.json(
-          await crmWorkspaceRepository.updateAgendaEvent(command.id, command.event),
+          await repository.updateAgendaEvent(command.id, command.event),
         );
       case "delete_agenda":
-        await crmWorkspaceRepository.deleteAgendaEvent(command.id);
+        await repository.deleteAgendaEvent(command.id);
         return Response.json({ ok: true });
       case "create_opportunity":
         return Response.json(
-          await crmWorkspaceRepository.createOpportunity(command.opportunity),
+          await repository.createOpportunity(command.opportunity),
           { status: 201 },
         );
       case "update_opportunity":
         return Response.json(
-          await crmWorkspaceRepository.updateOpportunity(
+          await repository.updateOpportunity(
             command.id,
             command.opportunity,
           ),
         );
       case "delete_opportunity":
-        await crmWorkspaceRepository.deleteOpportunity(command.id);
+        await repository.deleteOpportunity(command.id);
         return Response.json({ ok: true });
       default:
         return Response.json({ error: "Ação inválida." }, { status: 400 });
@@ -125,6 +126,7 @@ async function requireUser(): Promise<CrmSessionUser | Response> {
 async function denyUnauthorizedChange(
   user: CrmSessionUser,
   command: WorkspaceAction,
+  repository: ReturnType<typeof getCrmWorkspaceRepository>,
 ) {
   if (user.role !== "vendedor") return null;
   if (!user.sellerId) {
@@ -132,7 +134,7 @@ async function denyUnauthorizedChange(
   }
 
   const snapshot = crmDemoService.getSnapshot();
-  const workspace = await crmWorkspaceRepository.getWorkspace();
+  const workspace = await repository.getWorkspace();
   let assignedSellerId: string | undefined;
 
   switch (command.action) {
