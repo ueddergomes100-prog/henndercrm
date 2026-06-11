@@ -1,36 +1,230 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Hennder CRM
 
-## Getting Started
+**Inteligência Comercial e Recompra**
 
-First, run the development server:
+CRM comercial para lojas dos segmentos agro e pet shop, com foco em recuperação de clientes, recompra, qualidade cadastral, afinidade com vendedores e oportunidades de venda cruzada.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+Repositório: [github.com/ueddergomes100-prog/henndercrm](https://github.com/ueddergomes100-prog/henndercrm)
+
+Esta etapa funciona com dados fictícios no formato do ERP Uniplus. O banco local do ERP é tratado como uma fonte estritamente somente leitura. A persistência definitiva foi modelada para Supabase PostgreSQL, mas nenhuma credencial real é necessária para executar a demonstração.
+
+## Arquitetura
+
+```text
+Uniplus PostgreSQL (somente leitura)
+        |
+IUniplus*Repository
+        |
+UniplusSyncService
+        |
+ICrmSyncTargetRepository
+        |
+Supabase PostgreSQL
+        |
+Services de domínio
+        |
+API e frontend Next.js
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+O frontend não conhece tabelas ou consultas do Uniplus. A implementação real poderá substituir os repositórios mockados sem alterar telas ou regras comerciais.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Execução local
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm install
+npm run dev
+```
 
-## Learn More
+Acesse [http://localhost:3000](http://localhost:3000).
 
-To learn more about Next.js, take a look at the following resources:
+Contas locais:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- Administrador: `admin@henndercrm.local` / `Admin@123`
+- Supervisor: `supervisor@henndercrm.local` / `Supervisor@123`
+- Vendedor: `vendedor@henndercrm.local` / `Vendedor@123`
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+As sessões usam cookie HTTP-only assinado. Administrador e supervisor podem operar toda a base; o vendedor recebe e altera apenas registros da própria carteira.
 
-## Deploy on Vercel
+Validações:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+npm run lint
+npm run build
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Estrutura
+
+- `src/domain/crm`: tipos de domínio e regras puras.
+- `src/data/mock-uniplus.ts`: dados fictícios no formato esperado do Uniplus.
+- `src/integrations/uniplus`: interfaces e implementações mockadas dos repositórios.
+- `src/integrations/uniplus/sql/sales-extraction.sql`: consulta somente leitura para a futura integração.
+- `src/services`: sincronização, cálculos comerciais e view models.
+- `src/infrastructure/supabase`: cliente REST e destino de sincronização Supabase.
+- `src/infrastructure/crm-workspace-repository.ts`: persistência operacional local durável.
+- `src/app/api/auth/session`: login, restauração e encerramento de sessão.
+- `src/app/api/crm/workspace`: contatos, alertas, agenda e oportunidades.
+- `src/app/page.tsx`: interface navegável.
+- `supabase/migrations`: schema versionado.
+- `supabase/seed.sql`: massa inicial fictícia.
+
+## Contratos do Uniplus
+
+Foram criadas as interfaces:
+
+- `IUniplusClientRepository`
+- `IUniplusProductRepository`
+- `IUniplusSaleRepository`
+- `IUniplusSellerRepository`
+- `ICrmSyncTargetRepository`
+
+As implementações atuais são `MockUniplus*Repository`. O `UniplusSyncService` depende apenas das interfaces e nunca grava no Uniplus.
+
+Mapeamento principal:
+
+| Uniplus | CRM |
+| --- | --- |
+| `entidade` | `crm_clientes` |
+| `usuario` | `crm_vendedores` |
+| `produto` | `crm_produtos` |
+| `dav` | `crm_vendas` |
+| `davitem` | `crm_itens_venda` |
+
+Relacionamentos:
+
+- `entidade.id = dav.idcliente`
+- `dav.id = davitem.iddav`
+- `davitem.idproduto = produto.id`
+- `dav.idusuario = usuario.id`
+
+## Regras de importação
+
+São importadas apenas vendas que possuam:
+
+- Cliente identificado e ativo.
+- Nome de cliente preenchido.
+- Venda aprovada e não cancelada.
+- Pelo menos um item.
+- Produto válido em todos os itens.
+
+Registros rejeitados são classificados como:
+
+- `cliente_nao_identificado`
+- `venda_cancelada`
+- `item_sem_produto`
+- `cliente_inativo`
+- `dados_incompletos`
+
+A prévia pode ser executada por `POST /api/crm/sync/preview`.
+
+## Supabase
+
+As migrations criam:
+
+1. `crm_clientes`
+2. `crm_vendedores`
+3. `crm_produtos`
+4. `crm_vendas`
+5. `crm_itens_venda`
+6. `crm_regras_recompra`
+7. `crm_alertas_recompra`
+8. `crm_historico_contatos`
+9. `crm_oportunidades`
+10. `crm_score_cliente`
+11. `crm_vendas_ignoradas`
+12. `crm_sincronizacoes`
+13. `crm_usuarios`
+14. `crm_agenda_eventos`
+
+Também são criados índices, constraints, triggers de `updated_at`, cálculo automático de qualidade cadastral e Row Level Security. A segunda migration adiciona perfis `administrador`, `supervisor` e `vendedor`, além das políticas de agenda.
+
+Para preparar um projeto Supabase:
+
+1. Crie o projeto.
+2. Aplique a migration pelo SQL Editor ou Supabase CLI.
+3. Execute `supabase/seed.sql`.
+4. Copie `.env.example` para `.env.local`.
+5. Preencha `NEXT_PUBLIC_SUPABASE_URL` e `SUPABASE_SERVICE_ROLE_KEY`.
+6. Troque `CRM_DATA_PROVIDER` para `supabase` quando o provider de leitura for ativado.
+
+Sem credenciais remotas, as operações são persistidas em `.data/crm-workspace.json`, ignorado pelo Git. Esse modo permite validar o CRM completo antes da conexão com o PostgreSQL do ERP.
+
+Nunca exponha `SUPABASE_SERVICE_ROLE_KEY` no navegador.
+
+O projeto Supabase já foi criado. Ainda falta configurar localmente:
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- senha ou acesso autenticado para aplicar as migrations
+
+Depois disso, aplique em ordem:
+
+1. `supabase/migrations/202606110001_crm_schema.sql`
+2. `supabase/migrations/202606110002_crm_operacional.sql`
+3. `supabase/seed.sql`
+
+## Regras comerciais
+
+### Qualidade cadastral
+
+- Nome: 15 pontos.
+- CPF/CNPJ: 15 pontos.
+- Telefone ou celular: 20 pontos.
+- WhatsApp: 20 pontos.
+- E-mail: 10 pontos.
+- Cidade: 10 pontos.
+- Bairro: 5 pontos.
+- Endereço: 5 pontos.
+
+Classificação: ruim até 39, regular até 69, bom até 89 e excelente a partir de 90.
+
+### Inatividade
+
+- Ativo: até 30 dias.
+- Atenção: 31 a 60 dias.
+- Risco: 61 a 90 dias.
+- Perdido: acima de 90 dias.
+
+### Vendedor preferencial
+
+O vendedor com mais compras válidas é escolhido. Em empate, vence o maior valor total vendido. O percentual apresentado é a participação do vendedor nas compras do cliente.
+
+### Recompra
+
+Prioridade das regras:
+
+1. Produto.
+2. Palavra-chave.
+3. Departamento.
+4. Histórico individual.
+
+A data prevista é `data_compra + dias_recompra`. O modelo impede duplicidade para a mesma combinação de cliente, produto, venda e item.
+
+### Potencial perdido
+
+```text
+ticket médio * ciclos de compra estimados como perdidos
+```
+
+## Módulos atuais
+
+- Dashboard executivo calculado.
+- Clientes com filtros funcionais.
+- Perfil 360 com compras, alertas, qualidade e vendedor preferencial.
+- Central de recuperação e histórico persistente de contatos.
+- Alertas de recompra com filtros e status persistentes.
+- Carteira do vendedor.
+- Saúde da base.
+- Oportunidades com criação, edição e exclusão.
+- Agenda comercial com criação, edição e exclusão.
+- Autenticação com sessão HTTP-only e três perfis de acesso.
+- IA comercial com respostas calculadas localmente.
+- Relatórios demonstrativos derivados do snapshot.
+
+## Próximos passos
+
+1. Criar o projeto Supabase remoto e aplicar migrations/seed.
+2. Substituir as contas locais por Supabase Auth.
+3. Criar o provider de leitura do snapshot a partir do Supabase.
+4. Implementar os repositórios PostgreSQL reais no computador com acesso ao Uniplus.
+5. Executar sincronização incremental e idempotente.
+6. Integrar WhatsApp Business somente após consentimento, templates e webhooks.
