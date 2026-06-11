@@ -143,17 +143,18 @@ Para preparar um projeto Supabase:
 2. Aplique a migration pelo SQL Editor ou Supabase CLI.
 3. Execute `supabase/seed.sql`.
 4. Copie `.env.example` para `.env.local`.
-5. Preencha `NEXT_PUBLIC_SUPABASE_URL` e `SUPABASE_SERVICE_ROLE_KEY`.
+5. Preencha `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` e `SUPABASE_SECRET_KEY`.
 6. Troque `CRM_DATA_PROVIDER` para `supabase` quando o provider de leitura for ativado.
 
 Sem credenciais remotas, as operações são persistidas em `.data/crm-workspace.json`, ignorado pelo Git. Esse modo permite validar o CRM completo antes da conexão com o PostgreSQL do ERP.
 
-Nunca exponha `SUPABASE_SERVICE_ROLE_KEY` no navegador.
+Nunca exponha `SUPABASE_SECRET_KEY` no navegador.
 
 O projeto Supabase já foi criado. Ainda falta configurar localmente:
 
 - `NEXT_PUBLIC_SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
+- `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+- `SUPABASE_SECRET_KEY`
 - senha ou acesso autenticado para aplicar as migrations
 
 Depois disso, aplique em ordem:

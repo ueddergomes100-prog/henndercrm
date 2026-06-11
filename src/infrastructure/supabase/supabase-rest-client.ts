@@ -5,11 +5,12 @@ type QueryValue = string | number | boolean;
 export class SupabaseRestClient {
   constructor(
     private readonly baseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL,
-    private readonly serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY,
+    private readonly secretKey =
+      process.env.SUPABASE_SECRET_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY,
   ) {
-    if (!baseUrl || !serviceRoleKey) {
+    if (!baseUrl || !secretKey) {
       throw new Error(
-        "Supabase não configurado. Defina NEXT_PUBLIC_SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY.",
+        "Supabase não configurado. Defina NEXT_PUBLIC_SUPABASE_URL e SUPABASE_SECRET_KEY.",
       );
     }
   }
@@ -67,8 +68,8 @@ export class SupabaseRestClient {
     const response = await fetch(url, {
       method: options.method ?? "GET",
       headers: {
-        apikey: this.serviceRoleKey as string,
-        authorization: `Bearer ${this.serviceRoleKey}`,
+        apikey: this.secretKey as string,
+        authorization: `Bearer ${this.secretKey}`,
         "content-type": "application/json",
         ...(options.prefer ? { prefer: options.prefer } : {}),
       },
