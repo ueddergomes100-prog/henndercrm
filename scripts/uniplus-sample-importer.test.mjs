@@ -17,7 +17,9 @@ const headers = [
   "venda_status",
   "venda_aprovada",
   "uniplus_cliente_id",
+  "nome_cliente_venda",
   "cliente_codigo",
+  "cliente_nome_cadastro",
   "cliente_razao_social",
   "cliente_cpf_cnpj",
   "cliente_telefone",
@@ -36,6 +38,7 @@ const headers = [
   "cliente_classificacao_id",
   "cliente_ciclo_compras",
   "uniplus_vendedor_id",
+  "vendedor_nome",
   "vendedor_email",
   "vendedor_celular",
   "vendedor_whatsapp",
@@ -73,7 +76,10 @@ function row(overrides = {}) {
         venda_status: "2",
         venda_aprovada: "0",
         uniplus_cliente_id: "20",
+        nome_cliente_venda: "CLIENTE REAL DA VENDA",
         cliente_codigo: "C20",
+        cliente_nome_cadastro: "CLIENTE REAL CADASTRO",
+        cliente_razao_social: "CLIENTE REAL RAZAO SOCIAL",
         cliente_cpf_cnpj: "123",
         cliente_celular: "33999999999",
         cliente_id_cidade: "2698",
@@ -81,6 +87,7 @@ function row(overrides = {}) {
         cliente_data_cadastro: "2020-01-01",
         cliente_inativo: "0",
         uniplus_vendedor_id: "30",
+        vendedor_nome: "VENDEDOR REAL",
         vendedor_inativo: "0",
         uniplus_item_id: "40",
         uniplus_produto_id: "50",
@@ -130,10 +137,11 @@ test("one sale with multiple item ids creates one sale and many items", () => {
   assert.equal(result.metadata.maxItemsPerSale, 3);
 });
 
-test("personal fields are anonymized while missingness is preserved", () => {
+test("names are preserved while other personal fields remain pseudonymized", () => {
   const result = transformRows([row()], { referenceDate: "2026-06-15" });
-  assert.equal(result.clients[0].name, "Cliente Demonstração 001");
+  assert.equal(result.clients[0].name, "CLIENTE REAL CADASTRO");
+  assert.equal(result.clients[0].legalName, "CLIENTE REAL RAZAO SOCIAL");
   assert.match(result.clients[0].document, /^\d{3}\.\d{3}\.\d{3}-\d{2}$/);
   assert.equal(result.clients[0].email, undefined);
-  assert.equal(result.sellers[0].name, "Vendedor Demonstração 01");
+  assert.equal(result.sellers[0].name, "VENDEDOR REAL");
 });

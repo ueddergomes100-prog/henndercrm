@@ -25,11 +25,11 @@ const demoUsers: DemoUser[] = [
   },
   {
     id: "demo-seller",
-    name: "Carlos Mendes",
+    name: "Daniel Bahia",
     email: "vendedor@henndercrm.local",
     password: "Vendedor@123",
     role: "vendedor",
-    sellerId: "00000000-0000-4000-8000-000012d2ae65",
+    sellerId: "00000000-0000-4000-8000-0000a5c4bb4e",
   },
 ];
 

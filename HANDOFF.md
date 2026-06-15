@@ -6,7 +6,7 @@ Atualizado em: 15/06/2026
 
 O Hennder CRM, com o slogan "Inteligencia Comercial e Recompra", e um CRM comercial para uma loja dos segmentos agro e pet shop. O objetivo e usar os dados do ERP para identificar clientes sem compra, oportunidades de recompra, vendas cruzadas e clientes em risco, transformando essas informacoes em tarefas praticas para os vendedores.
 
-O snapshot comercial usa agora uma massa demonstrativa anonimizada, gerada de um resultado SQL real com 43 vendas e 100 itens. O projeto possui dominio, services, contratos de integracao e Supabase remoto operacional. As migrations e o seed foram aplicados, e contatos, status de alertas, oportunidades e agenda persistem nas tabelas `crm_*`. Ainda nao existe conexao real com ERP, WhatsApp Business API ou modelo de IA.
+O snapshot comercial usa agora uma massa demonstrativa gerada de um resultado SQL real com 43 vendas e 100 itens. Nomes de clientes, razoes sociais e vendedores foram preservados por solicitacao; os demais dados pessoais permanecem pseudonimizados. O projeto possui dominio, services, contratos de integracao e Supabase remoto operacional.
 
 Repositorio: `https://github.com/ueddergomes100-prog/henndercrm`
 
@@ -279,7 +279,9 @@ Implementar em etapas:
 - A interface ainda esta concentrada em `src/app/page.tsx`, mas tipos, dados e regras ja foram extraidos.
 - Separar os componentes visuais de forma incremental, preservando o comportamento aprovado.
 - Os numeros atuais sao demonstrativos, embora agora sejam calculados a partir do conjunto mock.
-- O fixture atual foi gerado de `H:\uniplus_sample_result.csv`, mas todos os dados pessoais foram anonimizados antes do versionamento.
+- O fixture atual foi gerado de `H:\uniplus_sample_result.csv`.
+- Nomes de clientes, razoes sociais e vendedores estao preservados no fixture por solicitacao do proprietario.
+- Documentos, telefones, enderecos e e-mails permanecem pseudonimizados.
 - O CSV bruto nao deve ser enviado ao GitHub.
 - O importador temporario consolida `uniplus_venda_id` e mantem uma linha por `uniplus_item_id`.
 - Datas invalidas viram nulo; a data da venda usa inclusao e alteracao como fallback.
@@ -310,7 +312,7 @@ Na ultima alteracao:
 - `UniplusSyncService` implementa regras de importacao e auditoria de vendas ignoradas.
 - O importador temporario gerou 43 vendas, 100 itens, 43 clientes, 12 vendedores e 85 produtos.
 - Foram identificadas 24 vendas multi-item, com maximo de 11 itens em uma venda.
-- Clientes e vendedores foram anonimizados deterministicamente para proteger dados pessoais.
+- Nomes de clientes e vendedores foram preservados; os demais campos pessoais foram pseudonimizados.
 - Migrations e seed Supabase foram criados e aplicados no projeto remoto.
 - As 14 tabelas `crm_*` foram verificadas.
 - O bootstrap importou 19 vendas, auditou 3 ignoradas e gerou 15 alertas, 4 oportunidades e 5 eventos.
@@ -326,7 +328,7 @@ Na ultima alteracao:
 - `src/app/page.tsx`: telas, dados mockados, navegacao e logica local.
 - `src/domain/crm`: tipos e regras comerciais puras.
 - `src/data/mock-uniplus.ts`: adaptador tipado da massa demonstrativa.
-- `src/data/generated/uniplus-sample.json`: fixture demonstrativo anonimizado.
+- `src/data/generated/uniplus-sample.json`: fixture demonstrativo com nomes preservados.
 - `scripts/uniplus-sample-importer.mjs`: transformacao temporaria do CSV.
 - `scripts/uniplus-sample-importer.test.mjs`: testes do importador.
 - `src/integrations/uniplus`: contratos e repositorios mockados.

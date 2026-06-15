@@ -6,7 +6,7 @@ CRM comercial para lojas dos segmentos agro e pet shop, com foco em recuperaçã
 
 Repositório: [github.com/ueddergomes100-prog/henndercrm](https://github.com/ueddergomes100-prog/henndercrm)
 
-Esta etapa usa uma massa demonstrativa anonimizada, gerada a partir do formato real de uma consulta de ERP. O banco local do cliente é tratado como uma fonte estritamente somente leitura. O Supabase PostgreSQL remoto já está configurado para persistir contatos, status de alertas, oportunidades e eventos da agenda.
+Esta etapa usa uma massa demonstrativa gerada a partir do formato real de uma consulta de ERP. Os nomes de clientes e vendedores foram preservados por solicitação; documentos, contatos e endereços permanecem pseudonimizados. O banco local do cliente é tratado como uma fonte estritamente somente leitura.
 
 ## Arquitetura
 
@@ -52,7 +52,7 @@ npm run build
 
 - `src/domain/crm`: tipos de domínio e regras puras.
 - `src/data/mock-uniplus.ts`: adaptador tipado para a massa demonstrativa gerada.
-- `src/data/generated/uniplus-sample.json`: fixture demonstrativo anonimizado gerado do CSV.
+- `src/data/generated/uniplus-sample.json`: fixture demonstrativo gerado do CSV.
 - `scripts/uniplus-sample-importer.mjs`: importador temporário e reproduzível do CSV.
 - `scripts/uniplus-sample-importer.test.mjs`: testes de agrupamento, datas e anonimização.
 - `src/integrations/uniplus`: interfaces e implementações mockadas dos repositórios.
@@ -90,7 +90,8 @@ O importador:
 - converte datas com anos fora de `1900..2100` para nulo;
 - usa `venda_data_inclusao` e depois `venda_data_alteracao` quando `data_venda` é inválida ou nula;
 - preserva valores, quantidades, produtos e padrões de compra;
-- anonimiza clientes, vendedores, documentos, telefones, endereços e e-mails;
+- preserva os nomes de clientes, razões sociais e vendedores como vieram no banco;
+- pseudonimiza documentos, telefones, endereços e e-mails;
 - gera regras temporárias de recompra por tipo de produto.
 
 Resultado atual:

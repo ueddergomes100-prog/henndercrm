@@ -123,10 +123,11 @@ export function transformRows(rows, options = {}) {
       clients.set(clientId, {
         id: clientId,
         code: text(row.cliente_codigo) || `CLI-${String(clientNumber).padStart(4, "0")}`,
-        name: `Cliente Demonstração ${String(clientNumber).padStart(3, "0")}`,
-        legalName: hasValue(row.cliente_razao_social)
-          ? `Razão Social Demonstração ${String(clientNumber).padStart(3, "0")}`
-          : undefined,
+        name:
+          text(row.cliente_nome_cadastro) ||
+          text(row.nome_cliente_venda) ||
+          `Cliente ${clientId}`,
+        legalName: text(row.cliente_razao_social) || undefined,
         document: hasValue(row.cliente_cpf_cnpj) || hasValue(row.cpf_cnpj_cliente_venda)
           ? fakeDocument(clientId)
           : undefined,
@@ -161,7 +162,7 @@ export function transformRows(rows, options = {}) {
       const sellerNumber = sellers.size + 1;
       sellers.set(sellerId, {
         id: sellerId,
-        name: `Vendedor Demonstração ${String(sellerNumber).padStart(2, "0")}`,
+        name: text(row.vendedor_nome) || `Vendedor ${sellerId}`,
         email: hasValue(row.vendedor_email)
           ? `vendedor${String(sellerNumber).padStart(2, "0")}@demo.henndercrm.local`
           : undefined,
@@ -247,7 +248,9 @@ export function transformRows(rows, options = {}) {
       source: "uniplus_sample_result.csv",
       generatedAt: new Date().toISOString(),
       referenceDate,
-      anonymized: true,
+      anonymized: false,
+      privacy:
+        "Nomes preservados por solicitação; documentos, contatos e endereços pseudonimizados.",
       rowsRead: rows.length,
       clients: clients.size,
       sellers: sellers.size,
