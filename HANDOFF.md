@@ -1,12 +1,12 @@
 # Handoff do Projeto Hennder CRM
 
-Atualizado em: 11/06/2026
+Atualizado em: 15/06/2026
 
 ## 1. Visao geral
 
 O Hennder CRM, com o slogan "Inteligencia Comercial e Recompra", e um CRM comercial para uma loja dos segmentos agro e pet shop. O objetivo e usar os dados do ERP para identificar clientes sem compra, oportunidades de recompra, vendas cruzadas e clientes em risco, transformando essas informacoes em tarefas praticas para os vendedores.
 
-O snapshot comercial continua usando dados ficticios no formato do Uniplus, mas o projeto ja possui dominio, services, contratos de integracao e Supabase remoto operacional. As migrations e o seed foram aplicados, e contatos, status de alertas, oportunidades e agenda ja persistem nas tabelas `crm_*`. Ainda nao existe conexao real com ERP, WhatsApp Business API ou modelo de IA.
+O snapshot comercial usa agora uma massa demonstrativa anonimizada, gerada de um resultado SQL real com 43 vendas e 100 itens. O projeto possui dominio, services, contratos de integracao e Supabase remoto operacional. As migrations e o seed foram aplicados, e contatos, status de alertas, oportunidades e agenda persistem nas tabelas `crm_*`. Ainda nao existe conexao real com ERP, WhatsApp Business API ou modelo de IA.
 
 Repositorio: `https://github.com/ueddergomes100-prog/henndercrm`
 
@@ -52,7 +52,7 @@ IMPORTANTE: antes de escrever codigo de Next.js, seguir o `AGENTS.md`. Ele deter
 - Graficos de evolucao de recompra e categorias.
 - Ranking de clientes para contato.
 - Ranking de vendedores.
-- Indicadores calculados pelos services a partir do snapshot mock.
+- Indicadores calculados pelos services a partir do snapshot demonstrativo anonimizado.
 - Previa compacta de clientes sem compra.
 - A previa mostra totais por faixa, os tres casos mais urgentes e um botao para abrir a Central de Recuperacao.
 - A Dashboard foi propositalmente mantida resumida para nao ficar poluida.
@@ -77,6 +77,7 @@ IMPORTANTE: antes de escrever codigo de Next.js, seguir o `AGENTS.md`. Ele deter
 - Compras, itens e alertas derivados do snapshot.
 - Vendedor preferencial e percentual de relacionamento.
 - Qualidade cadastral calculada.
+- Tabela de vendas e itens agrupada por venda, incluindo vendas com muitos produtos.
 
 ### Central de Recuperacao
 
@@ -149,7 +150,7 @@ Os registros sao persistidos pelo endpoint `/api/crm/workspace` e sobrevivem ao 
 ### Relatorios
 
 - Indicadores e grafico de barras.
-- Dados derivados do snapshot mock e das regras comerciais.
+- Dados derivados do snapshot demonstrativo e das regras comerciais.
 
 ## 4. Integracao atual de WhatsApp
 
@@ -166,6 +167,17 @@ Para automacao futura sera necessario usar oficialmente a WhatsApp Business Plat
 ## 5. Integracao planejada com ERP e PostgreSQL
 
 O Supabase PostgreSQL sera alimentado com dados vindos do ERP da loja. A fonte oficial das vendas continuara sendo o ERP.
+
+Fluxo obrigatorio:
+
+```text
+ERP PostgreSQL local (somente leitura)
+Hennder Sync Agent local
+Supabase
+Hennder CRM Web
+```
+
+O CRM Web nunca deve conectar diretamente ao PostgreSQL local do cliente.
 
 Dados minimos esperados:
 
@@ -267,6 +279,10 @@ Implementar em etapas:
 - A interface ainda esta concentrada em `src/app/page.tsx`, mas tipos, dados e regras ja foram extraidos.
 - Separar os componentes visuais de forma incremental, preservando o comportamento aprovado.
 - Os numeros atuais sao demonstrativos, embora agora sejam calculados a partir do conjunto mock.
+- O fixture atual foi gerado de `H:\uniplus_sample_result.csv`, mas todos os dados pessoais foram anonimizados antes do versionamento.
+- O CSV bruto nao deve ser enviado ao GitHub.
+- O importador temporario consolida `uniplus_venda_id` e mantem uma linha por `uniplus_item_id`.
+- Datas invalidas viram nulo; a data da venda usa inclusao e alteracao como fallback.
 - A persistencia operacional usa o Supabase quando `CRM_OPERATIONAL_PROVIDER=supabase`.
 - O fallback local continua disponivel em `.data/crm-workspace.json` com `CRM_OPERATIONAL_PROVIDER=local`.
 - O projeto remoto Supabase esta configurado; as credenciais ficam apenas em `.env.local`.
@@ -292,6 +308,9 @@ Na ultima alteracao:
 - Dominio, regras comerciais e services foram criados.
 - Contratos e repositorios mockados do Uniplus foram criados.
 - `UniplusSyncService` implementa regras de importacao e auditoria de vendas ignoradas.
+- O importador temporario gerou 43 vendas, 100 itens, 43 clientes, 12 vendedores e 85 produtos.
+- Foram identificadas 24 vendas multi-item, com maximo de 11 itens em uma venda.
+- Clientes e vendedores foram anonimizados deterministicamente para proteger dados pessoais.
 - Migrations e seed Supabase foram criados e aplicados no projeto remoto.
 - As 14 tabelas `crm_*` foram verificadas.
 - O bootstrap importou 19 vendas, auditou 3 ignoradas e gerou 15 alertas, 4 oportunidades e 5 eventos.
@@ -306,7 +325,10 @@ Na ultima alteracao:
 - `AGENTS.md`: regras obrigatorias para trabalhar com esta versao do Next.js.
 - `src/app/page.tsx`: telas, dados mockados, navegacao e logica local.
 - `src/domain/crm`: tipos e regras comerciais puras.
-- `src/data/mock-uniplus.ts`: fonte ficticia no formato do Uniplus.
+- `src/data/mock-uniplus.ts`: adaptador tipado da massa demonstrativa.
+- `src/data/generated/uniplus-sample.json`: fixture demonstrativo anonimizado.
+- `scripts/uniplus-sample-importer.mjs`: transformacao temporaria do CSV.
+- `scripts/uniplus-sample-importer.test.mjs`: testes do importador.
 - `src/integrations/uniplus`: contratos e repositorios mockados.
 - `src/services`: sincronizacao, services e view models.
 - `src/infrastructure/supabase`: cliente REST e destino de sincronizacao.

@@ -53,6 +53,17 @@ export class SupabaseCrmWorkspaceRepository implements ICrmWorkspaceRepository {
   constructor(private readonly client = new SupabaseRestClient()) {}
 
   async getWorkspace(): Promise<CrmWorkspace> {
+    const snapshot = crmDemoService.getSnapshot();
+    const currentClientIds = new Set(
+      snapshot.customers.map((customer) => customer.uniplusId),
+    );
+    const currentSellerIds = new Set(
+      snapshot.sellers.map((seller) => seller.uniplusId),
+    );
+    const currentProductIds = new Set(
+      snapshot.products.map((product) => product.uniplusId),
+    );
+    const currentAlertIds = new Set(snapshot.alerts.map((alert) => alert.id));
     const [clients, sellers, products, contacts, alerts, agenda, opportunities] =
       await Promise.all([
         this.client.select<ClientRow>("crm_clientes", {
@@ -84,9 +95,21 @@ export class SupabaseCrmWorkspaceRepository implements ICrmWorkspaceRepository {
         }),
       ]);
 
-    const clientById = new Map(clients.map((row) => [row.id, row]));
-    const sellerById = new Map(sellers.map((row) => [row.id, row]));
-    const productById = new Map(products.map((row) => [row.id, row]));
+    const clientById = new Map(
+      clients
+        .filter((row) => currentClientIds.has(row.uniplus_id))
+        .map((row) => [row.id, row]),
+    );
+    const sellerById = new Map(
+      sellers
+        .filter((row) => currentSellerIds.has(row.uniplus_id))
+        .map((row) => [row.id, row]),
+    );
+    const productById = new Map(
+      products
+        .filter((row) => currentProductIds.has(row.uniplus_id))
+        .map((row) => [row.id, row]),
+    );
 
     return {
       contacts: contacts.flatMap((row) => {
@@ -108,21 +131,25 @@ export class SupabaseCrmWorkspaceRepository implements ICrmWorkspaceRepository {
         }];
       }),
       alertStatuses: Object.fromEntries(
-        alerts.map((row) => [row.id, row.status]),
+        alerts
+          .filter((row) => currentAlertIds.has(row.id))
+          .map((row) => [row.id, row.status]),
       ),
-      agenda: agenda.map((row) => ({
-        id: row.id,
-        date: row.data_evento,
-        time: row.hora_evento.slice(0, 5),
-        title: row.titulo,
-        type: row.tipo,
-        customerId: row.cliente_id
-          ? toCustomerDomainId(clientById.get(row.cliente_id))
-          : undefined,
-        sellerId: row.vendedor_id
-          ? toSellerDomainId(sellerById.get(row.vendedor_id))
-          : undefined,
-      })),
+      agenda: agenda
+        .filter((row) => !row.cliente_id || clientById.has(row.cliente_id))
+        .map((row) => ({
+          id: row.id,
+          date: row.data_evento,
+          time: row.hora_evento.slice(0, 5),
+          title: row.titulo,
+          type: row.tipo,
+          customerId: row.cliente_id
+            ? toCustomerDomainId(clientById.get(row.cliente_id))
+            : undefined,
+          sellerId: row.vendedor_id
+            ? toSellerDomainId(sellerById.get(row.vendedor_id))
+            : undefined,
+        })),
       opportunities: opportunities.flatMap((row) => {
         const customer = clientById.get(row.cliente_id);
         if (!customer) return [];

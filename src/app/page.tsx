@@ -1215,6 +1215,66 @@ function CustomerProfile({
           </div>
         )}
       </Panel>
+      <Panel
+        title="Vendas e itens"
+        icon={ShoppingBag}
+        action={`${customerSales.length} vendas · ${purchasedItems.length} itens`}
+      >
+        <div className="overflow-x-auto rounded-lg border border-blue-100">
+          <table className="min-w-[860px] w-full text-left text-sm">
+            <thead className="bg-[#f1f8ff] text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <tr>
+                <th className="px-4 py-3">Data</th>
+                <th className="px-4 py-3">Venda</th>
+                <th className="px-4 py-3">Vendedor</th>
+                <th className="px-4 py-3">Itens da venda</th>
+                <th className="px-4 py-3 text-right">Total</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-blue-50 bg-white">
+              {customerSales.map((sale) => {
+                const currentItems = purchasedItems.filter(
+                  (item) => item.saleId === sale.id,
+                );
+                const seller = sellers.find((item) => item.id === sale.sellerId);
+                return (
+                  <tr key={sale.id} className="align-top">
+                    <td className="whitespace-nowrap px-4 py-4 font-medium">
+                      {formatContactDate(sale.soldAt)}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-4 text-slate-500">
+                      #{sale.uniplusId}
+                    </td>
+                    <td className="px-4 py-4 text-slate-600">
+                      {seller?.name ?? "Não atribuído"}
+                    </td>
+                    <td className="px-4 py-4">
+                      <div className="grid gap-2">
+                        {currentItems.map((item) => (
+                          <div
+                            key={item.id}
+                            className="flex items-start justify-between gap-4 rounded-md bg-[#f8fbff] px-3 py-2"
+                          >
+                            <span className="font-medium text-slate-700">
+                              {item.productName}
+                            </span>
+                            <span className="shrink-0 text-xs font-semibold text-cyan-700">
+                              {item.quantity} un.
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-4 text-right font-semibold">
+                      {formatCurrency(sale.totalValue)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
       <Panel title="Timeline comercial" icon={Clock3}>
         <div className="grid gap-4 lg:grid-cols-3">
           {[
@@ -1254,6 +1314,8 @@ function RepurchaseAlerts({
   onStatusChange: (id: string, status: RepurchaseAlertStatus) => Promise<void>;
 }) {
   const [filter, setFilter] = useState("todos");
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
   const nextSevenDays = addIsoDays(crmReferenceDate, 7);
   const filteredAlerts = alerts.filter((alert) => {
     if (filter === "hoje") return alert.recommendedIso === crmReferenceDate;
@@ -1264,6 +1326,8 @@ function RepurchaseAlerts({
     if (["alta", "media", "baixa"].includes(filter)) return alert.priorityCode === filter;
     return true;
   });
+  const totalPages = Math.max(1, Math.ceil(filteredAlerts.length / pageSize));
+  const visibleAlerts = filteredAlerts.slice((page - 1) * pageSize, page * pageSize);
 
   return (
     <div className="space-y-5">
@@ -1283,7 +1347,10 @@ function RepurchaseAlerts({
             <button
               key={value}
               type="button"
-              onClick={() => setFilter(value)}
+              onClick={() => {
+                setFilter(value);
+                setPage(1);
+              }}
               className={`rounded-lg px-3 py-2 text-sm font-medium ${
                 filter === value
                   ? "bg-[#0753a6] text-white"
@@ -1295,7 +1362,7 @@ function RepurchaseAlerts({
           ))}
         </div>
         <div className="grid gap-3">
-          {filteredAlerts.map((alert) => {
+          {visibleAlerts.map((alert) => {
             const customer = customers.find((item) => item.id === alert.customerId);
             const status = alertStatuses[alert.id] ?? alert.status;
 
@@ -1330,6 +1397,38 @@ function RepurchaseAlerts({
             );
           })}
         </div>
+        {totalPages > 1 && (
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-blue-100 pt-4">
+            <p className="text-sm text-slate-500">
+              Exibindo {(page - 1) * pageSize + 1} a{" "}
+              {Math.min(page * pageSize, filteredAlerts.length)} de{" "}
+              {filteredAlerts.length} alertas
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={page === 1}
+                onClick={() => setPage((current) => Math.max(1, current - 1))}
+                className="rounded-lg border border-blue-100 bg-white px-3 py-2 text-sm font-medium text-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Anterior
+              </button>
+              <span className="text-sm font-semibold text-slate-700">
+                Página {page} de {totalPages}
+              </span>
+              <button
+                type="button"
+                disabled={page === totalPages}
+                onClick={() =>
+                  setPage((current) => Math.min(totalPages, current + 1))
+                }
+                className="rounded-lg border border-blue-100 bg-white px-3 py-2 text-sm font-medium text-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Próxima
+              </button>
+            </div>
+          </div>
+        )}
       </Panel>
     </div>
   );

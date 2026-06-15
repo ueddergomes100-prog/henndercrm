@@ -289,35 +289,72 @@ export class OportunidadeService {
   getOpportunities(
     customers: CrmCustomer[],
     products: CrmProduct[],
+    sales: CrmSale[],
+    items: CrmSaleItem[],
   ): CrmOpportunity[] {
-    const suggestions = [
-      ["Casa do Produtor", "Óleo 2 Tempos 1L", "Herbicida Seletivo 5L", 92],
-      ["Pet Center Amigo Fiel", "Ração Golden Gatos 15kg", "NexGard 25kg", 87],
-      ["Sítio Boa Safra", "Semente de Milho 20kg", "Herbicida Seletivo 5L", 81],
-      ["Clínica Vet Norte", "NexGard 25kg", "Areia Higiênica 12kg", 78],
-    ] as const;
+    const productById = new Map(products.map((product) => [product.id, product]));
+    const itemsBySale = new Map<string, CrmSaleItem[]>();
+    for (const item of items) {
+      const saleItems = itemsBySale.get(item.saleId) ?? [];
+      saleItems.push(item);
+      itemsBySale.set(item.saleId, saleItems);
+    }
 
-    return suggestions.flatMap(([customerName, sourceName, suggestedName, confidence], index) => {
-      const customer = customers.find((item) => item.name === customerName);
-      const sourceProduct = products.find((item) => item.name === sourceName);
-      const suggestedProduct = products.find((item) => item.name === suggestedName);
-      if (!customer || !sourceProduct || !suggestedProduct) return [];
+    const productPopularity = new Map<string, number>();
+    for (const item of items) {
+      if (!item.productId) continue;
+      productPopularity.set(
+        item.productId,
+        (productPopularity.get(item.productId) ?? 0) + item.quantity,
+      );
+    }
+    const rankedProducts = [...products].sort(
+      (a, b) =>
+        (productPopularity.get(b.id) ?? 0) - (productPopularity.get(a.id) ?? 0),
+    );
 
-      return [{
-        id: crmUuid("opportunity", index + 1),
-        customerId: customer.id,
-        customerName,
-        sourceProductName: sourceName,
-        suggestedProductName: suggestedName,
-        reason: `Combinação recorrente entre ${sourceProduct.department || "categorias relacionadas"} e ${suggestedProduct.department || "itens complementares"}.`,
-        confidence,
-        status: "aberta" as const,
-        sellerId: customer.preferredSeller
-          ? crmUuid("seller", customer.preferredSeller.sellerId)
-          : undefined,
-        sellerName: customer.preferredSeller?.sellerName ?? "Não atribuído",
-      }];
-    });
+    return customers
+      .flatMap((customer, customerIndex) => {
+        const customerSales = sales
+          .filter((sale) => sale.customerId === customer.id)
+          .sort((a, b) => b.soldAt.localeCompare(a.soldAt));
+        const purchasedProductIds = new Set(
+          customerSales.flatMap((sale) =>
+            (itemsBySale.get(sale.id) ?? []).flatMap((item) =>
+              item.productId ? [item.productId] : [],
+            ),
+          ),
+        );
+        const sourceProduct = [...purchasedProductIds]
+          .map((id) => productById.get(id))
+          .find((product): product is CrmProduct => Boolean(product));
+        if (!sourceProduct) return [];
+
+        const suggestedProduct =
+          rankedProducts.find(
+            (product) =>
+              !purchasedProductIds.has(product.id) &&
+              product.department === sourceProduct.department,
+          ) ??
+          rankedProducts.find((product) => !purchasedProductIds.has(product.id));
+        if (!suggestedProduct) return [];
+
+        return [{
+          id: crmUuid("opportunity", customer.uniplusId),
+          customerId: customer.id,
+          customerName: customer.name,
+          sourceProductName: sourceProduct.name,
+          suggestedProductName: suggestedProduct.name,
+          reason: `Sugestão demonstrativa baseada em produtos relacionados do departamento ${suggestedProduct.department || "comercial"}.`,
+          confidence: Math.min(94, 72 + (customerIndex % 6) * 4),
+          status: "aberta" as const,
+          sellerId: customer.preferredSeller
+            ? crmUuid("seller", customer.preferredSeller.sellerId)
+            : undefined,
+          sellerName: customer.preferredSeller?.sellerName ?? "Não atribuído",
+        }];
+      })
+      .slice(0, 12);
   }
 }
 

@@ -6,18 +6,14 @@ CRM comercial para lojas dos segmentos agro e pet shop, com foco em recuperaçã
 
 Repositório: [github.com/ueddergomes100-prog/henndercrm](https://github.com/ueddergomes100-prog/henndercrm)
 
-Esta etapa usa dados comerciais fictícios no formato do ERP Uniplus. O banco local do ERP é tratado como uma fonte estritamente somente leitura. O Supabase PostgreSQL remoto já está configurado para persistir contatos, status de alertas, oportunidades e eventos da agenda.
+Esta etapa usa uma massa demonstrativa anonimizada, gerada a partir do formato real de uma consulta de ERP. O banco local do cliente é tratado como uma fonte estritamente somente leitura. O Supabase PostgreSQL remoto já está configurado para persistir contatos, status de alertas, oportunidades e eventos da agenda.
 
 ## Arquitetura
 
 ```text
-Uniplus PostgreSQL (somente leitura)
+ERP PostgreSQL local (somente leitura)
         |
-IUniplus*Repository
-        |
-UniplusSyncService
-        |
-ICrmSyncTargetRepository
+Hennder Sync Agent local
         |
 Supabase PostgreSQL
         |
@@ -26,7 +22,7 @@ Services de domínio
 API e frontend Next.js
 ```
 
-O frontend não conhece tabelas ou consultas do Uniplus. A implementação real poderá substituir os repositórios mockados sem alterar telas ou regras comerciais.
+O frontend não conhece tabelas ou consultas do ERP. O Hennder CRM Web nunca deve conectar diretamente ao banco local do cliente. A implementação real substituirá a massa temporária pelo Sync Agent sem alterar telas ou regras comerciais.
 
 ## Execução local
 
@@ -55,7 +51,10 @@ npm run build
 ## Estrutura
 
 - `src/domain/crm`: tipos de domínio e regras puras.
-- `src/data/mock-uniplus.ts`: dados fictícios no formato esperado do Uniplus.
+- `src/data/mock-uniplus.ts`: adaptador tipado para a massa demonstrativa gerada.
+- `src/data/generated/uniplus-sample.json`: fixture demonstrativo anonimizado gerado do CSV.
+- `scripts/uniplus-sample-importer.mjs`: importador temporário e reproduzível do CSV.
+- `scripts/uniplus-sample-importer.test.mjs`: testes de agrupamento, datas e anonimização.
 - `src/integrations/uniplus`: interfaces e implementações mockadas dos repositórios.
 - `src/integrations/uniplus/sql/sales-extraction.sql`: consulta somente leitura para a futura integração.
 - `src/services`: sincronização, cálculos comerciais e view models.
@@ -78,6 +77,37 @@ Foram criadas as interfaces:
 - `ICrmSyncTargetRepository`
 
 As implementações atuais são `MockUniplus*Repository`. O `UniplusSyncService` depende apenas das interfaces e nunca grava no Uniplus.
+
+## Massa demonstrativa baseada no resultado SQL
+
+O arquivo `H:\uniplus_sample_result.csv` foi usado somente como fonte local para gerar uma massa demonstrativa próxima da realidade. O CSV bruto não é versionado.
+
+O importador:
+
+- consolida uma venda por `uniplus_venda_id`;
+- cria um item para cada `uniplus_item_id`;
+- mantém a relação de uma venda para vários produtos;
+- converte datas com anos fora de `1900..2100` para nulo;
+- usa `venda_data_inclusao` e depois `venda_data_alteracao` quando `data_venda` é inválida ou nula;
+- preserva valores, quantidades, produtos e padrões de compra;
+- anonimiza clientes, vendedores, documentos, telefones, endereços e e-mails;
+- gera regras temporárias de recompra por tipo de produto.
+
+Resultado atual:
+
+- 100 linhas lidas;
+- 43 vendas únicas;
+- 100 itens únicos;
+- 24 vendas com mais de um item;
+- até 11 itens vinculados à mesma venda;
+- 43 clientes, 12 vendedores e 85 produtos.
+
+Para regenerar:
+
+```bash
+npm run import:uniplus-sample
+npm test
+```
 
 Mapeamento principal:
 

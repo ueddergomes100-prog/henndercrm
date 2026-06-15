@@ -44,7 +44,12 @@ export class CrmDemoService {
       mockUniplusSaleItems,
     );
     const sellers = this.vendedorService.getSellers(mockUniplusSellers, customers, alerts);
-    const opportunities = this.oportunidadeService.getOpportunities(customers, products);
+    const opportunities = this.oportunidadeService.getOpportunities(
+      customers,
+      products,
+      sales,
+      saleItems,
+    );
     const agenda = this.agendaService.getAgenda(alerts, customers);
     const dashboard = this.relatorioService.getDashboard(customers, alerts);
 

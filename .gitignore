@@ -24,6 +24,7 @@
 # misc
 .DS_Store
 *.pem
+uniplus_sample_result.csv
 
 # debug
 npm-debug.log*
