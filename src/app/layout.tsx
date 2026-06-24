@@ -13,9 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Hennder CRM | Inteligência Comercial e Recompra",
+  title: "Hennder CRM | Transforme clientes esquecidos em novas vendas",
   description:
-    "Hennder CRM: inteligência comercial, recuperação de clientes e gestão de recompra.",
+    "Hennder CRM: transforme clientes esquecidos em novas vendas com inteligência comercial e recompra.",
 };
 
 export default function RootLayout({

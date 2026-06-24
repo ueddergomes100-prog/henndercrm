@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { CRM_SESSION_COOKIE, readSessionToken } from "@/lib/crm-auth";
-import { crmSupabaseBootstrapService } from "@/services/crm-supabase-bootstrap-service";
+
+export const dynamic = "force-dynamic";
 
 export async function POST() {
   const cookieStore = await cookies();
@@ -16,6 +17,9 @@ export async function POST() {
   }
 
   try {
+    const { crmSupabaseBootstrapService } = await import(
+      "@/services/crm-supabase-bootstrap-service"
+    );
     return Response.json(await crmSupabaseBootstrapService.run());
   } catch (error) {
     return Response.json(

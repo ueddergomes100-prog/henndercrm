@@ -10,9 +10,12 @@ import {
   CheckCircle2,
   ChevronRight,
   CircleDollarSign,
+  ClipboardList,
   Clock3,
+  Database,
   Filter,
-  Leaf,
+  Download,
+  FileText,
   LineChart,
   LogIn,
   LogOut,
@@ -24,10 +27,13 @@ import {
   Phone,
   PieChart,
   Plus,
+  RefreshCcw,
   Search,
   Send,
+  Settings,
   ShieldCheck,
   ShoppingBag,
+  SlidersHorizontal,
   Sparkles,
   Sun,
   Target,
@@ -51,6 +57,7 @@ import {
   YAxis,
 } from "recharts";
 import { useEffect, useRef, useState } from "react";
+import { normalizeBrazilianWhatsAppNumber } from "@/domain/crm/rules";
 import type {
   CrmAgendaEvent,
   ContactChannel,
@@ -64,24 +71,43 @@ import type {
 import {
   crmReferenceDate,
   crmViewModel,
+  type AlertViewModel,
+  type CustomerViewModel,
   formatCurrency,
 } from "@/services/crm-view-service";
 
 type View =
   | "dashboard"
+  | "resultados"
   | "clientes"
+  | "vendas"
+  | "produtos"
   | "perfil"
   | "recuperacao"
   | "recompra"
   | "carteira"
+  | "vendedores"
   | "saude"
+  | "atividades"
+  | "campanhas"
   | "oportunidades"
   | "agenda"
   | "ia"
-  | "relatorios";
+  | "relatorios"
+  | "motor-recompra"
+  | "sincronizacao"
+  | "configuracoes";
 
 type ContactRecord = CrmContactRecord;
 type Theme = "light" | "dark";
+type CustomerRow = CustomerViewModel;
+type AlertRow = AlertViewModel;
+type QuickAction = "manual-alert" | "manual-customer" | "opportunity" | "agenda" | "contact";
+type ChatMessage = {
+  id: string;
+  role: "user" | "ai";
+  text: string;
+};
 
 const contactOutcomeLabels: Record<ContactOutcome, string> = {
   not_interested: "Cliente não quis",
@@ -104,19 +130,57 @@ const { sellers, sales, saleItems, dashboard } = snapshot;
 const kpiIcons = [UsersRound, Clock3, AlertTriangle, Target, CircleDollarSign, ShieldCheck];
 const kpis = serviceKpis.map((kpi, index) => ({ ...kpi, icon: kpiIcons[index] }));
 
-const navItems: { id: View; label: string; description: string; icon: typeof Activity }[] = [
-  { id: "dashboard", label: "Dashboard", description: "Resumo dos principais indicadores comerciais.", icon: BarChart3 },
-  { id: "clientes", label: "Clientes", description: "Consulte a carteira e o histórico dos clientes.", icon: UsersRound },
-  { id: "recuperacao", label: "Recuperação", description: "Gerencie clientes sem compra e registre retornos.", icon: Clock3 },
-  { id: "recompra", label: "Alertas", description: "Acompanhe clientes no momento ideal de recompra.", icon: Bell },
-  { id: "carteira", label: "Carteira", description: "Acompanhe clientes, alertas e potencial por vendedor.", icon: UserRound },
-  { id: "saude", label: "Saúde da base", description: "Monitore a qualidade dos cadastros dos clientes.", icon: ShieldCheck },
-  { id: "oportunidades", label: "Oportunidades", description: "Veja sugestões de vendas e produtos relacionados.", icon: Target },
-  { id: "agenda", label: "Agenda", description: "Organize contatos, visitas e retornos comerciais.", icon: CalendarDays },
-  { id: "ia", label: "IA Comercial", description: "Receba análises e recomendações para vender melhor.", icon: Bot },
-  { id: "relatorios", label: "Relatórios", description: "Analise resultados, recuperação e recorrência.", icon: PieChart },
+type NavItem = { id: View; label: string; description: string; icon: typeof Activity };
+type NavGroup = { title: string; items: NavItem[] };
+
+const navGroups: NavGroup[] = [
+  {
+    title: "Visão Geral",
+    items: [
+      { id: "dashboard", label: "Dashboard", description: "Resumo dos principais indicadores comerciais.", icon: BarChart3 },
+      { id: "resultados", label: "Resultados do CRM", description: "Impacto financeiro, recuperação e ROI comercial.", icon: LineChart },
+    ],
+  },
+  {
+    title: "Comercial",
+    items: [
+      { id: "clientes", label: "Clientes", description: "Consulte a carteira e o histórico dos clientes.", icon: UsersRound },
+      { id: "vendas", label: "Vendas", description: "Vendas importadas, itens e rastreabilidade do ERP.", icon: ShoppingBag },
+      { id: "produtos", label: "Produtos", description: "Produtos, recompra ativa e potencial recorrente.", icon: ClipboardList },
+      { id: "recompra", label: "Alertas", description: "Acompanhe clientes no momento ideal de recompra.", icon: Bell },
+      { id: "oportunidades", label: "Oportunidades", description: "Veja sugestões de vendas e produtos relacionados.", icon: Target },
+      { id: "agenda", label: "Agenda", description: "Organize contatos, visitas e retornos comerciais.", icon: CalendarDays },
+    ],
+  },
+  {
+    title: "Equipe",
+    items: [
+      { id: "carteira", label: "Carteira", description: "Acompanhe clientes, alertas e potencial por vendedor.", icon: UserRound },
+      { id: "vendedores", label: "Vendedores", description: "Performance, risco, potencial e conversões por vendedor.", icon: UsersRound },
+    ],
+  },
+  {
+    title: "Inteligência",
+    items: [
+      { id: "saude", label: "Saúde da base", description: "Monitore a qualidade dos cadastros dos clientes.", icon: ShieldCheck },
+      { id: "atividades", label: "Atividades", description: "Histórico de contatos, retornos e ações realizadas.", icon: Phone },
+      { id: "campanhas", label: "Campanhas", description: "Ações comerciais em lote e públicos de recompra.", icon: Sparkles },
+      { id: "ia", label: "IA Comercial", description: "Receba análises e recomendações para vender melhor.", icon: Bot },
+      { id: "relatorios", label: "Relatórios", description: "Analise resultados, recuperação e recorrência.", icon: PieChart },
+    ],
+  },
+  {
+    title: "Sistema",
+    items: [
+      { id: "motor-recompra", label: "Motor de Recompra", description: "Regras por produto, departamento e palavra-chave.", icon: SlidersHorizontal },
+      { id: "sincronizacao", label: "Sincronização", description: "Saúde da integração, logs e reprocessamentos.", icon: RefreshCcw },
+      { id: "configuracoes", label: "Configurações", description: "Usuários, permissões, empresa e parâmetros.", icon: Settings },
+    ],
+  },
 ];
 
+const sellerAllowedViews: View[] = ["dashboard", "clientes", "recompra", "agenda", "carteira", "atividades", "ia"];
+const supervisorBlockedViews: View[] = ["configuracoes"];
 export default function Home() {
   const [user, setUser] = useState<CrmSessionUser | null>(null);
   const [authChecking, setAuthChecking] = useState(true);
@@ -128,6 +192,13 @@ export default function Home() {
   const [agendaItems, setAgendaItems] = useState<CrmAgendaEvent[]>(snapshot.agenda);
   const [opportunityItems, setOpportunityItems] = useState<CrmOpportunity[]>(snapshot.opportunities);
   const [theme, setTheme] = useState<Theme>("light");
+  const [manualCustomers, setManualCustomers] = useState<CustomerRow[]>([]);
+  const [manualAlerts, setManualAlerts] = useState<AlertRow[]>([]);
+  const [quickAction, setQuickAction] = useState<QuickAction | null>(null);
+  const [isSigningOut, setIsSigningOut] = useState(false);
+
+  const appCustomers = [...manualCustomers, ...customers];
+  const appAlerts = [...manualAlerts, ...alerts];
 
   useEffect(() => {
     void fetch("/api/auth/session", { cache: "no-store" })
@@ -155,15 +226,9 @@ export default function Home() {
   }, [user]);
 
   if (authChecking) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-[#07111f] text-white">
-        <div className="text-center">
-          <div className="mx-auto h-9 w-9 animate-spin rounded-full border-2 border-cyan-300/30 border-t-cyan-300" />
-          <p className="mt-4 text-sm text-slate-300">Carregando sessão...</p>
-        </div>
-      </main>
-    );
+    return <SystemLoadingScreen label="Carregando sessao comercial" detail="Preparando dashboard, alertas e carteira de clientes." />;
   }
+
 
   if (!user) {
     return (
@@ -188,7 +253,7 @@ export default function Home() {
     );
   }
 
-  const openProfile = (customer: (typeof customers)[number]) => {
+  const openProfile = (customer: CustomerRow) => {
     setSelectedCustomer(customer);
     setActiveView("perfil");
     setMobileOpen(false);
@@ -272,10 +337,14 @@ export default function Home() {
             theme={theme}
             onThemeChange={changeTheme}
             user={user}
+            onQuickAction={setQuickAction}
             onLogout={async () => {
+              setIsSigningOut(true);
+              await new Promise((resolve) => window.setTimeout(resolve, 650));
               await fetch("/api/auth/session", { method: "DELETE" });
               setUser(null);
               setActiveView("dashboard");
+              setIsSigningOut(false);
             }}
           />
           <motion.div
@@ -287,15 +356,27 @@ export default function Home() {
           >
             {activeView === "dashboard" && (
               <Dashboard
+                customers={appCustomers}
                 openProfile={openProfile}
                 contactRecords={contactRecords}
                 openRecovery={() => setActiveView("recuperacao")}
                 theme={theme}
               />
             )}
-            {activeView === "clientes" && <Customers openProfile={openProfile} />}
+            {activeView === "resultados" && (
+              <CrmResults
+                customers={appCustomers}
+                alerts={appAlerts}
+                opportunities={opportunityItems}
+                contactRecords={contactRecords}
+              />
+            )}
+            {activeView === "clientes" && <Customers customers={appCustomers} openProfile={openProfile} />}
+            {activeView === "vendas" && <SalesModule customers={appCustomers} />}
+            {activeView === "produtos" && <ProductsModule customers={appCustomers} alerts={appAlerts} />}
             {activeView === "recuperacao" && (
               <RecoveryCustomers
+                customers={appCustomers}
                 openProfile={openProfile}
                 contactRecords={contactRecords}
                 onRegisterContact={registerContact}
@@ -303,18 +384,24 @@ export default function Home() {
             )}
             {activeView === "perfil" && (
               <CustomerProfile
+                alerts={appAlerts}
                 customer={selectedCustomer}
                 contactRecords={contactRecords.filter((record) => record.customerId === selectedCustomer.id)}
               />
             )}
             {activeView === "recompra" && (
               <RepurchaseAlerts
+                alerts={appAlerts}
+                customers={appCustomers}
                 alertStatuses={alertStatuses}
                 onStatusChange={updateAlertStatus}
               />
             )}
-            {activeView === "carteira" && <SellerPortfolio openProfile={openProfile} />}
-            {activeView === "saude" && <DataHealth openProfile={openProfile} />}
+            {activeView === "carteira" && <SellerPortfolio customers={appCustomers} alerts={appAlerts} openProfile={openProfile} />}
+            {activeView === "vendedores" && <SellersModule customers={appCustomers} alerts={appAlerts} />}
+            {activeView === "saude" && <DataHealth customers={appCustomers} openProfile={openProfile} />}
+            {activeView === "atividades" && <ActivitiesModule contactRecords={contactRecords} />}
+            {activeView === "campanhas" && <CampaignsModule customers={appCustomers} alerts={appAlerts} />}
             {activeView === "oportunidades" && (
               <Opportunities
                 items={opportunityItems}
@@ -331,11 +418,50 @@ export default function Home() {
                 onDelete={deleteAgendaEvent}
               />
             )}
-            {activeView === "ia" && <CommercialAi />}
-            {activeView === "relatorios" && <Reports theme={theme} />}
+            {activeView === "ia" && (
+              <CommercialAi
+                customers={appCustomers}
+                alerts={appAlerts}
+                opportunities={opportunityItems}
+                agenda={agendaItems}
+                contactRecords={contactRecords}
+              />
+            )}
+            {activeView === "motor-recompra" && <RepurchaseEngineModule alerts={appAlerts} />}
+            {activeView === "sincronizacao" && <SyncModule />}
+            {activeView === "configuracoes" && <SettingsModule />}
+            {activeView === "relatorios" && (
+              <Reports
+                theme={theme}
+                customers={appCustomers}
+                alerts={appAlerts}
+                opportunities={opportunityItems}
+                contactRecords={contactRecords}
+              />
+            )}
           </motion.div>
         </section>
       </div>
+      <QuickActionModals
+        action={quickAction}
+        user={user}
+        customers={appCustomers}
+        onClose={() => setQuickAction(null)}
+        onGoTo={(view) => setActiveView(view)}
+        onCreateCustomer={(customer) => {
+          setManualCustomers((current) => [customer, ...current]);
+          setSelectedCustomer(customer);
+          setActiveView("perfil");
+        }}
+        onCreateAlert={(alert) => {
+          setManualAlerts((current) => [alert, ...current]);
+          setActiveView("recompra");
+        }}
+        onCreateAgenda={saveAgendaEvent}
+        onCreateOpportunity={saveOpportunity}
+        onCreateContact={registerContact}
+      />
+      {isSigningOut && <SystemExitOverlay />}
     </main>
   );
 }
@@ -351,18 +477,373 @@ async function mutateWorkspace<T = unknown>(command: unknown): Promise<T> {
   return result;
 }
 
+function SystemLoadingScreen({
+  label,
+  detail,
+}: {
+  label: string;
+  detail: string;
+}) {
+  return (
+    <main className="crm-loading-screen flex min-h-screen items-center justify-center overflow-hidden bg-[#02040a] px-6 text-white">
+      <div className="crm-loading-orb crm-loading-orb-a" />
+      <div className="crm-loading-orb crm-loading-orb-b" />
+      <motion.div
+        initial={{ opacity: 0, y: 18, scale: 0.96 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ duration: 0.45 }}
+        className="relative z-10 w-full max-w-md rounded-3xl border border-cyan-300/18 bg-white/8 p-8 text-center shadow-2xl shadow-cyan-950/30 backdrop-blur-xl"
+      >
+        <LogoMark />
+        <div className="crm-loader-grid mx-auto mt-8">
+          {Array.from({ length: 9 }).map((_, index) => (
+            <span key={index} style={{ animationDelay: `${index * 0.08}s` }} />
+          ))}
+        </div>
+        <h1 className="mt-8 text-2xl font-bold">{label}</h1>
+        <p className="mt-3 text-sm leading-6 text-slate-300">{detail}</p>
+        <div className="mt-6 h-1.5 overflow-hidden rounded-full bg-white/10">
+          <div className="crm-loading-progress h-full rounded-full bg-gradient-to-r from-cyan-300 via-emerald-300 to-blue-400" />
+        </div>
+      </motion.div>
+    </main>
+  );
+}
+
+function SystemExitOverlay() {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/86 px-6 text-white backdrop-blur-md"
+    >
+      <motion.div
+        initial={{ y: 16, scale: 0.96 }}
+        animate={{ y: 0, scale: 1 }}
+        className="rounded-3xl border border-cyan-300/20 bg-white/8 p-8 text-center shadow-2xl"
+      >
+        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-cyan-400 text-[#06356c]">
+          <LogOut size={24} />
+        </div>
+        <p className="mt-5 text-lg font-bold">Encerrando sessao</p>
+        <p className="mt-2 text-sm text-slate-300">Salvando contexto comercial e fechando acesso com seguranca.</p>
+        <div className="mx-auto mt-6 h-1.5 w-64 overflow-hidden rounded-full bg-white/10">
+          <div className="crm-loading-progress h-full rounded-full bg-gradient-to-r from-cyan-300 to-emerald-300" />
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+function LoginLoadingOverlay() {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/62 px-6 backdrop-blur-sm"
+    >
+      <motion.div
+        initial={{ y: 16, scale: 0.96 }}
+        animate={{ y: 0, scale: 1 }}
+        className="rounded-3xl border border-emerald-300/20 bg-white/10 p-7 text-center shadow-2xl"
+      >
+        <div className="crm-login-pulse mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-300 text-emerald-950">
+          <ShieldCheck size={27} />
+        </div>
+        <p className="mt-5 text-lg font-bold text-white">Validando acesso</p>
+        <p className="mt-2 max-w-xs text-sm leading-6 text-emerald-50/75">
+          Carregando permissoes, carteira comercial e operacao do dia.
+        </p>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+function QuickActionModals({
+  action,
+  user,
+  customers,
+  onClose,
+  onGoTo,
+  onCreateCustomer,
+  onCreateAlert,
+  onCreateAgenda,
+  onCreateOpportunity,
+  onCreateContact,
+}: {
+  action: QuickAction | null;
+  user: CrmSessionUser;
+  customers: CustomerRow[];
+  onClose: () => void;
+  onGoTo: (view: View) => void;
+  onCreateCustomer: (customer: CustomerRow) => void;
+  onCreateAlert: (alert: AlertRow) => void;
+  onCreateAgenda: (event: Omit<CrmAgendaEvent, "id">) => Promise<void>;
+  onCreateOpportunity: (opportunity: Omit<CrmOpportunity, "id">) => Promise<void>;
+  onCreateContact: (record: Omit<ContactRecord, "id">) => Promise<void>;
+}) {
+  if (!action) return null;
+
+  if (action === "manual-customer") {
+    return (
+      <ManualCustomerModal
+        onClose={onClose}
+        onSave={(customer) => {
+          onCreateCustomer(customer);
+          onClose();
+        }}
+      />
+    );
+  }
+
+  if (action === "manual-alert") {
+    return (
+      <ManualAlertModal
+        customers={customers}
+        user={user}
+        onClose={onClose}
+        onSave={(alert) => {
+          onCreateAlert(alert);
+          onClose();
+        }}
+      />
+    );
+  }
+
+  if (action === "opportunity") {
+    return (
+      <OpportunityModal
+        user={user}
+        onClose={onClose}
+        onSave={async (opportunity) => {
+          await onCreateOpportunity(opportunity);
+          onClose();
+          onGoTo("oportunidades");
+        }}
+      />
+    );
+  }
+
+  if (action === "agenda") {
+    return (
+      <AgendaEventModal
+        user={user}
+        onClose={onClose}
+        onSave={async (event) => {
+          await onCreateAgenda(event);
+          onClose();
+          onGoTo("agenda");
+        }}
+      />
+    );
+  }
+
+  return (
+    <QuickContactModal
+      customers={customers}
+      onClose={onClose}
+      onSave={async (record) => {
+        await onCreateContact(record);
+        onClose();
+        onGoTo("recuperacao");
+      }}
+    />
+  );
+}
+
+function ManualCustomerModal({
+  onClose,
+  onSave,
+}: {
+  onClose: () => void;
+  onSave: (customer: CustomerRow) => void;
+}) {
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [city, setCity] = useState("Manhuacu");
+  const [category, setCategory] = useState("Cliente manual");
+  const [sellerId, setSellerId] = useState(sellers[0]?.id ?? "");
+  const [cycleDays, setCycleDays] = useState("45");
+
+  return (
+    <ModalFrame title="Cadastrar cliente manual" onClose={onClose}>
+      <form
+        className="grid gap-4"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const seller = sellers.find((item) => item.id === sellerId);
+          const normalized = normalizeBrazilianWhatsAppNumber(phone);
+          const qualityScore = normalized ? 70 : 45;
+          onSave({
+            id: `manual-customer-${Date.now()}`,
+            uniplusId: Date.now(),
+            name: name.trim(),
+            phone: phone.trim(),
+            whatsapp: normalized ? phone.trim() : "",
+            email: "",
+            document: "",
+            address: "",
+            neighborhood: "",
+            cityId: undefined,
+            city: city.trim() || "Cidade nao informada",
+            category: category.trim() || "Cliente manual",
+            status: "Atencao",
+            activityStatus: "atencao",
+            lastBuy: formatContactDate(crmReferenceDate),
+            lastBuyIso: crmReferenceDate,
+            days: 45,
+            ticket: formatCurrency(0),
+            ticketValue: 0,
+            score: 64,
+            potential: formatCurrency(0),
+            potentialValue: 0,
+            probability: 64,
+            preferredSeller: seller?.name ?? "Sem preferencia",
+            preferredSellerId: seller?.id,
+            sellerAffinity: seller ? 100 : 0,
+            qualityScore,
+            qualityStatus: qualityScore >= 70 ? "bom" : "regular",
+            purchaseCycleDays: Number(cycleDays) || 45,
+            totalPurchases: 0,
+            totalPurchased: formatCurrency(0),
+          });
+        }}
+      >
+        <FormInput label="Nome do cliente" value={name} onChange={setName} />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <FormInput label="Celular / WhatsApp" value={phone} onChange={setPhone} />
+          <FormInput label="Cidade" value={city} onChange={setCity} />
+        </div>
+        <div className="grid gap-4 sm:grid-cols-3">
+          <FormInput label="Categoria" value={category} onChange={setCategory} />
+          <FormInput label="Ciclo estimado (dias)" value={cycleDays} onChange={setCycleDays} type="number" />
+          <FormSelect label="Vendedor responsavel" value={sellerId} onChange={setSellerId}>
+            {sellers.map((seller) => <option key={seller.id} value={seller.id}>{seller.name}</option>)}
+          </FormSelect>
+        </div>
+        <p className="rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs leading-5 text-cyan-800">
+          Cadastro operacional de sessao. A fonte oficial do cliente continuara sendo o ERP quando o Sync Agent estiver ativo.
+        </p>
+        <ModalActions saving={false} error="" onClose={onClose} />
+      </form>
+    </ModalFrame>
+  );
+}
+
+function ManualAlertModal({
+  customers,
+  user,
+  onClose,
+  onSave,
+}: {
+  customers: CustomerRow[];
+  user: CrmSessionUser;
+  onClose: () => void;
+  onSave: (alert: AlertRow) => void;
+}) {
+  const defaultCustomer = customers[0];
+  const defaultSeller = sellers.find((seller) => seller.id === user.sellerId) ?? sellers[0];
+  const [customerId, setCustomerId] = useState(defaultCustomer?.id ?? "");
+  const [product, setProduct] = useState("Racao premium 15kg");
+  const [days, setDays] = useState("45");
+  const [recommendedIso, setRecommendedIso] = useState(addIsoDays(crmReferenceDate, 7));
+  const [priority, setPriority] = useState<AlertRow["priorityCode"]>("alta");
+  const [sellerId, setSellerId] = useState(defaultSeller?.id ?? "");
+
+  return (
+    <ModalFrame title="Cadastrar alerta manual" onClose={onClose}>
+      <form
+        className="grid gap-4"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const customer = customers.find((item) => item.id === customerId);
+          const seller = sellers.find((item) => item.id === sellerId);
+          if (!customer) return;
+          onSave({
+            id: `manual-alert-${Date.now()}`,
+            customerId: customer.id,
+            product,
+            client: customer.name,
+            buyDate: customer.lastBuy,
+            buyDateIso: customer.lastBuyIso,
+            days: `${Number(days) || 45} dias`,
+            recommended: formatContactDate(recommendedIso),
+            recommendedIso,
+            priority: capitalizePriority(priority),
+            priorityCode: priority,
+            seller: seller?.name ?? customer.preferredSeller,
+            department: "Manual",
+            status: "pendente",
+            origin: "manual",
+          });
+        }}
+      >
+        <FormSelect label="Cliente" value={customerId} onChange={setCustomerId}>
+          {customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}
+        </FormSelect>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <FormInput label="Produto / motivo" value={product} onChange={setProduct} />
+          <FormInput label="Recorrencia em dias" value={days} onChange={setDays} type="number" />
+        </div>
+        <div className="grid gap-4 sm:grid-cols-3">
+          <FormInput label="Data do alerta" value={recommendedIso} onChange={setRecommendedIso} type="date" />
+          <FormSelect label="Prioridade" value={priority} onChange={(value) => setPriority(value as AlertRow["priorityCode"])}>
+            <option value="alta">Alta</option>
+            <option value="media">Media</option>
+            <option value="baixa">Baixa</option>
+          </FormSelect>
+          <FormSelect label="Responsavel" value={sellerId} onChange={setSellerId} disabled={user.role === "vendedor"}>
+            {sellers.map((seller) => <option key={seller.id} value={seller.id}>{seller.name}</option>)}
+          </FormSelect>
+        </div>
+        <ModalActions saving={false} error="" onClose={onClose} />
+      </form>
+    </ModalFrame>
+  );
+}
+
+function QuickContactModal({
+  customers,
+  onClose,
+  onSave,
+}: {
+  customers: CustomerRow[];
+  onClose: () => void;
+  onSave: (record: Omit<ContactRecord, "id">) => Promise<void>;
+}) {
+  const [customerId, setCustomerId] = useState(customers[0]?.id ?? "");
+  const customer = customers.find((item) => item.id === customerId) ?? customers[0];
+
+  if (!customer) return null;
+
+  return (
+    <ContactOutcomeModal
+      customer={customer}
+      onClose={onClose}
+      onSave={onSave}
+      header={
+        <FormSelect label="Cliente" value={customerId} onChange={setCustomerId}>
+          {customers.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+        </FormSelect>
+      }
+    />
+  );
+}
+
 function LoginScreen({
   onLogin,
 }: {
   onLogin: (email: string, password: string) => Promise<void>;
 }) {
-  const [email, setEmail] = useState("admin@henndercrm.local");
-  const [password, setPassword] = useState("Admin@123");
+  const isProduction = process.env.NODE_ENV === "production";
+  const [email, setEmail] = useState(isProduction ? "" : "admin@henndercrm.local");
+  const [password, setPassword] = useState(isProduction ? "" : "Admin@123");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   return (
     <main className="min-h-screen overflow-hidden bg-[#0d1211] text-white">
+      {submitting && <LoginLoadingOverlay />}
       <div className="grid min-h-screen lg:grid-cols-[0.9fr_1.1fr]">
         <section className="flex items-center px-6 py-10 sm:px-10 lg:px-16">
           <motion.div
@@ -421,7 +902,11 @@ function LoginScreen({
                 disabled={submitting}
                 className="group flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-emerald-400 text-sm font-semibold text-emerald-950 shadow-[0_24px_60px_rgba(52,211,153,0.24)] transition hover:bg-emerald-300"
               >
-                <LogIn size={18} />
+                {submitting ? (
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-emerald-950/25 border-t-emerald-950" />
+                ) : (
+                  <LogIn size={18} />
+                )}
                 {submitting ? "Entrando..." : "Entrar"}
                 <ChevronRight size={17} className="transition group-hover:translate-x-0.5" />
               </button>
@@ -431,12 +916,14 @@ function LoginScreen({
                 </p>
               )}
             </form>
+            {!isProduction && (
             <div className="mt-5 rounded-lg border border-white/10 bg-white/5 p-3 text-xs leading-5 text-slate-300">
               <p className="font-semibold text-white">Acessos de demonstração</p>
               <p>Administrador: admin@henndercrm.local / Admin@123</p>
               <p>Supervisor: supervisor@henndercrm.local / Supervisor@123</p>
               <p>Vendedor: vendedor@henndercrm.local / Vendedor@123</p>
             </div>
+            )}
           </motion.div>
         </section>
         <section className="relative hidden items-center justify-center p-10 lg:flex">
@@ -479,10 +966,16 @@ function Sidebar({
   setMobileOpen: (open: boolean) => void;
   user: CrmSessionUser;
 }) {
-  const visibleNavItems =
-    user.role === "vendedor"
-      ? navItems.filter((item) => !["saude", "relatorios"].includes(item.id))
-      : navItems;
+  const visibleNavGroups = navGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => {
+        if (user.role === "vendedor") return sellerAllowedViews.includes(item.id);
+        if (user.role === "supervisor") return !supervisorBlockedViews.includes(item.id);
+        return true;
+      }),
+    }))
+    .filter((group) => group.items.length > 0);
 
   return (
     <>
@@ -503,35 +996,44 @@ function Sidebar({
             <X size={20} />
           </button>
         </div>
-        <nav className="mt-7 space-y-1.5">
-          {visibleNavItems.map((item) => {
-            const Icon = item.icon;
-            const active = activeView === item.id || (activeView === "perfil" && item.id === "clientes");
-            return (
-              <button
-                key={item.id}
-                onClick={() => {
-                  setActiveView(item.id);
-                  setMobileOpen(false);
-                }}
-                className={`flex min-h-11 w-full items-start gap-3 rounded-lg px-3 py-3 text-left text-sm font-medium transition ${
-                  active
-                    ? "bg-white text-[#084d9f] shadow-lg shadow-blue-950/20"
-                    : "text-blue-100 hover:bg-white/10 hover:text-white"
-                }`}
-              >
-                <Icon size={18} className="mt-0.5 shrink-0" />
-                <span className="min-w-0">
-                  <span className="block">{item.label}</span>
-                  {active && (
-                    <span className="mt-1 block text-xs font-normal leading-4 text-slate-500">
-                      {item.description}
-                    </span>
-                  )}
-                </span>
-              </button>
-            );
-          })}
+        <nav className="mt-7 space-y-5 overflow-y-auto pr-1">
+          {visibleNavGroups.map((group) => (
+            <div key={group.title}>
+              <p className="mb-2 px-3 text-[10px] font-black uppercase tracking-[0.18em] text-cyan-200/80">
+                {group.title}
+              </p>
+              <div className="space-y-1.5">
+                {group.items.map((item) => {
+                  const Icon = item.icon;
+                  const active = activeView === item.id || (activeView === "perfil" && item.id === "clientes");
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => {
+                        setActiveView(item.id);
+                        setMobileOpen(false);
+                      }}
+                      className={`flex min-h-11 w-full items-start gap-3 rounded-lg px-3 py-3 text-left text-sm font-medium transition ${
+                        active
+                          ? "bg-white text-[#084d9f] shadow-lg shadow-blue-950/20"
+                          : "text-blue-100 hover:bg-white/10 hover:text-white"
+                      }`}
+                    >
+                      <Icon size={18} className="mt-0.5 shrink-0" />
+                      <span className="min-w-0">
+                        <span className="block">{item.label}</span>
+                        {active && (
+                          <span className="mt-1 block text-xs font-normal leading-4 text-slate-500">
+                            {item.description}
+                          </span>
+                        )}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </nav>
         <div className="mt-8 rounded-xl border border-cyan-300/25 bg-white/10 p-4">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-cyan-400 text-[#06356c]">
@@ -552,15 +1054,30 @@ function Topbar({
   theme,
   onThemeChange,
   user,
+  onQuickAction,
   onLogout,
 }: {
   onMenu: () => void;
   theme: Theme;
   onThemeChange: (theme: Theme) => void;
   user: CrmSessionUser;
+  onQuickAction: (action: QuickAction) => void;
   onLogout: () => Promise<void>;
 }) {
   const ThemeIcon = theme === "dark" ? Moon : Sun;
+  const [actionOpen, setActionOpen] = useState(false);
+  const quickActions: Array<{
+    id: QuickAction;
+    label: string;
+    description: string;
+    icon: typeof Plus;
+  }> = [
+    { id: "manual-alert", label: "Cadastrar alerta manual", description: "Criar lembrete de recompra para um cliente.", icon: Bell },
+    { id: "manual-customer", label: "Cadastrar cliente manual", description: "Adicionar cliente operacional durante a sessao.", icon: UsersRound },
+    { id: "opportunity", label: "Nova oportunidade", description: "Registrar venda cruzada ou sugestao comercial.", icon: Target },
+    { id: "agenda", label: "Novo compromisso", description: "Agendar ligacao, visita, retorno ou recompra.", icon: CalendarDays },
+    { id: "contact", label: "Registrar retorno", description: "Salvar resultado de contato com cliente.", icon: MessageCircle },
+  ];
 
   return (
     <header className="crm-topbar sticky top-0 z-20 border-b border-blue-700/30 bg-[#0753a6] text-white shadow-[0_4px_18px_rgba(6,61,128,0.18)]">
@@ -593,10 +1110,47 @@ function Topbar({
               <option value="dark">Dark profundo</option>
             </select>
           </label>
-          <button className="hidden h-10 items-center gap-2 rounded-lg border border-white/20 bg-white px-3 text-sm font-semibold text-[#0753a6] shadow-sm sm:flex">
-            <Plus size={17} />
-            Nova ação
-          </button>
+          <div className="relative hidden sm:block">
+            <button
+              type="button"
+              onClick={() => setActionOpen((current) => !current)}
+              className="flex h-10 items-center gap-2 rounded-lg border border-white/20 bg-white px-3 text-sm font-semibold text-[#0753a6] shadow-sm transition hover:bg-cyan-50"
+            >
+              <Plus size={17} />
+              Nova ação
+              <ChevronRight size={15} className={`transition ${actionOpen ? "rotate-90" : ""}`} />
+            </button>
+            {actionOpen && (
+              <motion.div
+                initial={{ opacity: 0, y: -6, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                className="absolute right-0 top-12 z-40 w-80 overflow-hidden rounded-xl border border-blue-100 bg-white p-2 text-slate-900 shadow-2xl"
+              >
+                {quickActions.map((action) => {
+                  const Icon = action.icon;
+                  return (
+                    <button
+                      key={action.id}
+                      type="button"
+                      onClick={() => {
+                        setActionOpen(false);
+                        onQuickAction(action.id);
+                      }}
+                      className="flex w-full gap-3 rounded-lg px-3 py-3 text-left transition hover:bg-cyan-50"
+                    >
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#0753a6] text-white">
+                        <Icon size={17} />
+                      </span>
+                      <span>
+                        <span className="block text-sm font-bold">{action.label}</span>
+                        <span className="mt-0.5 block text-xs leading-5 text-slate-500">{action.description}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </motion.div>
+            )}
+          </div>
           <button
             type="button"
             aria-label="Abrir notificações"
@@ -634,13 +1188,549 @@ function Topbar({
   );
 }
 
+function CrmResults({
+  customers,
+  alerts,
+  opportunities,
+  contactRecords,
+}: {
+  customers: CustomerRow[];
+  alerts: AlertRow[];
+  opportunities: CrmOpportunity[];
+  contactRecords: ContactRecord[];
+}) {
+  const contactedCustomerIds = new Set(contactRecords.map((record) => record.customerId));
+  const recoveredCustomerIds = new Set(
+    contactRecords
+      .filter((record) => record.outcome === "interested" || record.outcome === "follow_up")
+      .map((record) => record.customerId),
+  );
+  const recoveredCustomers = customers.filter((customer) => recoveredCustomerIds.has(customer.id));
+  const influencedCustomers = customers.filter(
+    (customer) => contactedCustomerIds.has(customer.id) || alerts.some((alert) => alert.customerId === customer.id),
+  );
+  const recoveredRevenue = recoveredCustomers.reduce((total, customer) => total + customer.ticketValue, 0);
+  const influencedRevenue = influencedCustomers.reduce((total, customer) => total + customer.potentialValue, 0);
+  const convertedAlerts = alerts.filter((alert) => alert.status === "convertido");
+  const conversionRate = contactRecords.length
+    ? Math.round((recoveredCustomerIds.size / contactRecords.length) * 100)
+    : 0;
+  const roi = recoveredRevenue ? Math.max(1, Math.round(recoveredRevenue / 350)) : 0;
+  const sellerRanking = buildSellerAttentionRanking({ customers, alerts, opportunities, agenda: [], contactRecords })
+    .slice(0, 5);
+
+  return (
+    <div className="space-y-5">
+      <PageTitle eyebrow="Resultados" title="Resultados do CRM" description="Impacto financeiro, conversões e recuperação gerada pela operação comercial." />
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <MetricCard label="Faturamento recuperado" value={formatCurrency(recoveredRevenue)} />
+        <MetricCard label="Faturamento influenciado" value={formatCurrency(influencedRevenue)} />
+        <MetricCard label="Clientes recuperados" value={`${recoveredCustomers.length}`} />
+        <MetricCard label="ROI estimado" value={`${roi}x`} />
+        <MetricCard label="Alertas convertidos" value={`${convertedAlerts.length}`} />
+        <MetricCard label="Taxa de conversão" value={`${conversionRate}%`} />
+        <MetricCard label="Ticket médio recuperado" value={formatCurrency(recoveredCustomers.length ? recoveredRevenue / recoveredCustomers.length : 0)} />
+        <MetricCard label="Oportunidades abertas" value={`${opportunities.filter((item) => item.status === "aberta").length}`} />
+      </div>
+      <div className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
+        <Panel title="Evolução mensal recuperada" icon={LineChart}>
+          <div className="h-80">
+            <MeasuredChart>
+              {({ width, height }) => (
+                <AreaChart width={width} height={height} data={repurchaseTrend}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <XAxis dataKey="mes" tickLine={false} axisLine={false} />
+                  <YAxis tickLine={false} axisLine={false} />
+                  <Tooltip />
+                  <Area type="monotone" dataKey="recuperados" stroke="#0753a6" fill="#bfdbfe" strokeWidth={3} />
+                </AreaChart>
+              )}
+            </MeasuredChart>
+          </div>
+        </Panel>
+        <Panel title="Ranking por recuperação" icon={UsersRound}>
+          <div className="space-y-3">
+            {sellerRanking.map((seller, index) => (
+              <div key={seller.name} className="flex items-center justify-between rounded-lg border border-blue-50 bg-[#f8fbff] p-3">
+                <div>
+                  <p className="font-bold text-[#123252]">{index + 1}. {seller.name}</p>
+                  <p className="text-xs text-slate-500">{seller.riskCustomers} clientes em risco · {seller.pendingAlerts} alertas</p>
+                </div>
+                <span className="font-black text-[#0753a6]">{formatCurrency(seller.potentialValue)}</span>
+              </div>
+            ))}
+            {!sellerRanking.length && <EmptyState text="Sem vendedores vinculados aos dados atuais." />}
+          </div>
+        </Panel>
+      </div>
+      <div className="grid gap-5 xl:grid-cols-2">
+        <Panel title="Top clientes recuperados" icon={CheckCircle2}>
+          <SimpleRows rows={recoveredCustomers.slice(0, 6).map((customer) => [customer.name, customer.ticket, customer.preferredSeller])} empty="Nenhum cliente recuperado registrado ainda." />
+        </Panel>
+        <Panel title="Top produtos de recompra" icon={ShoppingBag}>
+          <SimpleRows rows={buildProductRepurchaseRanking(alerts).map((item) => [item.name, `${item.count} alertas`, `${item.days} dias`])} empty="Nenhum produto com alerta pendente." />
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
+function SalesModule({ customers }: { customers: CustomerRow[] }) {
+  const [selectedSaleId, setSelectedSaleId] = useState(sales[0]?.id ?? "");
+  const customerById = new Map(customers.map((customer) => [customer.id, customer]));
+  const itemsBySale = new Map<string, typeof saleItems>();
+  for (const item of saleItems) {
+    const current = itemsBySale.get(item.saleId) ?? [];
+    current.push(item);
+    itemsBySale.set(item.saleId, current);
+  }
+  const selectedSale = sales.find((sale) => sale.id === selectedSaleId) ?? sales[0];
+  const selectedItems = selectedSale ? itemsBySale.get(selectedSale.id) ?? [] : [];
+
+  return (
+    <div className="space-y-5">
+      <PageTitle eyebrow="Comercial" title="Vendas" description="Conferência das vendas importadas do ERP, respeitando uma venda para vários itens." />
+      <div className="grid gap-4 md:grid-cols-4">
+        <MetricCard label="Vendas importadas" value={`${sales.length}`} />
+        <MetricCard label="Itens importados" value={`${saleItems.length}`} />
+        <MetricCard label="Ticket médio" value={formatCurrency(sales.length ? sales.reduce((total, sale) => total + sale.totalValue, 0) / sales.length : 0)} />
+        <MetricCard label="Vinculadas a alertas" value={`${snapshot.alerts.filter((alert) => sales.some((sale) => sale.id === alert.saleId)).length}`} />
+      </div>
+      <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
+        <Panel title="Listagem de vendas" icon={ShoppingBag} action={`${sales.length} registros únicos`}>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-left text-sm">
+              <thead className="text-xs uppercase tracking-wide text-slate-400">
+                <tr>
+                  <th className="px-3 py-2">Venda</th>
+                  <th className="px-3 py-2">Cliente</th>
+                  <th className="px-3 py-2">Data</th>
+                  <th className="px-3 py-2">Valor</th>
+                  <th className="px-3 py-2">Itens</th>
+                  <th className="px-3 py-2">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-blue-50">
+                {sales.map((sale) => {
+                  const saleCustomer = customerById.get(sale.customerId);
+                  return (
+                    <tr key={sale.id} className="cursor-pointer hover:bg-cyan-50/60" onClick={() => setSelectedSaleId(sale.id)}>
+                      <td className="px-3 py-3 font-semibold text-[#0753a6]">#{sale.uniplusId}</td>
+                      <td className="px-3 py-3">{saleCustomer?.name ?? "Cliente não encontrado"}</td>
+                      <td className="px-3 py-3">{formatContactDate(sale.soldAt)}</td>
+                      <td className="px-3 py-3 font-bold">{formatCurrency(sale.totalValue)}</td>
+                      <td className="px-3 py-3">{itemsBySale.get(sale.id)?.length ?? 0}</td>
+                      <td className="px-3 py-3">{sale.approved ? "Aprovada" : sale.status}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {!sales.length && <EmptyState text="Nenhuma venda importada no momento." />}
+          </div>
+        </Panel>
+        <Panel title="Detalhe da venda" icon={FileText}>
+          {selectedSale ? (
+            <div className="space-y-4">
+              <div className="rounded-lg bg-[#f8fbff] p-4">
+                <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Venda ERP</p>
+                <p className="mt-1 text-2xl font-black text-[#123252]">#{selectedSale.uniplusId}</p>
+                <p className="mt-1 text-sm text-slate-500">{customerById.get(selectedSale.customerId)?.name}</p>
+              </div>
+              <SimpleRows
+                rows={selectedItems.map((item) => [item.productName, `${item.quantity} un.`, formatCurrency(item.estimatedValue)])}
+                empty="Sem itens vinculados."
+              />
+              <p className="rounded-lg border border-cyan-100 bg-cyan-50 p-3 text-xs leading-5 text-cyan-800">
+                Repetições do mesmo uniplus_venda_id no SQL representam itens. O CRM mantém uma venda única e vários itens vinculados.
+              </p>
+            </div>
+          ) : <EmptyState text="Selecione uma venda para visualizar os itens." />}
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
+function ProductsModule({ customers, alerts }: { customers: CustomerRow[]; alerts: AlertRow[] }) {
+  const salesById = new Map(sales.map((sale) => [sale.id, sale]));
+  const productStats = snapshot.products.map((product) => {
+    const productItems = saleItems.filter((item) => item.productId === product.id);
+    const buyerIds = new Set(productItems.flatMap((item) => {
+      const sale = salesById.get(item.saleId);
+      return sale?.customerId ? [sale.customerId] : [];
+    }));
+    const productAlerts = alerts.filter((alert) => alert.product === product.name);
+    return {
+      product,
+      customers: buyerIds.size,
+      potential: customers
+        .filter((customer) => buyerIds.has(customer.id))
+        .reduce((total, customer) => total + customer.potentialValue, 0),
+      alertCount: productAlerts.length,
+    };
+  });
+
+  return (
+    <div className="space-y-5">
+      <PageTitle eyebrow="Comercial" title="Produtos" description="Gestão comercial dos produtos, recorrência e potencial de recompra." />
+      <div className="grid gap-4 md:grid-cols-4">
+        <MetricCard label="Produtos" value={`${snapshot.products.length}`} />
+        <MetricCard label="Usam CRM" value={`${snapshot.products.filter((product) => product.usesCrm).length}`} />
+        <MetricCard label="Recompra ativa" value={`${snapshot.products.filter((product) => product.repurchaseActive).length}`} />
+        <MetricCard label="Com alertas" value={`${new Set(alerts.map((alert) => alert.product)).size}`} />
+      </div>
+      <Panel title="Catálogo comercial" icon={ClipboardList} action={`${productStats.length} produtos`}>
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-left text-sm">
+            <thead className="text-xs uppercase tracking-wide text-slate-400">
+              <tr>
+                <th className="px-3 py-2">Produto</th>
+                <th className="px-3 py-2">Código</th>
+                <th className="px-3 py-2">Departamento</th>
+                <th className="px-3 py-2">Usa CRM</th>
+                <th className="px-3 py-2">Recompra</th>
+                <th className="px-3 py-2">Clientes</th>
+                <th className="px-3 py-2">Potencial</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-blue-50">
+              {productStats.map(({ product, customers: buyerCount, potential }) => (
+                <tr key={product.id} className="hover:bg-cyan-50/60">
+                  <td className="px-3 py-3 font-semibold text-[#123252]">{product.name}</td>
+                  <td className="px-3 py-3">{product.code}</td>
+                  <td className="px-3 py-3">{product.department || "Sem departamento"}</td>
+                  <td className="px-3 py-3">{product.usesCrm ? "Sim" : "Não"}</td>
+                  <td className="px-3 py-3">{product.repurchaseActive ? `${product.defaultRepurchaseDays ?? "-"} dias` : "Inativa"}</td>
+                  <td className="px-3 py-3">{buyerCount}</td>
+                  <td className="px-3 py-3 font-bold">{formatCurrency(potential)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!productStats.length && <EmptyState text="Nenhum produto importado no momento." />}
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+function SellersModule({ customers, alerts }: { customers: CustomerRow[]; alerts: AlertRow[] }) {
+  const sellerRows = sellers.map((seller) => {
+    const sellerCustomers = customers.filter((customer) => customer.preferredSellerId === seller.id);
+    const sellerAlerts = alerts.filter((alert) => alert.seller === seller.name);
+    const recoveredContacts = sellerCustomers.filter((customer) => customer.activityStatus === "ativo").length;
+    return {
+      seller,
+      customers: sellerCustomers.length,
+      risk: sellerCustomers.filter((customer) => customer.activityStatus === "risco" || customer.activityStatus === "perdido").length,
+      alerts: sellerAlerts.length,
+      potential: sellerCustomers.reduce((total, customer) => total + customer.potentialValue, 0),
+      conversion: sellerCustomers.length ? Math.round((recoveredContacts / sellerCustomers.length) * 100) : seller.conversionRate,
+    };
+  });
+
+  return (
+    <div className="space-y-5">
+      <PageTitle eyebrow="Equipe" title="Vendedores" description="Performance comercial, carteira, risco, alertas e potencial por vendedor." />
+      <div className="grid gap-4 md:grid-cols-4">
+        <MetricCard label="Vendedores ativos" value={`${sellerRows.length}`} />
+        <MetricCard label="Clientes vinculados" value={`${sellerRows.reduce((total, row) => total + row.customers, 0)}`} />
+        <MetricCard label="Alertas ativos" value={`${sellerRows.reduce((total, row) => total + row.alerts, 0)}`} />
+        <MetricCard label="Potencial da equipe" value={formatCurrency(sellerRows.reduce((total, row) => total + row.potential, 0))} />
+      </div>
+      <Panel title="Performance comercial" icon={UsersRound}>
+        <div className="grid gap-4 xl:grid-cols-2">
+          {sellerRows.map((row) => (
+            <div key={row.seller.id} className="rounded-xl border border-blue-100 bg-[#f8fbff] p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-lg font-black text-[#123252]">{row.seller.name}</p>
+                  <p className="mt-1 text-sm text-slate-500">{row.seller.supervisor ? "Supervisor" : "Vendedor"}</p>
+                </div>
+                <span className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-bold text-cyan-700">{row.conversion}% conversão</span>
+              </div>
+              <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                <MiniStat label="Clientes" value={`${row.customers}`} />
+                <MiniStat label="Em risco" value={`${row.risk}`} />
+                <MiniStat label="Alertas" value={`${row.alerts}`} />
+                <MiniStat label="Potencial" value={formatCurrency(row.potential)} />
+              </div>
+            </div>
+          ))}
+          {!sellerRows.length && <EmptyState text="Nenhum vendedor disponível na base atual." />}
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+function ActivitiesModule({ contactRecords }: { contactRecords: ContactRecord[] }) {
+  const outcomes = contactRecords.reduce<Record<string, number>>((acc, record) => {
+    acc[record.outcome] = (acc[record.outcome] ?? 0) + 1;
+    return acc;
+  }, {});
+
+  return (
+    <div className="space-y-5">
+      <PageTitle eyebrow="Inteligência" title="Atividades" description="Histórico de contatos, retornos, observações e ações feitas pela equipe." />
+      <div className="grid gap-4 md:grid-cols-4">
+        <MetricCard label="Atividades" value={`${contactRecords.length}`} />
+        <MetricCard label="Interessados" value={`${outcomes.interested ?? 0}`} />
+        <MetricCard label="Retornos" value={`${outcomes.follow_up ?? 0}`} />
+        <MetricCard label="Sem resposta" value={`${outcomes.no_answer ?? 0}`} />
+      </div>
+      <Panel title="Histórico de contatos" icon={Phone}>
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-left text-sm">
+            <thead className="text-xs uppercase tracking-wide text-slate-400">
+              <tr>
+                <th className="px-3 py-2">Cliente</th>
+                <th className="px-3 py-2">Canal</th>
+                <th className="px-3 py-2">Resultado</th>
+                <th className="px-3 py-2">Responsável</th>
+                <th className="px-3 py-2">Data</th>
+                <th className="px-3 py-2">Observação</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-blue-50">
+              {contactRecords.map((record) => (
+                <tr key={record.id} className="hover:bg-cyan-50/60">
+                  <td className="px-3 py-3 font-semibold text-[#123252]">{record.customerName}</td>
+                  <td className="px-3 py-3">{record.channel}</td>
+                  <td className="px-3 py-3">{contactOutcomeLabels[record.outcome]}</td>
+                  <td className="px-3 py-3">{record.responsible}</td>
+                  <td className="px-3 py-3">{formatContactDate(record.contactedAt)}</td>
+                  <td className="px-3 py-3">{record.note || "-"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!contactRecords.length && <EmptyState text="Nenhuma atividade registrada ainda." />}
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+function CampaignsModule({ customers, alerts }: { customers: CustomerRow[]; alerts: AlertRow[] }) {
+  const campaigns = [
+    {
+      name: "Clientes sem compra há 60 dias",
+      audience: customers.filter((customer) => customer.days >= 60).length,
+      period: "Mensal",
+      status: "Planejada",
+      result: "Aguardando disparo",
+    },
+    {
+      name: "Recompra de produtos recorrentes",
+      audience: new Set(alerts.map((alert) => alert.customerId)).size,
+      period: "Semanal",
+      status: "Ativa",
+      result: `${alerts.filter((alert) => alert.status === "convertido").length} conversões`,
+    },
+    {
+      name: "Atualização cadastral",
+      audience: customers.filter((customer) => !customer.whatsapp || customer.qualityScore < 70).length,
+      period: "Pontual",
+      status: "Sugestão",
+      result: "Qualificar WhatsApp e cidade",
+    },
+    {
+      name: "Grande chance de conversão",
+      audience: customers.filter((customer) => customer.score >= 75).length,
+      period: "Quinzenal",
+      status: "Planejada",
+      result: "Abordagem consultiva",
+    },
+  ];
+
+  return (
+    <div className="space-y-5">
+      <PageTitle eyebrow="Inteligência" title="Campanhas" description="Estrutura inicial para ações comerciais em lote com público, período e resultado." />
+      <Panel title="Campanhas comerciais" icon={Sparkles} action={`${campaigns.length} modelos`}>
+        <div className="grid gap-4 xl:grid-cols-2">
+          {campaigns.map((campaign) => (
+            <div key={campaign.name} className="rounded-xl border border-blue-100 bg-white p-4 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="font-black text-[#123252]">{campaign.name}</p>
+                  <p className="mt-1 text-sm text-slate-500">Público-alvo: {campaign.audience} cliente(s)</p>
+                </div>
+                <span className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-bold text-cyan-700">{campaign.status}</span>
+              </div>
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <MiniStat label="Período" value={campaign.period} />
+                <MiniStat label="Resultado" value={campaign.result} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+function RepurchaseEngineModule({ alerts }: { alerts: AlertRow[] }) {
+  const activeProducts = snapshot.products.filter((product) => product.repurchaseActive);
+  const departments = [...new Set(activeProducts.map((product) => product.department || "Sem departamento"))];
+  const manualRules = alerts.filter((alert) => alert.origin === "manual");
+
+  return (
+    <div className="space-y-5">
+      <PageTitle eyebrow="Sistema" title="Motor de Recompra" description="Visualização das regras que alimentam alertas por produto, departamento e comportamento." />
+      <div className="grid gap-4 md:grid-cols-4">
+        <MetricCard label="Regras por produto" value={`${activeProducts.length}`} />
+        <MetricCard label="Departamentos" value={`${departments.length}`} />
+        <MetricCard label="Regras manuais" value={`${manualRules.length}`} />
+        <MetricCard label="Alertas gerados" value={`${alerts.length}`} />
+      </div>
+      <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
+        <Panel title="Regras por produto" icon={SlidersHorizontal}>
+          <SimpleRows
+            rows={activeProducts.slice(0, 12).map((product) => [
+              product.name,
+              product.department || "Sem departamento",
+              `${product.defaultRepurchaseDays ?? 45} dias`,
+            ])}
+            empty="Nenhuma regra de produto ativa."
+          />
+        </Panel>
+        <Panel title="Regras complementares" icon={Database}>
+          <SimpleRows
+            rows={[
+              ["Palavra-chave", "ração, vermífugo, vacina", "Ativa"],
+              ["Departamento", departments.slice(0, 3).join(", ") || "Sem dados", "Ativa"],
+              ["Histórico do cliente", "Média de recompra observada", "Ativa"],
+              ["Manual cliente/produto", `${manualRules.length} regra(s)`, "Operacional"],
+            ]}
+            empty="Sem regras complementares."
+          />
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
+function SyncModule() {
+  const ignoredSales = Math.max(0, snapshot.sales.length - sales.length);
+  const syncRows = [
+    ["Última sincronização", "Demonstração local"],
+    ["Status", "Pronta para importação manual"],
+    ["Total lidos", `${snapshot.sales.length + ignoredSales}`],
+    ["Total importados", `${sales.length}`],
+    ["Total atualizados", `${customers.length + snapshot.products.length + sellers.length}`],
+    ["Total ignorados", `${ignoredSales}`],
+  ];
+
+  return (
+    <div className="space-y-5">
+      <PageTitle eyebrow="Sistema" title="Sincronização" description="Saúde da integração, histórico, idempotência e reprocessamento seguro." />
+      <div className="grid gap-4 md:grid-cols-4">
+        <MetricCard label="Status" value="OK" />
+        <MetricCard label="Vendas" value={`${sales.length}`} />
+        <MetricCard label="Itens" value={`${saleItems.length}`} />
+        <MetricCard label="Produtos" value={`${snapshot.products.length}`} />
+      </div>
+      <div className="grid gap-5 xl:grid-cols-2">
+        <Panel title="Resumo da integração" icon={RefreshCcw}>
+          <SimpleRows rows={syncRows} empty="Sem sincronização registrada." />
+        </Panel>
+        <Panel title="Reprocessamento seguro" icon={Database}>
+          <div className="space-y-3 text-sm leading-6 text-slate-600">
+            {[
+              "UPSERT por uniplus_id para prevenir duplicidade.",
+              "Uma venda por uniplus_venda_id e vários itens por uniplus_item_id.",
+              "Janela de segurança para reler períodos recentes.",
+              "Log de vendas ignoradas com motivo e payload de auditoria.",
+              "Reprocessar período ou venda sem apagar histórico comercial.",
+            ].map((item) => (
+              <div key={item} className="rounded-lg border border-blue-50 bg-[#f8fbff] px-3 py-2">{item}</div>
+            ))}
+          </div>
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
+function SettingsModule() {
+  const settings = [
+    ["Usuários", "Perfis de administrador, supervisor e vendedor."],
+    ["Permissões", "Estrutura preparada para ocultar menus por perfil."],
+    ["Empresa", "Parâmetros comerciais e preferências do sistema."],
+    ["Atribuição", "Janela e regras para reconhecer conversões do CRM."],
+    ["Integração", "Configurações futuras do Sync Agent local."],
+    ["Preferências", "Tema, notificações e comportamento operacional."],
+  ];
+
+  return (
+    <div className="space-y-5">
+      <PageTitle eyebrow="Sistema" title="Configurações" description="Parâmetros operacionais, usuários, permissões e integração." />
+      <Panel title="Central de configurações" icon={Settings}>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {settings.map(([title, description]) => (
+            <div key={title} className="rounded-xl border border-blue-100 bg-[#f8fbff] p-4">
+              <p className="font-black text-[#123252]">{title}</p>
+              <p className="mt-2 text-sm leading-6 text-slate-500">{description}</p>
+            </div>
+          ))}
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+function MiniStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-blue-50 bg-white px-3 py-2">
+      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{label}</p>
+      <p className="mt-1 text-sm font-black text-[#123252]">{value}</p>
+    </div>
+  );
+}
+
+function SimpleRows({
+  rows,
+  empty,
+}: {
+  rows: Array<Array<string | number>>;
+  empty: string;
+}) {
+  if (!rows.length) return <EmptyState text={empty} />;
+
+  return (
+    <div className="space-y-2">
+      {rows.map((row, index) => (
+        <div key={`${row.join("-")}-${index}`} className="grid gap-2 rounded-lg border border-blue-50 bg-[#f8fbff] p-3 text-sm text-slate-600 md:grid-cols-3">
+          {row.map((cell, cellIndex) => (
+            <span key={`${cell}-${cellIndex}`} className={cellIndex === 0 ? "font-bold text-[#123252]" : ""}>
+              {cell}
+            </span>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function EmptyState({ text }: { text: string }) {
+  return (
+    <div className="rounded-xl border border-dashed border-blue-200 bg-blue-50/50 p-5 text-center text-sm text-slate-500">
+      {text}
+    </div>
+  );
+}
+
 function Dashboard({
+  customers,
   openProfile,
   contactRecords,
   openRecovery,
   theme,
 }: {
-  openProfile: (customer: (typeof customers)[number]) => void;
+  customers: CustomerRow[];
+  openProfile: (customer: CustomerRow) => void;
   contactRecords: ContactRecord[];
   openRecovery: () => void;
   theme: Theme;
@@ -849,15 +1939,17 @@ function Dashboard({
 }
 
 function RecoveryCustomers({
+  customers,
   openProfile,
   contactRecords,
   onRegisterContact,
 }: {
-  openProfile: (customer: (typeof customers)[number]) => void;
+  customers: CustomerRow[];
+  openProfile: (customer: CustomerRow) => void;
   contactRecords: ContactRecord[];
   onRegisterContact: (record: Omit<ContactRecord, "id">) => Promise<void>;
 }) {
-  const [contactCustomer, setContactCustomer] = useState<(typeof customers)[number] | null>(null);
+  const [contactCustomer, setContactCustomer] = useState<CustomerRow | null>(null);
   const inactiveCustomers = [...customers]
     .filter((customer) => customer.activityStatus !== "ativo")
     .sort((a, b) => b.days - a.days);
@@ -1016,7 +2108,13 @@ function RecoveryCustomers({
   );
 }
 
-function Customers({ openProfile }: { openProfile: (customer: (typeof customers)[number]) => void }) {
+function Customers({
+  customers,
+  openProfile,
+}: {
+  customers: CustomerRow[];
+  openProfile: (customer: CustomerRow) => void;
+}) {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("todos");
   const [sellerFilter, setSellerFilter] = useState("todos");
@@ -1118,10 +2216,12 @@ function Customers({ openProfile }: { openProfile: (customer: (typeof customers)
 }
 
 function CustomerProfile({
+  alerts,
   customer,
   contactRecords,
 }: {
-  customer: (typeof customers)[number];
+  alerts: AlertRow[];
+  customer: CustomerRow;
   contactRecords: ContactRecord[];
 }) {
   const customerSales = sales
@@ -1307,9 +2407,13 @@ function CustomerProfile({
 }
 
 function RepurchaseAlerts({
+  alerts,
+  customers,
   alertStatuses,
   onStatusChange,
 }: {
+  alerts: AlertRow[];
+  customers: CustomerRow[];
   alertStatuses: Record<string, RepurchaseAlertStatus>;
   onStatusChange: (id: string, status: RepurchaseAlertStatus) => Promise<void>;
 }) {
@@ -1488,9 +2592,13 @@ function Field({ label, value }: { label: string; value: string }) {
 }
 
 function SellerPortfolio({
+  customers,
+  alerts,
   openProfile,
 }: {
-  openProfile: (customer: (typeof customers)[number]) => void;
+  customers: CustomerRow[];
+  alerts: AlertRow[];
+  openProfile: (customer: CustomerRow) => void;
 }) {
   const [sellerId, setSellerId] = useState(sellers[0]?.id ?? "");
   const seller = sellers.find((item) => item.id === sellerId) ?? sellers[0];
@@ -1564,9 +2672,11 @@ function SellerPortfolio({
 }
 
 function DataHealth({
+  customers,
   openProfile,
 }: {
-  openProfile: (customer: (typeof customers)[number]) => void;
+  customers: CustomerRow[];
+  openProfile: (customer: CustomerRow) => void;
 }) {
   const missingWhatsapp = customers.filter((customer) => !customer.whatsapp);
   const missingPhone = customers.filter((customer) => !customer.phone);
@@ -1921,55 +3031,133 @@ function AgendaEventModal({
   );
 }
 
-function CommercialAi() {
+function CommercialAi({
+  customers,
+  alerts,
+  opportunities,
+  agenda,
+  contactRecords,
+}: {
+  customers: CustomerRow[];
+  alerts: AlertRow[];
+  opportunities: CrmOpportunity[];
+  agenda: CrmAgendaEvent[];
+  contactRecords: ContactRecord[];
+}) {
   const prompts = [
     "Quais clientes devo ligar hoje?",
-    "Quem está em risco de abandono?",
-    "Quais produtos têm maior potencial de recompra?",
+    "Quem esta em risco de abandono?",
+    "Quais produtos tem maior potencial de recompra?",
     "Mostre clientes que compravam mensalmente e pararam.",
+    "Quem esta sem WhatsApp ou com cadastro fraco?",
+    "Qual vendedor precisa de mais atencao hoje?",
   ];
-  const [question, setQuestion] = useState(prompts[0]);
-  const [answer, setAnswer] = useState(getCommercialAiAnswer(prompts[0]));
+  const context = { customers, alerts, opportunities, agenda, contactRecords };
+  const welcomeMessage = getCommercialAiWelcomeMessage();
+  const [question, setQuestion] = useState("");
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    { id: "welcome", role: "ai", text: welcomeMessage },
+  ]);
+  const [isThinking, setIsThinking] = useState(false);
+  const messageIdRef = useRef(0);
+  const insights = buildCommercialAiInsights(context);
+  const ask = (nextQuestion = question) => {
+    const cleanQuestion = nextQuestion.trim();
+    if (!cleanQuestion) return;
+    messageIdRef.current += 1;
+    const userMessage: ChatMessage = {
+      id: `user-${messageIdRef.current}`,
+      role: "user",
+      text: cleanQuestion,
+    };
+    setMessages((current) => [...current, userMessage]);
+    setQuestion("");
+    setIsThinking(true);
+    window.setTimeout(() => {
+      messageIdRef.current += 1;
+      const aiMessage: ChatMessage = {
+        id: `ai-${messageIdRef.current}`,
+        role: "ai",
+        text: getCommercialAiAnswer(cleanQuestion, context),
+      };
+      setMessages((current) => [...current, aiMessage]);
+      setIsThinking(false);
+    }, 360);
+  };
 
   return (
     <div className="space-y-5">
-      <PageTitle eyebrow="Assistente comercial" title="IA Comercial" description="Interface de chat para transformar perguntas do time em ações de venda." />
-      <Panel title="Chat comercial" icon={Bot} action="GPT-ready mockup">
+      <PageTitle eyebrow="Assistente comercial" title="IA Comercial" description="Assistente local que transforma dados comerciais em prioridades, scripts e proximas acoes." />
+      <div className="grid gap-4 md:grid-cols-4">
+        {insights.map((item) => {
+          const Icon = item.icon;
+          return (
+            <div key={item.label} className="rounded-xl border border-blue-100 bg-white p-4 shadow-sm">
+              <div className="flex items-center justify-between gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#e7f4ff] text-[#0753a6]">
+                  <Icon size={18} />
+                </span>
+                <span className={`rounded-full px-2 py-1 text-[11px] font-bold ${item.tone}`}>
+                  {item.badge}
+                </span>
+              </div>
+              <p className="mt-4 text-2xl font-black text-[#123252]">{item.value}</p>
+              <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-400">{item.label}</p>
+            </div>
+          );
+        })}
+      </div>
+      <Panel title="Chat comercial" icon={Bot} action="IA local orientada por dados">
         <div className="grid gap-5 lg:grid-cols-[0.75fr_1.25fr]">
           <div className="space-y-3">
+            <div className="rounded-xl border border-cyan-100 bg-cyan-50/70 p-4 text-sm leading-6 text-cyan-900">
+              <div className="mb-2 flex items-center gap-2 font-bold">
+                <Sparkles size={16} />
+                Perguntas prontas
+              </div>
+              Use essas entradas como atalho ou escreva do seu jeito. A IA cruza recompra, risco, potencial e qualidade do cadastro.
+            </div>
             {prompts.map((prompt) => (
               <button
                 key={prompt}
                 type="button"
-                onClick={() => {
-                  setQuestion(prompt);
-                  setAnswer(getCommercialAiAnswer(prompt));
-                }}
+                onClick={() => ask(prompt)}
                 className="w-full rounded-lg border border-blue-100 bg-[#f8fbff] p-4 text-left text-sm font-medium text-slate-700 transition hover:border-cyan-400 hover:bg-white"
               >
                 {prompt}
               </button>
             ))}
           </div>
-          <div className="rounded-lg border border-blue-100 bg-[#f3f8fd] p-4">
-            <div className="space-y-4">
-              <ChatBubble role="user" text={question} />
-              <ChatBubble role="ai" text={answer} />
+          <div className="rounded-2xl border border-blue-100 bg-[#f3f8fd] p-4 shadow-inner">
+            <div className="max-h-[520px] min-h-[380px] space-y-4 overflow-y-auto pr-1">
+              {messages.map((message) => (
+                <ChatBubble key={message.id} role={message.role} text={message.text} />
+              ))}
+              {isThinking && (
+                <ChatBubble role="ai" text="Analisando..." />
+              )}
             </div>
             <div className="mt-5 flex h-12 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3">
               <input
                 value={question}
                 onChange={(event) => setQuestion(event.target.value)}
-                placeholder="Pergunte sobre clientes, produtos ou oportunidades"
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") ask();
+                }}
+                placeholder="Pergunte sobre clientes, produtos, vendedores ou oportunidades"
                 className="min-w-0 flex-1 bg-transparent text-sm outline-none"
               />
               <button
                 type="button"
-                onClick={() => setAnswer(getCommercialAiAnswer(question))}
-                className="flex h-8 w-8 items-center justify-center rounded-md bg-[#0753a6] text-white"
+                onClick={() => ask()}
+                disabled={isThinking}
+                className="flex h-8 w-8 items-center justify-center rounded-md bg-[#0753a6] text-white disabled:opacity-60"
               >
-                <Send size={16} />
+                {isThinking ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" /> : <Send size={16} />}
               </button>
+            </div>
+            <div className="mt-4 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+              No momento ela roda como IA comercial local, sem enviar dados para fora. Quando quisermos, plugamos OpenAI ou outro modelo usando esse mesmo contexto.
             </div>
           </div>
         </div>
@@ -1977,26 +3165,160 @@ function CommercialAi() {
     </div>
   );
 }
-
-function Reports({ theme }: { theme: Theme }) {
+function Reports({
+  theme,
+  customers,
+  alerts,
+  opportunities,
+  contactRecords,
+}: {
+  theme: Theme;
+  customers: CustomerRow[];
+  alerts: AlertRow[];
+  opportunities: CrmOpportunity[];
+  contactRecords: ContactRecord[];
+}) {
   const chartColors = getChartColors(theme);
+  const pendingAlerts = alerts.filter((alert) => alert.status === "pendente");
+  const calledCustomers = contactRecords;
+  const potentialCustomers = [...customers].sort((a, b) => b.potentialValue - a.potentialValue).slice(0, 30);
+  const highConversion = [...opportunities]
+    .filter((item) => item.status === "aberta" || item.status === "em_contato")
+    .sort((a, b) => b.confidence - a.confidence)
+    .slice(0, 30);
   const reportCards = [
-    ["Clientes perdidos", `${dashboard.lostCustomers}`],
+    ["Clientes perdidos", `${customers.filter((customer) => customer.activityStatus === "perdido").length}`],
     ["Alertas de recompra", `${alerts.length}`],
     ["Produtos recorrentes", `${snapshot.products.filter((product) => product.repurchaseActive).length}`],
-    ["Potencial perdido", formatCurrency(dashboard.potentialLost)],
-    ["Qualidade da base", `${dashboard.averageRegistrationQuality}%`],
+    ["Potencial perdido", formatCurrency(customers.reduce((total, customer) => total + customer.potentialValue, 0))],
+    ["Qualidade da base", `${customers.length ? Math.round(customers.reduce((total, customer) => total + customer.qualityScore, 0) / customers.length) : 0}%`],
+  ];
+  const pdfReports = [
+    {
+      title: "Clientes para ligar",
+      description: "Fila priorizada por alerta pendente, prioridade e data prevista de recompra.",
+      count: pendingAlerts.length,
+      icon: Phone,
+      onClick: () => openPrintableReport({
+        title: "Relatorio - Clientes para ligar",
+        subtitle: "Prioridade de contato comercial e recompra",
+        summary: [`${pendingAlerts.length} cliente(s) na fila`, `${alerts.filter((alert) => alert.priorityCode === "alta").length} alerta(s) de alta prioridade`],
+        columns: ["Cliente", "Produto", "Prioridade", "Vendedor", "Contato sugerido", "Data prevista"],
+        rows: pendingAlerts.sort(compareAlertPriority).map((alert) => {
+          const customer = customers.find((item) => item.id === alert.customerId);
+          return [
+            alert.client,
+            alert.product,
+            alert.priority,
+            alert.seller,
+            customer?.whatsapp ? "WhatsApp" : customer?.phone ? "Telefone" : "Atualizar cadastro",
+            alert.recommended,
+          ];
+        }),
+      }),
+    },
+    {
+      title: "Clientes ligados",
+      description: "Historico de retornos registrados pela equipe comercial.",
+      count: calledCustomers.length,
+      icon: CheckCircle2,
+      onClick: () => openPrintableReport({
+        title: "Relatorio - Clientes ligados",
+        subtitle: "Contatos realizados, resultado e proximo passo",
+        summary: [`${calledCustomers.length} contato(s) registrado(s)`],
+        columns: ["Cliente", "Canal", "Resultado", "Responsavel", "Data", "Proximo contato"],
+        rows: calledCustomers.map((record) => [
+          record.customerName,
+          record.channel,
+          contactOutcomeLabels[record.outcome],
+          record.responsible,
+          formatContactDate(record.contactedAt),
+          record.nextContact ? formatContactDate(record.nextContact) : "-",
+        ]),
+      }),
+    },
+    {
+      title: "Maiores potenciais",
+      description: "Clientes ordenados por potencial perdido e ticket medio.",
+      count: potentialCustomers.length,
+      icon: CircleDollarSign,
+      onClick: () => openPrintableReport({
+        title: "Relatorio - Maiores potenciais",
+        subtitle: "Clientes com maior chance de recuperar faturamento",
+        summary: [`Potencial listado: ${formatCurrency(potentialCustomers.reduce((total, customer) => total + customer.potentialValue, 0))}`],
+        columns: ["Cliente", "Potencial", "Ticket medio", "Dias sem compra", "Vendedor", "WhatsApp"],
+        rows: potentialCustomers.map((customer) => [
+          customer.name,
+          customer.potential,
+          customer.ticket,
+          `${customer.days} dias`,
+          customer.preferredSeller,
+          customer.whatsapp || customer.phone || "Sem contato",
+        ]),
+      }),
+    },
+    {
+      title: "Grande chance de conversao",
+      description: "Oportunidades abertas com maior confianca comercial.",
+      count: highConversion.length,
+      icon: Target,
+      onClick: () => openPrintableReport({
+        title: "Relatorio - Grande chance de conversao",
+        subtitle: "Oportunidades para abordagem consultiva",
+        summary: [`${highConversion.length} oportunidade(s) selecionada(s)`],
+        columns: ["Cliente", "Produto sugerido", "Confianca", "Status", "Vendedor", "Motivo"],
+        rows: highConversion.map((item) => [
+          item.customerName,
+          item.suggestedProductName,
+          `${item.confidence}%`,
+          item.status,
+          item.sellerName,
+          item.reason,
+        ]),
+      }),
+    },
   ];
 
   return (
     <div className="space-y-5">
-      <PageTitle eyebrow="Analytics" title="Relatórios" description="Leitura analítica de perda, recuperação, recorrência e faturamento recuperado." />
+      <PageTitle eyebrow="Analytics" title="Relatorios" description="Leitura analitica e PDFs comerciais para reuniao, rotina de ligacao e apresentacao ao cliente." />
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         {reportCards.map(([label, value]) => (
           <MetricCard key={label} label={label} value={value} />
         ))}
       </div>
-      <Panel title="Performance por relatório" icon={BarChart3}>
+      <Panel title="Relatorios em PDF" icon={FileText} action="Exportacao comercial">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {pdfReports.map((report) => {
+            const Icon = report.icon;
+            return (
+              <button
+                key={report.title}
+                type="button"
+                onClick={report.onClick}
+                className="rounded-xl border border-blue-100 bg-[#f8fbff] p-4 text-left transition hover:border-cyan-400 hover:bg-white hover:shadow-md"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#0753a6] text-white">
+                    <Icon size={19} />
+                  </span>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-cyan-50 px-2 py-1 text-xs font-bold text-cyan-700">
+                    <Download size={13} />
+                    PDF
+                  </span>
+                </div>
+                <p className="mt-4 text-base font-black text-[#123252]">{report.title}</p>
+                <p className="mt-2 text-sm leading-6 text-slate-500">{report.description}</p>
+                <p className="mt-4 text-xs font-bold uppercase tracking-wide text-slate-400">{report.count} registro(s)</p>
+              </button>
+            );
+          })}
+        </div>
+        <p className="mt-4 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+          Ao clicar, o sistema abre um relatorio pronto para salvar como PDF pelo navegador. Quando a importacao mensal entrar, esses PDFs ja saem com a base nova.
+        </p>
+      </Panel>
+      <Panel title="Performance por relatorio" icon={BarChart3}>
         <div className="h-96">
           <MeasuredChart>
             {({ width, height }) => (
@@ -2013,6 +3335,161 @@ function Reports({ theme }: { theme: Theme }) {
       </Panel>
     </div>
   );
+}
+
+type PrintableReport = {
+  title: string;
+  subtitle: string;
+  summary: string[];
+  columns: string[];
+  rows: Array<Array<string | number>>;
+};
+
+function openPrintableReport(report: PrintableReport) {
+  const printWindow = window.open("", "_blank", "width=1100,height=820");
+  if (!printWindow) return;
+
+  const rows = report.rows.length
+    ? report.rows
+        .map((row) => `
+          <tr>
+            ${row.map((cell) => `<td>${escapeReportHtml(String(cell))}</td>`).join("")}
+          </tr>
+        `)
+        .join("")
+    : `<tr><td colspan="${report.columns.length}">Nenhum registro encontrado para este relatorio.</td></tr>`;
+
+  const html = `<!doctype html>
+    <html lang="pt-BR">
+      <head>
+        <meta charset="utf-8" />
+        <title>${escapeReportHtml(report.title)}</title>
+        <style>
+          * { box-sizing: border-box; }
+          body {
+            margin: 0;
+            background: #f4f8fb;
+            color: #123252;
+            font-family: Arial, Helvetica, sans-serif;
+          }
+          .page {
+            max-width: 1120px;
+            margin: 0 auto;
+            padding: 36px;
+          }
+          .cover {
+            border-radius: 22px;
+            background: linear-gradient(135deg, #0753a6, #06356c 58%, #16c786);
+            color: white;
+            padding: 28px;
+            box-shadow: 0 18px 50px rgba(6, 53, 108, 0.2);
+          }
+          .brand {
+            font-size: 13px;
+            font-weight: 800;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            opacity: 0.82;
+          }
+          h1 {
+            margin: 12px 0 6px;
+            font-size: 34px;
+            line-height: 1.1;
+          }
+          .subtitle {
+            margin: 0;
+            color: rgba(255,255,255,0.82);
+            font-size: 15px;
+          }
+          .summary {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 12px;
+            margin: 22px 0;
+          }
+          .summary div {
+            border: 1px solid #dbeafe;
+            border-radius: 14px;
+            background: white;
+            padding: 14px;
+            font-size: 13px;
+            font-weight: 700;
+          }
+          table {
+            width: 100%;
+            border-collapse: collapse;
+            overflow: hidden;
+            border-radius: 16px;
+            background: white;
+            box-shadow: 0 10px 30px rgba(18, 50, 82, 0.08);
+          }
+          th, td {
+            border-bottom: 1px solid #e8f1fb;
+            padding: 12px 10px;
+            text-align: left;
+            vertical-align: top;
+            font-size: 12px;
+          }
+          th {
+            background: #e7f4ff;
+            color: #0753a6;
+            font-size: 11px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+          }
+          tr:last-child td { border-bottom: 0; }
+          .footer {
+            margin-top: 22px;
+            color: #64748b;
+            font-size: 11px;
+          }
+          @media print {
+            body { background: white; }
+            .page { padding: 0; }
+            .cover, table { box-shadow: none; }
+          }
+        </style>
+      </head>
+      <body>
+        <main class="page">
+          <section class="cover">
+            <div class="brand">Hennder CRM</div>
+            <h1>${escapeReportHtml(report.title)}</h1>
+            <p class="subtitle">${escapeReportHtml(report.subtitle)}</p>
+          </section>
+          <section class="summary">
+            ${report.summary.map((item) => `<div>${escapeReportHtml(item)}</div>`).join("")}
+            <div>Gerado em ${escapeReportHtml(new Date().toLocaleString("pt-BR"))}</div>
+          </section>
+          <table>
+            <thead>
+              <tr>${report.columns.map((column) => `<th>${escapeReportHtml(column)}</th>`).join("")}</tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+          <p class="footer">Relatorio gerado pelo Hennder CRM - Inteligencia Comercial e Recompra.</p>
+        </main>
+        <script>
+          window.addEventListener("load", () => {
+            window.focus();
+            window.print();
+          });
+        </script>
+      </body>
+    </html>`;
+
+  printWindow.document.open();
+  printWindow.document.write(html);
+  printWindow.document.close();
+}
+
+function escapeReportHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 function DashboardPreview() {
@@ -2295,9 +3772,18 @@ function ModalFrame({
   children: React.ReactNode;
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
+    >
       <button type="button" aria-label="Fechar modal" className="absolute inset-0 cursor-default" onClick={onClose} />
-      <section className="relative z-10 max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-blue-100 bg-white p-5 shadow-2xl">
+      <motion.section
+        initial={{ opacity: 0, y: 18, scale: 0.96 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ duration: 0.24 }}
+        className="relative z-10 max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-blue-100 bg-white p-5 shadow-2xl"
+      >
         <div className="mb-5 flex items-center justify-between gap-4 border-b border-blue-50 pb-4">
           <h2 className="text-xl font-bold text-[#18334d]">{title}</h2>
           <button type="button" onClick={onClose} className="flex h-9 w-9 items-center justify-center rounded-lg border border-blue-100 text-slate-500 hover:bg-slate-50">
@@ -2305,8 +3791,8 @@ function ModalFrame({
           </button>
         </div>
         {children}
-      </section>
-    </div>
+      </motion.section>
+    </motion.div>
   );
 }
 
@@ -2400,10 +3886,12 @@ function ContactOutcomeModal({
   customer,
   onClose,
   onSave,
+  header,
 }: {
-  customer: (typeof customers)[number];
+  customer: CustomerRow;
   onClose: () => void;
   onSave: (record: Omit<ContactRecord, "id">) => Promise<void>;
+  header?: React.ReactNode;
 }) {
   const [outcome, setOutcome] = useState<ContactOutcome>("no_answer");
   const [note, setNote] = useState("");
@@ -2459,6 +3947,8 @@ function ContactOutcomeModal({
             <X size={18} />
           </button>
         </div>
+
+        {header && <div className="mt-5">{header}</div>}
 
         <label className="mt-5 block">
           <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Resultado do contato</span>
@@ -2557,55 +4047,361 @@ function addIsoDays(value: string, days: number) {
   return date.toISOString().slice(0, 10);
 }
 
-function getCommercialAiAnswer(question: string) {
-  const normalized = question.toLocaleLowerCase("pt-BR");
-
-  if (normalized.includes("sem whatsapp")) {
-    const names = customers.filter((customer) => !customer.whatsapp).map((customer) => customer.name);
-    return names.length
-      ? `${names.length} clientes estão sem WhatsApp: ${names.join(", ")}. Recomendo priorizar a atualização cadastral.`
-      : "Todos os clientes do recorte atual possuem WhatsApp.";
-  }
-  if (normalized.includes("vendedor")) {
-    return sellers
-      .map((seller) => `${seller.name}: ${seller.customerCount} clientes e ${formatCurrency(seller.potentialValue)} de potencial`)
-      .join(". ");
-  }
-  if (normalized.includes("produto")) {
-    const names = snapshot.products
-      .filter((product) => product.repurchaseActive)
-      .slice(0, 5)
-      .map((product) => `${product.name} (${product.defaultRepurchaseDays ?? "histórico"} dias)`);
-    return `Produtos com regra ativa: ${names.join(", ")}.`;
-  }
-  if (normalized.includes("potencial")) {
-    const priority = [...customers]
-      .sort((a, b) => b.potentialValue - a.potentialValue)
-      .slice(0, 3)
-      .map((customer) => `${customer.name} (${customer.potential})`);
-    return `Maior potencial perdido: ${priority.join(", ")}.`;
-  }
-  if (normalized.includes("risco") || normalized.includes("pararam")) {
-    const riskCustomers = customers
-      .filter((customer) => customer.activityStatus === "risco" || customer.activityStatus === "perdido")
-      .map((customer) => `${customer.name} (${customer.days} dias)`);
-    return `Clientes em risco ou perdidos: ${riskCustomers.join(", ")}.`;
-  }
-
-  const priority = [...customers]
-    .filter((customer) => customer.activityStatus !== "ativo")
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 3)
-    .map((customer) => `${customer.name} com score ${customer.score}`);
-  return `Priorize hoje: ${priority.join(", ")}. A recomendação combina inatividade, recorrência e potencial perdido.`;
+function capitalizePriority(value: AlertRow["priorityCode"]) {
+  return {
+    alta: "Alta",
+    media: "Media",
+    baixa: "Baixa",
+  }[value];
 }
 
+type CommercialAiContext = {
+  customers: CustomerRow[];
+  alerts: AlertRow[];
+  opportunities: CrmOpportunity[];
+  agenda: CrmAgendaEvent[];
+  contactRecords: ContactRecord[];
+};
+
+type CommercialAiIntent =
+  | "greeting"
+  | "help"
+  | "contacts"
+  | "risk"
+  | "repurchase"
+  | "seller"
+  | "registration"
+  | "opportunity"
+  | "potential";
+
+const commercialAiKnowledgeBase: Array<{
+  intent: CommercialAiIntent;
+  menuLabel: string;
+  keywords: string[];
+}> = [
+  {
+    intent: "greeting",
+    menuLabel: "Cumprimentos e boas-vindas",
+    keywords: ["bom dia", "boa tarde", "boa noite", "ola", "oi", "e ai", "tudo bem"],
+  },
+  {
+    intent: "help",
+    menuLabel: "Menu do que a IA consegue analisar",
+    keywords: ["ajuda", "menu", "opcoes", "o que voce faz", "o que consegue", "comandos"],
+  },
+  {
+    intent: "contacts",
+    menuLabel: "Clientes para ligar hoje",
+    keywords: ["agenda", "hoje", "ligar", "contato", "retorno", "visita"],
+  },
+  {
+    intent: "risk",
+    menuLabel: "Clientes em risco ou parados",
+    keywords: ["risco", "abandono", "pararam", "perdido", "sumiu", "sem comprar"],
+  },
+  {
+    intent: "repurchase",
+    menuLabel: "Produtos e alertas de recompra",
+    keywords: ["produto", "produtos", "recompra", "comprar de novo", "recorrente", "recorrencia"],
+  },
+  {
+    intent: "seller",
+    menuLabel: "Vendedor, carteira e responsavel",
+    keywords: ["vendedor", "carteira", "time", "equipe", "responsavel"],
+  },
+  {
+    intent: "registration",
+    menuLabel: "WhatsApp, telefone e qualidade do cadastro",
+    keywords: ["whatsapp", "cadastro", "telefone", "celular", "numero", "qualidade"],
+  },
+  {
+    intent: "opportunity",
+    menuLabel: "Oportunidades e chance de conversao",
+    keywords: ["oportunidade", "venda cruzada", "cross", "sugestao", "oferecer", "conversao"],
+  },
+  {
+    intent: "potential",
+    menuLabel: "Potencial, receita e faturamento",
+    keywords: ["potencial", "faturamento", "receita", "dinheiro", "valor"],
+  },
+];
+
+function buildCommercialAiInsights(context: CommercialAiContext) {
+  const pendingAlerts = context.alerts.filter((alert) => alert.status === "pendente");
+  const riskCustomers = context.customers.filter(
+    (customer) => customer.activityStatus === "risco" || customer.activityStatus === "perdido",
+  );
+  const weakRegistration = context.customers.filter(
+    (customer) => !customer.whatsapp || customer.qualityScore < 70,
+  );
+  const todayAgenda = context.agenda.filter((event) => event.date === crmReferenceDate);
+
+  return [
+    {
+      label: "Prioridade de contato",
+      value: pendingAlerts.length,
+      badge: pendingAlerts.length ? "agir hoje" : "em dia",
+      icon: Bell,
+      tone: pendingAlerts.length ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700",
+    },
+    {
+      label: "Clientes em risco",
+      value: riskCustomers.length,
+      badge: riskCustomers.length ? "recuperar" : "ok",
+      icon: AlertTriangle,
+      tone: riskCustomers.length ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700",
+    },
+    {
+      label: "Cadastros para revisar",
+      value: weakRegistration.length,
+      badge: "qualidade",
+      icon: ShieldCheck,
+      tone: weakRegistration.length ? "bg-blue-100 text-blue-700" : "bg-emerald-100 text-emerald-700",
+    },
+    {
+      label: "Agenda de hoje",
+      value: todayAgenda.length,
+      badge: "rotina",
+      icon: CalendarDays,
+      tone: todayAgenda.length ? "bg-cyan-100 text-cyan-700" : "bg-slate-100 text-slate-600",
+    },
+  ];
+}
+
+function getCommercialAiAnswer(question: string, context: CommercialAiContext) {
+  const normalized = normalizeAiText(question);
+  const knowledge = findCommercialAiKnowledge(normalized);
+  const customersById = new Map(context.customers.map((customer) => [customer.id, customer]));
+  const pendingAlerts = context.alerts.filter((alert) => alert.status === "pendente");
+  const priorityAlerts = [...pendingAlerts].sort(compareAlertPriority).slice(0, 5);
+  const riskCustomers = [...context.customers]
+    .filter((customer) => customer.activityStatus === "risco" || customer.activityStatus === "perdido")
+    .sort((a, b) => b.potentialValue - a.potentialValue || b.days - a.days)
+    .slice(0, 6);
+  const weakRegistration = [...context.customers]
+    .filter((customer) => !customer.whatsapp || customer.qualityScore < 70)
+    .sort((a, b) => a.qualityScore - b.qualityScore)
+    .slice(0, 6);
+  const todayAgenda = context.agenda.filter((event) => event.date === crmReferenceDate);
+  const sellerRanking = buildSellerAttentionRanking(context);
+  const productRanking = buildProductRepurchaseRanking(context.alerts);
+  const opportunityRanking = [...context.opportunities]
+    .sort((a, b) => b.confidence - a.confidence)
+    .slice(0, 5);
+
+  if (knowledge?.intent === "greeting") {
+    return [
+      resolveCommercialAiGreeting(),
+      "Sou a IA Comercial do Hennder CRM. Posso ajudar com clientes para ligar, risco de abandono, recompra, vendedores, cadastros fracos, potencial e oportunidades.",
+      "",
+      getCommercialAiMenuText(),
+    ].join("\n");
+  }
+
+  if (knowledge?.intent === "help") {
+    return getCommercialAiMenuText();
+  }
+
+  if (!context.customers.length && !context.alerts.length) {
+    return [
+      "Base comercial zerada no momento.",
+      "",
+      "Proximo movimento recomendado:",
+      "1. Emitir o relatorio mensal no PostgreSQL do ERP.",
+      "2. Importar o CSV pelo importador temporario.",
+      "3. Conferir clientes, vendas, itens, vendedores e alertas antes da apresentacao.",
+      "",
+      "Depois da importacao eu consigo priorizar contatos, sugerir recompra e apontar cadastros fracos automaticamente.",
+    ].join("\n");
+  }
+
+  if (knowledge?.intent === "registration") {
+    return [
+      `Encontrei ${weakRegistration.length} cadastro(s) que merecem revisao no recorte atual.`,
+      formatCustomerList(weakRegistration, (customer) => {
+        const reasons = [
+          !customer.whatsapp ? "sem WhatsApp valido" : undefined,
+          customer.qualityScore < 70 ? `score ${customer.qualityScore}%` : undefined,
+        ].filter(Boolean).join("; ");
+        return `${customer.name}: ${reasons || "cadastro ok"}`;
+      }),
+      "Acao sugerida: antes de campanha em massa, valide celular/WhatsApp desses clientes para nao perder retorno por dado ruim.",
+    ].join("\n");
+  }
+
+  if (knowledge?.intent === "seller") {
+    return [
+      "Leitura por vendedor, considerando clientes em risco, alertas pendentes e potencial perdido:",
+      formatGenericList(sellerRanking.slice(0, 5).map((seller) => `${seller.name}: ${seller.score} pts, ${seller.riskCustomers} cliente(s) em risco, ${seller.pendingAlerts} alerta(s), ${formatCurrency(seller.potentialValue)} de potencial.`)),
+      "Acao sugerida: comece pelo vendedor com maior pontuacao e distribua uma lista curta de contatos para hoje.",
+    ].join("\n");
+  }
+
+  if (knowledge?.intent === "repurchase") {
+    return [
+      "Produtos com maior sinal de recompra agora:",
+      formatGenericList(productRanking.map((product) => `${product.name}: ${product.count} alerta(s), prioridade ${product.priority}, ciclo medio ${product.days} dias.`)),
+      "Acao sugerida: monte abordagem por produto, nao so por cliente. Isso ajuda o vendedor a falar direto do item que provavelmente acabou.",
+    ].join("\n");
+  }
+
+  if (knowledge?.intent === "opportunity") {
+    return [
+      "Melhores oportunidades comerciais abertas:",
+      formatGenericList(opportunityRanking.map((item) => `${item.customerName}: oferecer ${item.suggestedProductName} (${item.confidence}% de confianca). Motivo: ${item.reason}`)),
+      "Acao sugerida: use oportunidade quando o cliente ja estiver em contato por recompra. A conversa fica mais natural.",
+    ].join("\n");
+  }
+
+  if (knowledge?.intent === "contacts") {
+    const contactQueue = priorityAlerts
+      .map((alert) => {
+        const customer = customersById.get(alert.customerId);
+        const channel = customer?.whatsapp ? "WhatsApp" : customer?.phone ? "telefone" : "atualizar cadastro";
+        return `${alert.client}: ${alert.product}, ${alert.priority.toLowerCase()}, contato por ${channel}.`;
+      });
+    return [
+      `Fila recomendada para hoje: ${contactQueue.length} contato(s) prioritario(s).`,
+      formatGenericList(contactQueue),
+      todayAgenda.length ? `Agenda ja marcada: ${todayAgenda.map((event) => `${event.time} ${event.title}`).join("; ")}.` : "Agenda de hoje sem compromissos importados.",
+      "Script curto: confirme se o produto esta acabando, ofereca reposicao e ja atualize WhatsApp/celular se necessario.",
+    ].join("\n");
+  }
+
+  if (knowledge?.intent === "risk") {
+    return [
+      `Clientes com maior risco de abandono: ${riskCustomers.length}.`,
+      formatCustomerList(riskCustomers, (customer) => `${customer.name}: ${customer.days} dias sem compra, potencial ${customer.potential}, vendedor ${customer.preferredSeller}.`),
+      "Acao sugerida: priorize quem tem maior potencial perdido e WhatsApp valido. Se nao houver WhatsApp, vira tarefa de saneamento cadastral.",
+    ].join("\n");
+  }
+
+  if (knowledge?.intent === "potential") {
+    const topPotential = [...context.customers]
+      .sort((a, b) => b.potentialValue - a.potentialValue)
+      .slice(0, 5);
+    const totalPotential = topPotential.reduce((total, customer) => total + customer.potentialValue, 0);
+    return [
+      `Top potencial recuperavel neste recorte: ${formatCurrency(totalPotential)} nos principais clientes.`,
+      formatCustomerList(topPotential, (customer) => `${customer.name}: ${customer.potential}, ticket medio ${customer.ticket}, ${customer.days} dias sem compra.`),
+      "Acao sugerida: use mensagem personalizada por historico de compra, evitando campanha generica.",
+    ].join("\n");
+  }
+
+  return [
+    "Nao entendi.",
+    "Consulte algumas opcoes no menu ao lado, onde esta escrito o que eu consigo trazer de informacao.",
+    "",
+    getCommercialAiMenuText(),
+  ].join("\n");
+}
+
+function normalizeAiText(value: string) {
+  return value
+    .toLocaleLowerCase("pt-BR")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function findCommercialAiKnowledge(normalizedQuestion: string) {
+  return commercialAiKnowledgeBase.find((entry) => hasAny(normalizedQuestion, entry.keywords));
+}
+
+function getCommercialAiMenuText() {
+  const options = commercialAiKnowledgeBase
+    .filter((entry) => entry.intent !== "greeting" && entry.intent !== "help")
+    .map((entry, index) => `${index + 1}. ${entry.menuLabel}`)
+    .join("\n");
+
+  return `Posso ajudar com estas opcoes:\n${options}`;
+}
+
+function getCommercialAiWelcomeMessage() {
+  return [
+    resolveCommercialAiGreeting(),
+    "Sou sua assistente comercial. Me pergunte quem ligar, onde tem oportunidade ou qual cliente merece atencao hoje.",
+  ].join("\n");
+}
+
+function resolveCommercialAiGreeting() {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Bom dia! Como posso ajudar sua operacao comercial hoje?";
+  if (hour < 18) return "Boa tarde! Vamos encontrar as melhores oportunidades comerciais?";
+  return "Boa noite! Posso resumir prioridades, riscos e oportunidades para voce.";
+}
+
+function hasAny(value: string, terms: string[]) {
+  return terms.some((term) => value.includes(normalizeAiText(term)));
+}
+
+function compareAlertPriority(a: AlertRow, b: AlertRow) {
+  const priorityWeight = { alta: 3, media: 2, baixa: 1 } as const;
+  return (
+    priorityWeight[b.priorityCode] - priorityWeight[a.priorityCode]
+    || a.recommendedIso.localeCompare(b.recommendedIso)
+  );
+}
+
+function buildSellerAttentionRanking(context: CommercialAiContext) {
+  return sellers
+    .map((seller) => {
+      const sellerCustomers = context.customers.filter((customer) => customer.preferredSellerId === seller.id);
+      const riskCustomers = sellerCustomers.filter(
+        (customer) => customer.activityStatus === "risco" || customer.activityStatus === "perdido",
+      ).length;
+      const pendingAlerts = context.alerts.filter(
+        (alert) => alert.status === "pendente" && alert.seller === seller.name,
+      ).length;
+      const potentialValue = sellerCustomers.reduce((total, customer) => total + customer.potentialValue, 0);
+      return {
+        name: seller.name,
+        riskCustomers,
+        pendingAlerts,
+        potentialValue,
+        score: riskCustomers * 4 + pendingAlerts * 3 + Math.round(potentialValue / 500),
+      };
+    })
+    .sort((a, b) => b.score - a.score || b.potentialValue - a.potentialValue);
+}
+
+function buildProductRepurchaseRanking(alerts: AlertRow[]) {
+  const products = new Map<string, { name: string; count: number; priorityScore: number; daysTotal: number }>();
+  const priorityWeight = { alta: 3, media: 2, baixa: 1 } as const;
+
+  for (const alert of alerts.filter((item) => item.status === "pendente")) {
+    const current = products.get(alert.product) ?? { name: alert.product, count: 0, priorityScore: 0, daysTotal: 0 };
+    current.count += 1;
+    current.priorityScore += priorityWeight[alert.priorityCode];
+    current.daysTotal += Number.parseInt(alert.days, 10) || 0;
+    products.set(alert.product, current);
+  }
+
+  return [...products.values()]
+    .map((product) => ({
+      name: product.name,
+      count: product.count,
+      priority: Math.round(product.priorityScore / product.count * 10) / 10,
+      days: product.count ? Math.round(product.daysTotal / product.count) : 0,
+    }))
+    .sort((a, b) => b.priority - a.priority || b.count - a.count)
+    .slice(0, 5);
+}
+
+function formatCustomerList(customers: CustomerRow[], formatter: (customer: CustomerRow) => string) {
+  if (!customers.length) return "Nenhum cliente encontrado para esse criterio.";
+  return formatGenericList(customers.map(formatter));
+}
+
+function formatGenericList(items: string[]) {
+  if (!items.length) return "Nenhum item encontrado para esse criterio.";
+  return items.map((item, index) => `${index + 1}. ${item}`).join("\n");
+}
 function WhatsAppButton({
   customer,
   message = "Olá! Aqui é da Hennder CRM. Gostaria de conversar sobre suas próximas compras.",
   compact = false,
 }: {
-  customer: (typeof customers)[number];
+  customer: CustomerRow;
   message?: string;
   compact?: boolean;
 }) {
@@ -2624,8 +4420,8 @@ function WhatsAppButton({
     );
   }
 
-  const localNumber = customer.whatsapp.replace(/\D/g, "");
-  const phone = localNumber.startsWith("55") ? localNumber : `55${localNumber}`;
+  const phone = normalizeBrazilianWhatsAppNumber(customer.whatsapp);
+  if (!phone) return null;
   const href = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
 
   return (
@@ -2652,7 +4448,11 @@ function Badge({ children }: { children: React.ReactNode }) {
 function ChatBubble({ role, text }: { role: "user" | "ai"; text: string }) {
   return (
     <div className={`flex ${role === "user" ? "justify-end" : "justify-start"}`}>
-      <div className={`max-w-[82%] rounded-xl px-4 py-3 text-sm leading-6 ${role === "user" ? "bg-[#0753a6] text-white" : "border border-blue-100 bg-white text-slate-700"}`}>
+      <div className={`max-w-[82%] whitespace-pre-line rounded-2xl px-4 py-3 text-sm leading-6 shadow-sm ${
+        role === "user"
+          ? "rounded-br-sm bg-[#0753a6] text-white"
+          : "rounded-bl-sm border border-blue-100 bg-white text-slate-700"
+      }`}>
         {text}
       </div>
     </div>
@@ -2662,8 +4462,10 @@ function ChatBubble({ role, text }: { role: "user" | "ai"; text: string }) {
 function LogoMark({ compact = false }: { compact?: boolean }) {
   return (
     <div className="flex items-center gap-3">
-      <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-cyan-400 text-[#06356c] shadow-lg shadow-blue-950/20">
-        <Leaf size={24} />
+      <div className="relative flex h-11 w-11 items-center justify-center overflow-hidden rounded-xl border border-cyan-300/70 bg-gradient-to-br from-[#041d40] via-[#06356c] to-[#0753a6] text-white shadow-lg shadow-blue-950/20">
+        <span className="absolute -right-5 -top-5 h-16 w-16 rounded-full bg-cyan-300/25 blur-sm" />
+        <span className="absolute bottom-2 left-2 right-2 h-1 rounded-full bg-cyan-300" />
+        <span className="relative z-10 text-2xl font-black leading-none tracking-tight drop-shadow-sm">H</span>
       </div>
       <div>
         <p className={`font-semibold ${compact ? "text-slate-950" : "text-white"}`}>Hennder CRM</p>

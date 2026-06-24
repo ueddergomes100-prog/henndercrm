@@ -20,11 +20,13 @@
 # production
 /build
 /.data
+/.tmp
 
 # misc
 .DS_Store
 *.pem
 uniplus_sample_result.csv
+docs/sql/resultadosql
 
 # debug
 npm-debug.log*

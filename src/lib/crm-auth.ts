@@ -8,7 +8,7 @@ const SESSION_TTL_SECONDS = 60 * 60 * 12;
 
 type DemoUser = CrmSessionUser & { password: string };
 
-const demoUsers: DemoUser[] = [
+const fallbackDemoUsers: DemoUser[] = [
   {
     id: "demo-admin",
     name: "Ana Administradora",
@@ -36,6 +36,7 @@ const demoUsers: DemoUser[] = [
 type SessionPayload = CrmSessionUser & { expiresAt: number };
 
 export function authenticateDemoUser(email: string, password: string): CrmSessionUser | null {
+  const demoUsers = resolveAuthUsers();
   const user = demoUsers.find((candidate) => candidate.email === email.trim().toLowerCase());
   if (!user || !safeEqual(user.password, password)) return null;
 
@@ -45,6 +46,38 @@ export function authenticateDemoUser(email: string, password: string): CrmSessio
     email: user.email,
     role: user.role,
     sellerId: user.sellerId,
+  };
+}
+
+function resolveAuthUsers() {
+  const configuredUsers = [
+    authUserFromEnv("CRM_ADMIN", "demo-admin", "Administrador", "administrador"),
+    authUserFromEnv("CRM_SUPERVISOR", "demo-supervisor", "Supervisor", "supervisor"),
+    authUserFromEnv("CRM_SELLER", "demo-seller", "Vendedor", "vendedor"),
+  ].filter((user): user is DemoUser => Boolean(user));
+
+  if (configuredUsers.length > 0) return configuredUsers;
+  if (process.env.NODE_ENV === "production") return [];
+  return fallbackDemoUsers;
+}
+
+function authUserFromEnv(
+  prefix: string,
+  id: string,
+  defaultName: string,
+  role: CrmSessionUser["role"],
+): DemoUser | null {
+  const email = process.env[`${prefix}_EMAIL`]?.trim().toLowerCase();
+  const password = process.env[`${prefix}_PASSWORD`]?.trim();
+  if (!email || !password) return null;
+
+  return {
+    id,
+    name: process.env[`${prefix}_NAME`]?.trim() || defaultName,
+    email,
+    password,
+    role,
+    sellerId: process.env[`${prefix}_SELLER_ID`]?.trim() || undefined,
   };
 }
 
