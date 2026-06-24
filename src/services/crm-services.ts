@@ -17,6 +17,7 @@ import {
   classifyCustomerActivity,
   crmUuid,
   daysBetween,
+  resolveCustomerWhatsApp,
   resolveRepurchaseRule,
   roundCurrency,
 } from "@/domain/crm/rules";
@@ -40,16 +41,14 @@ import type {
 
 export class VendaService {
   getValidSourceSales() {
-    const activeClientIds = new Set(
-      mockUniplusClients.filter((client) => !client.inactive).map((client) => client.id),
-    );
+    const clientIds = new Set(mockUniplusClients.map((client) => client.id));
     const productIds = new Set(mockUniplusProducts.map((product) => product.id));
 
     return mockUniplusSales.filter((sale) => {
       const saleItems = mockUniplusSaleItems.filter((item) => item.saleId === sale.id);
       return Boolean(
         sale.clientId &&
-          activeClientIds.has(sale.clientId) &&
+          clientIds.has(sale.clientId) &&
           sale.clientName?.trim() &&
           !sale.cancelledAt &&
           sale.approved &&
@@ -88,7 +87,7 @@ export class VendaService {
           productCode: item.productCode ?? product?.code ?? "",
           productName: item.productName ?? product?.name ?? "Produto não identificado",
           quantity: item.quantity,
-          estimatedValue: roundCurrency((product?.price ?? 0) * item.quantity),
+          estimatedValue: item.estimatedValue ?? roundCurrency((product?.price ?? 0) * item.quantity),
         };
       });
   }
@@ -148,7 +147,6 @@ export class ClienteService {
     sellers = mockUniplusSellers,
   ): CrmCustomer[] {
     return clients
-      .filter((client) => !client.inactive)
       .map((client) => {
         const clientSales = sourceSales
           .filter((sale) => sale.clientId === client.id)
@@ -174,7 +172,7 @@ export class ClienteService {
           document: client.document ?? "",
           phone: client.phone ?? "",
           mobile: client.mobile ?? "",
-          whatsapp: client.whatsapp ?? "",
+          whatsapp: resolveCustomerWhatsApp(client.mobile, client.whatsapp) ?? "",
           email: client.email ?? "",
           address: client.address ?? "",
           neighborhood: client.neighborhood ?? "",

@@ -267,6 +267,114 @@ textarea:focus-visible {
   background: transparent;
 }
 
+.crm-loading-screen {
+  position: relative;
+}
+
+.crm-loading-screen::before {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 22% 24%, rgba(34, 211, 238, 0.16), transparent 26%),
+    radial-gradient(circle at 78% 70%, rgba(22, 199, 134, 0.14), transparent 28%),
+    linear-gradient(145deg, #02040a 0%, #061324 52%, #02040a 100%);
+  content: "";
+}
+
+.crm-loading-orb {
+  position: absolute;
+  border-radius: 999px;
+  filter: blur(4px);
+  opacity: 0.65;
+  animation: crm-orb-float 4.8s ease-in-out infinite;
+}
+
+.crm-loading-orb-a {
+  left: 16%;
+  top: 18%;
+  height: 140px;
+  width: 140px;
+  background: rgba(34, 211, 238, 0.18);
+}
+
+.crm-loading-orb-b {
+  bottom: 14%;
+  right: 14%;
+  height: 180px;
+  width: 180px;
+  background: rgba(16, 185, 129, 0.16);
+  animation-delay: -1.3s;
+}
+
+.crm-loader-grid {
+  display: grid;
+  width: 74px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.crm-loader-grid span {
+  height: 14px;
+  border-radius: 5px;
+  background: linear-gradient(135deg, #22d3ee, #16c786);
+  animation: crm-loader-tile 1.05s ease-in-out infinite;
+}
+
+.crm-loading-progress {
+  animation: crm-loading-progress 1.35s ease-in-out infinite;
+  transform-origin: left;
+}
+
+.crm-login-pulse {
+  animation: crm-login-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes crm-loader-tile {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.72);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes crm-loading-progress {
+  0% {
+    transform: translateX(-100%) scaleX(0.35);
+  }
+  50% {
+    transform: translateX(12%) scaleX(0.72);
+  }
+  100% {
+    transform: translateX(110%) scaleX(0.35);
+  }
+}
+
+@keyframes crm-orb-float {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(18px, -16px, 0) scale(1.08);
+  }
+}
+
+@keyframes crm-login-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.28);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 0 18px rgba(52, 211, 153, 0);
+    transform: scale(1.04);
+  }
+}
+
 @media (min-width: 1024px) {
   .crm-sidebar {
     left: 0 !important;

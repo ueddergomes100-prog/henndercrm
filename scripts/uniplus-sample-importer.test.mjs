@@ -9,6 +9,7 @@ import {
 
 const headers = [
   "uniplus_venda_id",
+  "data_venda_final",
   "data_venda",
   "venda_data_inclusao",
   "venda_data_alteracao",
@@ -46,6 +47,7 @@ const headers = [
   "vendedor_inativo",
   "vendedor_perfil_id",
   "uniplus_item_id",
+  "item_uniplus_venda_id",
   "uniplus_produto_id",
   "produto_codigo_item",
   "produto_nome_item",
@@ -57,6 +59,7 @@ const headers = [
   "produto_departamento",
   "produto_fabricante_id",
   "produto_preco",
+  "item_valor_estimado",
   "produto_data_ultima_venda",
   "produto_data_ultima_compra",
   "produto_tipo_produto",
@@ -68,6 +71,7 @@ function row(overrides = {}) {
     headers.map((header) => {
       const defaults = {
         uniplus_venda_id: "10",
+        data_venda_final: "NULL",
         data_venda: "NULL",
         venda_data_inclusao: "2026-06-12 10:00:00",
         venda_data_alteracao: "2026-06-12 10:05:00",
@@ -80,21 +84,32 @@ function row(overrides = {}) {
         cliente_codigo: "C20",
         cliente_nome_cadastro: "CLIENTE REAL CADASTRO",
         cliente_razao_social: "CLIENTE REAL RAZAO SOCIAL",
-        cliente_cpf_cnpj: "123",
+        cliente_cpf_cnpj: "123.456.789-00",
+        cliente_telefone: "3333333333",
         cliente_celular: "33999999999",
+        cliente_whatsapp: "33888888888",
+        cliente_email: "cliente@exemplo.com",
+        cliente_endereco: "RUA REAL",
+        cliente_bairro: "CENTRO",
+        cliente_cep: "36900-000",
         cliente_id_cidade: "2698",
         cliente_id_estado: "18",
         cliente_data_cadastro: "2020-01-01",
         cliente_inativo: "0",
         uniplus_vendedor_id: "30",
         vendedor_nome: "VENDEDOR REAL",
+        vendedor_email: "vendedor@exemplo.com",
+        vendedor_celular: "33977777777",
+        vendedor_whatsapp: "33966666666",
         vendedor_inativo: "0",
         uniplus_item_id: "40",
+        item_uniplus_venda_id: "10",
         uniplus_produto_id: "50",
         produto_codigo: "P50",
         produto_nome: "RAÇÃO DEMONSTRAÇÃO",
         produto_departamento: "1",
         produto_preco: "25.00",
+        item_valor_estimado: "50.00",
         item_quantidade: "2",
         item_data_inclusao: "2026-06-12",
       };
@@ -112,11 +127,19 @@ test("invalid years become null and sale date uses fallbacks", () => {
   assert.equal(sanitizeDate("9540-01-01"), null);
   assert.equal(
     resolveSaleDate({
+      data_venda_final: "9540-01-01",
       data_venda: "9540-01-01",
       venda_data_inclusao: "2026-05-10 12:00:00",
       venda_data_alteracao: "2026-05-11",
     }),
     "2026-05-10 12:00:00",
+  );
+  assert.equal(
+    resolveSaleDate({
+      data_venda_final: "2026-06-23 00:00:00",
+      data_venda: "2026-05-10",
+    }),
+    "2026-06-23 00:00:00",
   );
 });
 
@@ -137,11 +160,51 @@ test("one sale with multiple item ids creates one sale and many items", () => {
   assert.equal(result.metadata.maxItemsPerSale, 3);
 });
 
-test("names are preserved while other personal fields remain pseudonymized", () => {
+test("item rows linked to a different sale are rejected", () => {
+  const result = transformRows(
+    [
+      row(),
+      row({
+        uniplus_item_id: "41",
+        item_uniplus_venda_id: "999",
+      }),
+    ],
+    { referenceDate: "2026-06-15" },
+  );
+
+  assert.equal(result.sales.length, 1);
+  assert.equal(result.items.length, 1);
+  assert.equal(result.metadata.invalidRows.length, 1);
+  assert.equal(result.metadata.invalidRows[0].reason, "item_vinculado_a_outra_venda");
+});
+
+test("names and personal fields from SQL are preserved", () => {
   const result = transformRows([row()], { referenceDate: "2026-06-15" });
   assert.equal(result.clients[0].name, "CLIENTE REAL CADASTRO");
   assert.equal(result.clients[0].legalName, "CLIENTE REAL RAZAO SOCIAL");
-  assert.match(result.clients[0].document, /^\d{3}\.\d{3}\.\d{3}-\d{2}$/);
-  assert.equal(result.clients[0].email, undefined);
+  assert.equal(result.clients[0].document, "123.456.789-00");
+  assert.equal(result.clients[0].phone, "3333333333");
+  assert.equal(result.clients[0].mobile, "33999999999");
+  assert.equal(result.clients[0].whatsapp, result.clients[0].mobile);
+  assert.equal(result.clients[0].email, "cliente@exemplo.com");
+  assert.equal(result.clients[0].address, "RUA REAL");
+  assert.equal(result.clients[0].zipCode, "36900-000");
   assert.equal(result.sellers[0].name, "VENDEDOR REAL");
+  assert.equal(result.sellers[0].email, "vendedor@exemplo.com");
+  assert.equal(result.items[0].estimatedValue, 50);
+});
+
+test("customer WhatsApp availability uses mobile before the dedicated field", () => {
+  const mobileResult = transformRows(
+    [row({ cliente_celular: "33999999999", cliente_whatsapp: "33888888888" })],
+    { referenceDate: "2026-06-15" },
+  );
+  assert.equal(mobileResult.clients[0].whatsapp, mobileResult.clients[0].mobile);
+
+  const whatsappResult = transformRows(
+    [row({ cliente_celular: "", cliente_whatsapp: "33888888888" })],
+    { referenceDate: "2026-06-15" },
+  );
+  assert.equal(whatsappResult.clients[0].whatsapp, "33888888888");
+  assert.equal(whatsappResult.clients[0].mobile, undefined);
 });

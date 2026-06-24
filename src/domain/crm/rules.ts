@@ -24,6 +24,30 @@ export function addDays(date: string, days: number) {
   return value.toISOString().slice(0, 10);
 }
 
+export function normalizeBrazilianWhatsAppNumber(value?: string) {
+  const rawValue = value?.trim();
+  if (!rawValue) return undefined;
+
+  const carrierFormatMatch = rawValue.match(/\((?:0?\d?xx)?(\d{2})\)\s*([0-9 .-]+)/i);
+  if (carrierFormatMatch) {
+    const [, areaCode, localNumber] = carrierFormatMatch;
+    const digits = `${areaCode}${localNumber.replace(/\D/g, "")}`;
+    if (digits.length === 10 || digits.length === 11) return `55${digits}`;
+  }
+
+  let digits = rawValue.replace(/\D/g, "");
+  if (digits.length === 12 && digits.startsWith("0")) digits = digits.slice(1);
+  if (digits.length === 10 || digits.length === 11) return `55${digits}`;
+  if ((digits.length === 12 || digits.length === 13) && digits.startsWith("55")) return digits;
+  return undefined;
+}
+
+export function resolveCustomerWhatsApp(mobile?: string, whatsapp?: string) {
+  if (normalizeBrazilianWhatsAppNumber(mobile)) return mobile?.trim();
+  if (normalizeBrazilianWhatsAppNumber(whatsapp)) return whatsapp?.trim();
+  return undefined;
+}
+
 export function calculateRegistrationQuality(client: UniplusClient) {
   let score = 0;
 

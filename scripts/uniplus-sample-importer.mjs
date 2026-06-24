@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const MIN_YEAR = 1900;
@@ -72,6 +72,7 @@ export function sanitizeDate(value) {
 
 export function resolveSaleDate(row) {
   return (
+    sanitizeDate(row.data_venda_final) ??
     sanitizeDate(row.data_venda) ??
     sanitizeDate(row.venda_data_inclusao) ??
     sanitizeDate(row.venda_data_alteracao)
@@ -80,6 +81,7 @@ export function resolveSaleDate(row) {
 
 export function transformRows(rows, options = {}) {
   const referenceDate = options.referenceDate ?? new Date().toISOString().slice(0, 10);
+  const sourceName = options.sourceName ?? "uniplus_sample_result.csv";
   const clients = new Map();
   const sellers = new Map();
   const products = new Map();
@@ -91,6 +93,7 @@ export function transformRows(rows, options = {}) {
   for (const [index, row] of rows.entries()) {
     const saleId = integer(row.uniplus_venda_id);
     const itemId = integer(row.uniplus_item_id);
+    const itemSaleId = integer(row.item_uniplus_venda_id);
     const productId = integer(row.uniplus_produto_id);
     const clientId = integer(row.uniplus_cliente_id);
     const sellerId = integer(row.uniplus_vendedor_id);
@@ -100,6 +103,17 @@ export function transformRows(rows, options = {}) {
       invalidRows.push({
         line: index + 2,
         reason: "identificador_ou_data_invalida",
+      });
+      continue;
+    }
+
+    if (itemSaleId && itemSaleId !== saleId) {
+      invalidRows.push({
+        line: index + 2,
+        reason: "item_vinculado_a_outra_venda",
+        saleId,
+        itemSaleId,
+        itemId,
       });
       continue;
     }
@@ -128,21 +142,17 @@ export function transformRows(rows, options = {}) {
           text(row.nome_cliente_venda) ||
           `Cliente ${clientId}`,
         legalName: text(row.cliente_razao_social) || undefined,
-        document: hasValue(row.cliente_cpf_cnpj) || hasValue(row.cpf_cnpj_cliente_venda)
-          ? fakeDocument(clientId)
-          : undefined,
-        phone: hasValue(row.cliente_telefone) ? fakePhone(clientId, false) : undefined,
-        mobile: hasValue(row.cliente_celular) ? fakePhone(clientId, true) : undefined,
-        whatsapp: hasValue(row.cliente_whatsapp) ? fakePhone(clientId, true) : undefined,
-        email: hasValue(row.cliente_email)
-          ? `cliente${String(clientNumber).padStart(3, "0")}@demo.henndercrm.local`
-          : undefined,
-        address: hasValue(row.cliente_endereco) ? `Endereço Demonstrativo, ${100 + clientNumber}` : undefined,
-        neighborhood: hasValue(row.cliente_bairro) ? `Bairro Demonstrativo ${clientNumber}` : undefined,
+        document: text(row.cliente_cpf_cnpj) || text(row.cpf_cnpj_cliente_venda) || undefined,
+        phone: text(row.cliente_telefone) || undefined,
+        mobile: text(row.cliente_celular) || undefined,
+        whatsapp: text(row.cliente_celular) || text(row.cliente_whatsapp) || undefined,
+        email: text(row.cliente_email) || undefined,
+        address: text(row.cliente_endereco) || undefined,
+        neighborhood: text(row.cliente_bairro) || undefined,
         cityId: integer(row.cliente_id_cidade),
         cityName: cityName(integer(row.cliente_id_cidade)),
         stateId: integer(row.cliente_id_estado),
-        zipCode: hasValue(row.cliente_cep) ? fakeZip(clientId) : undefined,
+        zipCode: text(row.cliente_cep) || undefined,
         registeredAt: sanitizeDate(row.cliente_data_cadastro)?.slice(0, 10) ?? undefined,
         lastPurchaseAt: sanitizeDate(row.cliente_data_ultima_compra)?.slice(0, 10) ?? soldAt,
         inactive: booleanValue(row.cliente_inativo),
@@ -159,15 +169,12 @@ export function transformRows(rows, options = {}) {
     }
 
     if (sellerId && !sellers.has(sellerId)) {
-      const sellerNumber = sellers.size + 1;
       sellers.set(sellerId, {
         id: sellerId,
         name: text(row.vendedor_nome) || `Vendedor ${sellerId}`,
-        email: hasValue(row.vendedor_email)
-          ? `vendedor${String(sellerNumber).padStart(2, "0")}@demo.henndercrm.local`
-          : undefined,
-        mobile: hasValue(row.vendedor_celular) ? fakePhone(sellerId, true) : undefined,
-        whatsapp: hasValue(row.vendedor_whatsapp) ? fakePhone(sellerId, true) : undefined,
+        email: text(row.vendedor_email) || undefined,
+        mobile: text(row.vendedor_celular) || undefined,
+        whatsapp: text(row.vendedor_whatsapp) || undefined,
         supervisor: booleanValue(row.vendedor_supervisor),
         inactive: booleanValue(row.vendedor_inativo),
         profileId: integer(row.vendedor_perfil_id),
@@ -218,6 +225,7 @@ export function transformRows(rows, options = {}) {
       productCode,
       productName,
       quantity: decimal(row.item_quantidade),
+      estimatedValue: decimal(row.item_valor_estimado),
       includedAt:
         sanitizeDate(row.item_data_inclusao) ??
         sanitizeDate(row.venda_data_inclusao) ??
@@ -245,12 +253,12 @@ export function transformRows(rows, options = {}) {
 
   return {
     metadata: {
-      source: "uniplus_sample_result.csv",
+      source: sourceName,
       generatedAt: new Date().toISOString(),
       referenceDate,
       anonymized: false,
       privacy:
-        "Nomes preservados por solicitação; documentos, contatos e endereços pseudonimizados.",
+        "Dados preservados conforme resultado SQL recebido; proteger em ambiente de producao.",
       rowsRead: rows.length,
       clients: clients.size,
       sellers: sellers.size,
@@ -279,7 +287,10 @@ export async function importSample({
   referenceDate,
 }) {
   const source = await readFile(input, "utf8");
-  const result = transformRows(parseCsv(source.replace(/^\uFEFF/, "")), { referenceDate });
+  const result = transformRows(parseCsv(source.replace(/^\uFEFF/, "")), {
+    referenceDate,
+    sourceName: basename(input),
+  });
   await mkdir(dirname(output), { recursive: true });
   await writeFile(output, `${JSON.stringify(result, null, 2)}\n`, "utf8");
   return result.metadata;
@@ -291,11 +302,32 @@ function nullable(value) {
 }
 
 function text(value) {
-  return nullable(value) ?? "";
+  return fixEncoding(nullable(value) ?? "");
 }
 
-function hasValue(value) {
-  return nullable(value) !== null;
+function fixEncoding(value) {
+  return value
+    .replaceAll("Ã‡", "Ç")
+    .replaceAll("Ãƒ", "Ã")
+    .replaceAll("Ã§", "ç")
+    .replaceAll("Ã£", "ã")
+    .replaceAll("Ã¡", "á")
+    .replaceAll("Ã¢", "â")
+    .replaceAll("Ã©", "é")
+    .replaceAll("Ãª", "ê")
+    .replaceAll("Ã­", "í")
+    .replaceAll("Ã³", "ó")
+    .replaceAll("Ã´", "ô")
+    .replaceAll("Ãµ", "õ")
+    .replaceAll("Ãº", "ú")
+    .replaceAll("Ã¼", "ü")
+    .replaceAll("Ã€", "À")
+    .replaceAll("ÃÁ", "Á")
+    .replaceAll("Ã‰", "É")
+    .replaceAll("Ã“", "Ó")
+    .replaceAll("Ãš", "Ú")
+    .replaceAll("Âº", "º")
+    .replaceAll("Âª", "ª");
 }
 
 function integer(value) {
@@ -319,22 +351,6 @@ function decimal(value) {
 
 function booleanValue(value) {
   return ["1", "true", "t", "sim", "s"].includes(String(value ?? "").trim().toLowerCase());
-}
-
-function fakeDocument(id) {
-  const digits = String(100_000_000_00 + (id % 89_999_999_999)).padStart(11, "0");
-  return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9)}`;
-}
-
-function fakePhone(id, mobile) {
-  const suffix = String(10_000_000 + (id % 89_999_999)).padStart(8, "0");
-  return mobile
-    ? `(33) 9${suffix.slice(0, 4)}-${suffix.slice(4)}`
-    : `(33) 3${suffix.slice(1, 4)}-${suffix.slice(4)}`;
-}
-
-function fakeZip(id) {
-  return `369${String(id % 100).padStart(2, "0")}-${String(id % 1000).padStart(3, "0")}`;
 }
 
 function cityName(id) {

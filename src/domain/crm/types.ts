@@ -99,6 +99,7 @@ export interface UniplusSaleItem {
   productName?: string;
   quantity: number;
   includedAt: string;
+  estimatedValue?: number;
 }
 
 export interface RepurchaseRule {

@@ -208,7 +208,7 @@ function mapCustomer(customer: CrmCustomer): CustomerViewModel {
     id: customer.id,
     uniplusId: customer.uniplusId,
     name: customer.name,
-    phone: customer.whatsapp || customer.mobile || customer.phone,
+    phone: customer.mobile || customer.whatsapp || customer.phone,
     whatsapp: customer.whatsapp,
     email: customer.email,
     document: customer.document,
