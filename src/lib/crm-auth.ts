@@ -35,6 +35,34 @@ const fallbackDemoUsers: DemoUser[] = [
 
 type SessionPayload = CrmSessionUser & { expiresAt: number };
 
+type SupabasePasswordAuthResponse = {
+  access_token?: string;
+  user?: {
+    id?: string;
+    email?: string;
+  };
+};
+
+type CrmUserProfileRow = {
+  id: string;
+  nome: string;
+  email: string;
+  perfil: string;
+  vendedor_id: string | null;
+  ativo: boolean;
+};
+
+export async function authenticateCrmUser(
+  email: string,
+  password: string,
+): Promise<CrmSessionUser | null> {
+  if (isSupabaseAuthConfigured()) {
+    return authenticateSupabaseUser(email, password);
+  }
+
+  return authenticateDemoUser(email, password);
+}
+
 export function authenticateDemoUser(email: string, password: string): CrmSessionUser | null {
   const demoUsers = resolveAuthUsers();
   const user = demoUsers.find((candidate) => candidate.email === email.trim().toLowerCase());
@@ -47,6 +75,86 @@ export function authenticateDemoUser(email: string, password: string): CrmSessio
     role: user.role,
     sellerId: user.sellerId,
   };
+}
+
+async function authenticateSupabaseUser(
+  email: string,
+  password: string,
+): Promise<CrmSessionUser | null> {
+  const baseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const apiKey = getSupabaseClientApiKey();
+  if (!baseUrl || !apiKey) return null;
+
+  const normalizedEmail = email.trim().toLowerCase();
+  const authUrl = new URL("/auth/v1/token", baseUrl);
+  authUrl.searchParams.set("grant_type", "password");
+
+  const authResponse = await fetch(authUrl, {
+    method: "POST",
+    headers: supabaseHeaders(apiKey),
+    body: JSON.stringify({
+      email: normalizedEmail,
+      password,
+    }),
+    cache: "no-store",
+  });
+
+  if (!authResponse.ok) return null;
+
+  const authResult = (await authResponse.json()) as SupabasePasswordAuthResponse;
+  const authUserId = authResult.user?.id;
+  const accessToken = authResult.access_token;
+  if (!authUserId || !accessToken) return null;
+
+  const profileUrl = new URL("/rest/v1/crm_usuarios", baseUrl);
+  profileUrl.searchParams.set(
+    "select",
+    "id,nome,email,perfil,vendedor_id,ativo",
+  );
+  profileUrl.searchParams.set("auth_user_id", `eq.${authUserId}`);
+  profileUrl.searchParams.set("ativo", "eq.true");
+  profileUrl.searchParams.set("limit", "1");
+
+  const profileResponse = await fetch(profileUrl, {
+    headers: supabaseHeaders(apiKey, accessToken),
+    cache: "no-store",
+  });
+
+  if (!profileResponse.ok) return null;
+
+  const [profile] = (await profileResponse.json()) as CrmUserProfileRow[];
+  if (!profile || !isCrmUserRole(profile.perfil)) return null;
+
+  return {
+    id: profile.id,
+    name: profile.nome,
+    email: profile.email,
+    role: profile.perfil,
+    sellerId: profile.vendedor_id ?? undefined,
+  };
+}
+
+function isSupabaseAuthConfigured() {
+  return Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && getSupabaseClientApiKey());
+}
+
+function getSupabaseClientApiKey() {
+  return (
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  );
+}
+
+function supabaseHeaders(apiKey: string, accessToken = apiKey) {
+  return {
+    apikey: apiKey,
+    ...(accessToken !== apiKey ? { authorization: `Bearer ${accessToken}` } : {}),
+    "content-type": "application/json",
+  };
+}
+
+function isCrmUserRole(value: string): value is CrmSessionUser["role"] {
+  return value === "administrador" || value === "supervisor" || value === "vendedor";
 }
 
 function resolveAuthUsers() {

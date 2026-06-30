@@ -65,6 +65,7 @@ import type {
   CrmContactRecord,
   CrmOpportunity,
   CrmSessionUser,
+  CrmUserRole,
   CrmWorkspace,
   RepurchaseAlertStatus,
 } from "@/domain/crm/types";
@@ -107,6 +108,14 @@ type ChatMessage = {
   id: string;
   role: "user" | "ai";
   text: string;
+};
+type ManagedCrmUser = {
+  id: string;
+  name: string;
+  email: string;
+  role: CrmUserRole;
+  sellerId?: string | null;
+  active: boolean;
 };
 
 const contactOutcomeLabels: Record<ContactOutcome, string> = {
@@ -429,7 +438,7 @@ export default function Home() {
             )}
             {activeView === "motor-recompra" && <RepurchaseEngineModule alerts={appAlerts} />}
             {activeView === "sincronizacao" && <SyncModule />}
-            {activeView === "configuracoes" && <SettingsModule />}
+            {activeView === "configuracoes" && <SettingsModule user={user} sellers={sellers} />}
             {activeView === "relatorios" && (
               <Reports
                 theme={theme}
@@ -1654,7 +1663,13 @@ function SyncModule() {
   );
 }
 
-function SettingsModule() {
+function SettingsModule({
+  user,
+  sellers,
+}: {
+  user: CrmSessionUser;
+  sellers: typeof snapshot.sellers;
+}) {
   const settings = [
     ["Usuários", "Perfis de administrador, supervisor e vendedor."],
     ["Permissões", "Estrutura preparada para ocultar menus por perfil."],
@@ -1666,6 +1681,7 @@ function SettingsModule() {
 
   return (
     <div className="space-y-5">
+      <UserManagementPanel user={user} sellers={sellers} />
       <PageTitle eyebrow="Sistema" title="Configurações" description="Parâmetros operacionais, usuários, permissões e integração." />
       <Panel title="Central de configurações" icon={Settings}>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -1676,6 +1692,164 @@ function SettingsModule() {
             </div>
           ))}
         </div>
+      </Panel>
+    </div>
+  );
+}
+
+function UserManagementPanel({
+  user,
+  sellers,
+}: {
+  user: CrmSessionUser;
+  sellers: typeof snapshot.sellers;
+}) {
+  const [managedUsers, setManagedUsers] = useState<ManagedCrmUser[]>([]);
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [role, setRole] = useState<CrmUserRole>("vendedor");
+  const [sellerId, setSellerId] = useState(sellers[0]?.id ?? "");
+  const [loadingUsers, setLoadingUsers] = useState(user.role === "administrador");
+  const [savingUser, setSavingUser] = useState(false);
+  const [userMessage, setUserMessage] = useState("");
+  const [userError, setUserError] = useState("");
+
+  useEffect(() => {
+    if (user.role !== "administrador") return;
+
+    let active = true;
+    fetch("/api/crm/users", { cache: "no-store" })
+      .then(async (response) => {
+        const result = (await response.json()) as {
+          users?: ManagedCrmUser[];
+          error?: string;
+        };
+        if (!response.ok) throw new Error(result.error ?? "Falha ao carregar usuarios.");
+        if (active) setManagedUsers(result.users ?? []);
+      })
+      .catch((error) => {
+        if (active) setUserError(error instanceof Error ? error.message : "Falha ao carregar usuarios.");
+      })
+      .finally(() => {
+        if (active) setLoadingUsers(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [user.role]);
+
+  async function createUser(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSavingUser(true);
+    setUserError("");
+    setUserMessage("");
+
+    try {
+      const response = await fetch("/api/crm/users", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name,
+          email,
+          password,
+          role,
+          sellerId: role === "vendedor" ? sellerId : undefined,
+        }),
+      });
+      const result = (await response.json()) as {
+        user?: ManagedCrmUser;
+        error?: string;
+      };
+      if (!response.ok || !result.user) throw new Error(result.error ?? "Falha ao cadastrar usuario.");
+
+      setManagedUsers((current) => [
+        result.user as ManagedCrmUser,
+        ...current.filter((item) => item.email !== result.user?.email),
+      ]);
+      setName("");
+      setEmail("");
+      setPassword("");
+      setRole("vendedor");
+      setSellerId(sellers[0]?.id ?? "");
+      setUserMessage("Usuario cadastrado e liberado para entrar no CRM.");
+    } catch (error) {
+      setUserError(error instanceof Error ? error.message : "Falha ao cadastrar usuario.");
+    } finally {
+      setSavingUser(false);
+    }
+  }
+
+  return (
+    <div className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
+      <Panel title="Cadastrar usuario" icon={UsersRound} action={user.role === "administrador" ? "Supabase Auth" : "Acesso restrito"}>
+        {user.role !== "administrador" ? (
+          <EmptyState text="Somente administradores podem cadastrar usuarios." />
+        ) : (
+          <form className="space-y-4" onSubmit={createUser}>
+            <div className="grid gap-4 md:grid-cols-2">
+              <FormInput label="Nome" value={name} onChange={setName} />
+              <FormInput label="Email" value={email} onChange={setEmail} type="email" />
+              <FormInput label="Senha provisoria" value={password} onChange={setPassword} type="password" />
+              <FormSelect label="Perfil" value={role} onChange={(value) => setRole(value as CrmUserRole)}>
+                <option value="administrador">Administrador</option>
+                <option value="supervisor">Supervisor</option>
+                <option value="vendedor">Vendedor</option>
+              </FormSelect>
+            </div>
+
+            {role === "vendedor" && (
+              <FormSelect label="Vendedor vinculado" value={sellerId} onChange={setSellerId}>
+                {sellers.map((seller) => (
+                  <option key={seller.id} value={seller.id}>{seller.name}</option>
+                ))}
+              </FormSelect>
+            )}
+
+            {userError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{userError}</p>}
+            {userMessage && <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{userMessage}</p>}
+
+            <div className="flex justify-end">
+              <button
+                type="submit"
+                disabled={savingUser}
+                className="flex h-11 items-center gap-2 rounded-lg bg-[#0753a6] px-4 text-sm font-semibold text-white disabled:opacity-60"
+              >
+                <Plus size={17} />
+                {savingUser ? "Cadastrando..." : "Cadastrar usuario"}
+              </button>
+            </div>
+          </form>
+        )}
+      </Panel>
+
+      <Panel title="Usuarios ativos" icon={ShieldCheck} action={loadingUsers ? "Carregando" : `${managedUsers.length} usuarios`}>
+        {user.role !== "administrador" ? (
+          <EmptyState text="Lista disponivel apenas para administradores." />
+        ) : managedUsers.length === 0 ? (
+          <EmptyState text={loadingUsers ? "Carregando usuarios..." : "Nenhum usuario cadastrado."} />
+        ) : (
+          <div className="space-y-2">
+            {managedUsers.map((managedUser) => {
+              const seller = sellers.find((item) => item.id === managedUser.sellerId);
+              return (
+                <div key={managedUser.id} className="rounded-lg border border-blue-50 bg-[#f8fbff] p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-bold text-[#123252]">{managedUser.name}</p>
+                      <p className="mt-1 text-sm text-slate-500">{managedUser.email}</p>
+                    </div>
+                    <span className="rounded-full bg-white px-2 py-1 text-xs font-bold uppercase text-cyan-700">
+                      {managedUser.role}
+                    </span>
+                  </div>
+                  {seller && <p className="mt-2 text-xs font-semibold text-slate-500">Vendedor: {seller.name}</p>}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </Panel>
     </div>
   );
@@ -3805,7 +3979,7 @@ function FormInput({
   label: string;
   value: string;
   onChange: (value: string) => void;
-  type?: "text" | "number" | "date" | "time";
+  type?: "text" | "number" | "date" | "time" | "email" | "password";
 }) {
   return (
     <label className="block">

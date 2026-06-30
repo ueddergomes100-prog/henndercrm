@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import {
-  authenticateDemoUser,
+  authenticateCrmUser,
   createSessionToken,
   CRM_SESSION_COOKIE,
   readSessionToken,
@@ -15,7 +15,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   const body = (await request.json()) as { email?: string; password?: string };
-  const user = authenticateDemoUser(body.email ?? "", body.password ?? "");
+  const user = await authenticateCrmUser(body.email ?? "", body.password ?? "");
   if (!user) {
     return Response.json({ error: "E-mail ou senha inválidos." }, { status: 401 });
   }

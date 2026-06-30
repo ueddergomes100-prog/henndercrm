@@ -80,7 +80,7 @@ export class SupabaseRestClient {
       method: options.method ?? "GET",
       headers: {
         apikey: this.secretKey as string,
-        authorization: `Bearer ${this.secretKey}`,
+        ...(isJwt(this.secretKey) ? { authorization: `Bearer ${this.secretKey}` } : {}),
         "content-type": "application/json",
         ...(options.prefer ? { prefer: options.prefer } : {}),
       },
@@ -98,4 +98,8 @@ export class SupabaseRestClient {
     if (response.status === 204 || responseText.length === 0) return [] as T;
     return JSON.parse(responseText) as T;
   }
+}
+
+function isJwt(value?: string) {
+  return Boolean(value && value.split(".").length === 3);
 }

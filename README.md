@@ -92,6 +92,7 @@ O importador:
 - preserva valores, quantidades, produtos e padrões de compra;
 - preserva os nomes de clientes, razões sociais e vendedores como vieram no banco;
 - pseudonimiza documentos, telefones, endereços e e-mails;
+- considera o celular como contato principal de WhatsApp e usa o campo WhatsApp como alternativa;
 - gera regras temporárias de recompra por tipo de produto.
 
 Resultado atual:
@@ -182,6 +183,9 @@ Com `CRM_OPERATIONAL_PROVIDER=local`, as operações são persistidas em `.data/
 
 Nunca exponha `SUPABASE_SECRET_KEY` no navegador.
 
+Para publicar em producao na Hostinger com Git e subdominio, siga `docs/PRODUCAO_HOSTINGER.md`.
+O login de producao usa Supabase Auth vinculado a `public.crm_usuarios`; nao cadastre senhas reais em variaveis `CRM_*_PASSWORD`.
+
 O projeto Supabase do Hennder CRM já está configurado:
 
 - As duas migrations e o seed foram aplicados.
@@ -192,7 +196,7 @@ O projeto Supabase do Hennder CRM já está configurado:
 
 O bootstrap pode ser reexecutado por um administrador em `POST /api/crm/bootstrap`. A operação é idempotente para a massa demonstrativa.
 
-As credenciais reais ficam somente em `.env.local`, que é ignorado pelo Git. Como a chave secreta foi compartilhada durante a configuração, ela deve ser rotacionada antes da publicação em produção.
+As credenciais de ambiente ficam fora do Git. Como a chave secreta foi compartilhada durante a configuração, ela deve ser rotacionada antes da publicação em produção.
 
 ## Regras comerciais
 
