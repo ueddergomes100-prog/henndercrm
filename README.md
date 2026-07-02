@@ -6,23 +6,23 @@ CRM comercial para lojas dos segmentos agro e pet shop, com foco em recuperaçã
 
 Repositório: [github.com/ueddergomes100-prog/henndercrm](https://github.com/ueddergomes100-prog/henndercrm)
 
-Esta etapa usa uma massa demonstrativa gerada a partir do formato real de uma consulta de ERP. Os nomes de clientes e vendedores foram preservados por solicitação; documentos, contatos e endereços permanecem pseudonimizados. O banco local do cliente é tratado como uma fonte estritamente somente leitura.
+Esta etapa usa uma massa demonstrativa gerada a partir do formato real de uma consulta de ERP. A fixture atual foi gerada de um resultado SQL maior e preserva dados conforme o material recebido; trate qualquer exportacao real como sensivel e nao versionavel. O banco do Uniplus deve ser tratado como uma fonte estritamente somente leitura.
 
 ## Arquitetura
 
 ```text
-ERP PostgreSQL local (somente leitura)
+ERP PostgreSQL Uniplus (somente leitura)
         |
-Hennder Sync Agent local
+VPS Linux / Hennder Sync Agent
         |
-Supabase PostgreSQL
+Supabase PostgreSQL (nuvem)
         |
-Services de domínio
+API Next.js + services de dominio (Hostinger)
         |
-API e frontend Next.js
+Frontend web Hennder CRM
 ```
 
-O frontend não conhece tabelas ou consultas do ERP. O Hennder CRM Web nunca deve conectar diretamente ao banco local do cliente. A implementação real substituirá a massa temporária pelo Sync Agent sem alterar telas ou regras comerciais.
+O frontend não conhece tabelas ou consultas do ERP. O Hennder CRM Web nunca deve conectar diretamente ao PostgreSQL do Uniplus. O Hennder Sync roda fora da Hostinger, em uma VPS Linux com acesso ao PostgreSQL do Uniplus via Docker, rede privada ou tunel/VPN, e envia os dados normalizados para o Supabase.
 
 ## Execução local
 
@@ -56,7 +56,8 @@ npm run build
 - `scripts/uniplus-sample-importer.mjs`: importador temporário e reproduzível do CSV.
 - `scripts/uniplus-sample-importer.test.mjs`: testes de agrupamento, datas e anonimização.
 - `src/integrations/uniplus`: interfaces e implementações mockadas dos repositórios.
-- `src/integrations/uniplus/sql/sales-extraction.sql`: consulta somente leitura para a futura integração.
+- `docs/sql/uniplus_exportacao_crm_corrigida.sql`: consulta corrigida para exportacao/validacao do Uniplus.
+- `src/integrations/uniplus/sql/sales-extraction.sql`: consulta antiga mantida como referencia; nao usar como SQL final.
 - `src/services`: sincronização, cálculos comerciais e view models.
 - `src/infrastructure/supabase`: cliente REST e destino de sincronização Supabase.
 - `src/infrastructure/crm-workspace-repository.ts`: persistência operacional local durável.
@@ -80,7 +81,7 @@ As implementações atuais são `MockUniplus*Repository`. O `UniplusSyncService`
 
 ## Massa demonstrativa baseada no resultado SQL
 
-O arquivo `H:\uniplus_sample_result.csv` foi usado somente como fonte local para gerar uma massa demonstrativa próxima da realidade. O CSV bruto não é versionado.
+O arquivo local ignorado `docs/sql/resultadosql` foi usado como fonte para gerar a fixture atual em `src/data/generated/uniplus-sample.json`. O CSV/resultado bruto não deve ser versionado.
 
 O importador:
 
@@ -91,18 +92,18 @@ O importador:
 - usa `venda_data_inclusao` e depois `venda_data_alteracao` quando `data_venda` é inválida ou nula;
 - preserva valores, quantidades, produtos e padrões de compra;
 - preserva os nomes de clientes, razões sociais e vendedores como vieram no banco;
-- pseudonimiza documentos, telefones, endereços e e-mails;
+- preserva os dados conforme o resultado SQL recebido; proteger qualquer exportacao real;
 - considera o celular como contato principal de WhatsApp e usa o campo WhatsApp como alternativa;
 - gera regras temporárias de recompra por tipo de produto.
 
 Resultado atual:
 
-- 100 linhas lidas;
-- 43 vendas únicas;
-- 100 itens únicos;
-- 24 vendas com mais de um item;
-- até 11 itens vinculados à mesma venda;
-- 43 clientes, 12 vendedores e 85 produtos.
+- 500 linhas lidas;
+- 266 vendas únicas;
+- 500 itens únicos;
+- 114 vendas com mais de um item;
+- até 14 itens vinculados à mesma venda;
+- 246 clientes, 9 vendedores e 303 produtos.
 
 Para regenerar:
 
@@ -116,17 +117,19 @@ Mapeamento principal:
 | Uniplus | CRM |
 | --- | --- |
 | `entidade` | `crm_clientes` |
-| `usuario` | `crm_vendedores` |
+| `entidade` via `dav.idrepresentante` | `crm_vendedores` |
 | `produto` | `crm_produtos` |
 | `dav` | `crm_vendas` |
 | `davitem` | `crm_itens_venda` |
+| `usuario` via `dav.idusuario` | auditoria do operador |
 
 Relacionamentos:
 
 - `entidade.id = dav.idcliente`
 - `dav.id = davitem.iddav`
 - `davitem.idproduto = produto.id`
-- `dav.idusuario = usuario.id`
+- `dav.idrepresentante = entidade.id` para vendedor comercial
+- `dav.idusuario = usuario.id` apenas para operador/auditoria
 
 ## Regras de importação
 
@@ -184,6 +187,7 @@ Com `CRM_OPERATIONAL_PROVIDER=local`, as operações são persistidas em `.data/
 Nunca exponha `SUPABASE_SECRET_KEY` no navegador.
 
 Para publicar em producao na Hostinger com Git e subdominio, siga `docs/PRODUCAO_HOSTINGER.md`.
+Para implantar o agente de sincronizacao na VPS Linux, siga `docs/HENNDER_SYNC_VPS.md`.
 O login de producao usa Supabase Auth vinculado a `public.crm_usuarios`; nao cadastre senhas reais em variaveis `CRM_*_PASSWORD`.
 
 O projeto Supabase do Hennder CRM já está configurado:
@@ -259,8 +263,8 @@ ticket médio * ciclos de compra estimados como perdidos
 ## Próximos passos
 
 1. Substituir as contas locais por Supabase Auth.
-2. Consolidar o snapshot comercial no Supabase sem alterar a interface.
-3. Manter a integração PostgreSQL com o Uniplus para a etapa final.
-4. Validar o schema real do ERP e implementar os repositórios somente leitura.
-5. Executar sincronização incremental e idempotente.
+2. Implementar o Hennder Sync em VPS Linux com acesso ao PostgreSQL do Uniplus via Docker/rede privada.
+3. Executar sincronização incremental e idempotente para o Supabase.
+4. Consolidar o snapshot comercial no Supabase sem alterar a interface.
+5. Validar regras especificas do Uniplus para status, cancelamentos e devolucoes.
 6. Integrar WhatsApp Business somente após consentimento, templates e webhooks.

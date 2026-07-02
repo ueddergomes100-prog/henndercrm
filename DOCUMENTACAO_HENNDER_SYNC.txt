@@ -8,8 +8,9 @@ Producao: https://gestao.nexarcompany.com.br
 1. OBJETIVO DESTE ARQUIVO
 ================================================================================
 
-Este TXT foi feito para abrir o projeto em outro computador, principalmente no
-computador que tem acesso ao PostgreSQL do Uniplus.
+Este TXT foi feito para abrir o projeto em outro ambiente e continuar o
+desenvolvimento do Hennder Sync, principalmente na VPS Linux que tera acesso ao
+PostgreSQL do Uniplus via Docker/rede privada.
 
 Ele explica:
 
@@ -17,7 +18,7 @@ Ele explica:
 - Como esta a producao na Hostinger.
 - Como esta a base demonstrativa.
 - Quais arquivos principais existem.
-- Quais comandos usar no computador novo.
+- Quais comandos usar no ambiente novo.
 - Como deve funcionar o Hennder Sync.
 - Qual SQL usar no PostgreSQL do Uniplus.
 - Quais validacoes fazer antes de importar dados reais.
@@ -26,7 +27,7 @@ Ele explica:
 IMPORTANTE:
 Nao colocar chaves secretas do Supabase, senha real de banco ou dados sensiveis
 dentro do Git. As variaveis secretas devem ser copiadas por canal seguro para o
-.env.local do computador novo e para as variaveis da Hostinger.
+.env.local do ambiente de desenvolvimento/VPS e para as variaveis da Hostinger.
 
 ================================================================================
 2. ESTADO ATUAL DO SISTEMA EM PRODUCAO
@@ -120,16 +121,22 @@ POST /api/crm/bootstrap
 
 Essa rota exige usuario administrador logado.
 
-Ultima carga demonstrativa feita:
+Fixture demonstrativo local atual:
 
-- 43 clientes/vendas
-- 100 itens de venda
-- 85 produtos
-- 12 vendedores
-- 98 alertas de recompra
-- 12 oportunidades
-- 5 eventos de agenda
-- 12 contatos/retornos comerciais
+- 500 linhas lidas
+- 266 vendas unicas
+- 500 itens de venda
+- 246 clientes
+- 303 produtos
+- 9 vendedores
+- 114 vendas com mais de um item
+- maximo de 14 itens em uma venda
+- 0 linhas invalidas
+
+Observacao:
+Esses numeros sao da fixture local atual em src/data/generated/uniplus-sample.json.
+A producao/Supabase so refletira essa carga maior depois de rodar o bootstrap
+ou o Hennder Sync real contra o destino Supabase.
 
 3.3 Producao na Hostinger
 
@@ -254,6 +261,10 @@ Integracao Uniplus:
 - src/integrations/uniplus/sql/sales-extraction.sql
   SQL inicial antigo. Nao e o SQL final recomendado.
 
+- docs/sql/uniplus_exportacao_crm_corrigida.sql
+  SQL corrigido atual para validacao/exportacao: usa d.codigo como venda
+  comercial e d.idrepresentante como vendedor.
+
 Supabase:
 
 - src/infrastructure/supabase/supabase-rest-client.ts
@@ -263,9 +274,19 @@ Supabase:
 Fixture demo:
 
 - src/data/generated/uniplus-sample.json
+  Fixture atual gerada de docs/sql/resultadosql, com 500 linhas, 266 vendas,
+  500 itens, 246 clientes, 303 produtos e 9 vendedores.
 - src/data/mock-uniplus.ts
 - scripts/uniplus-sample-importer.mjs
 - scripts/uniplus-sample-importer.test.mjs
+
+Docs:
+
+- docs/PRODUCAO_HOSTINGER.md
+  Publicacao do front-end web na Hostinger.
+
+- docs/HENNDER_SYNC_VPS.md
+  Guia operacional do Hennder Sync na VPS Linux.
 
 SQLs importantes:
 
@@ -274,17 +295,18 @@ estava todo versionado. Por seguranca, o conteudo principal esta copiado nos
 anexos deste TXT.
 
 ================================================================================
-5. COMO ABRIR NO COMPUTADOR NOVO
+5. COMO ABRIR NO AMBIENTE NOVO
 ================================================================================
 
-5.1 Instalar dependencias no computador novo
+5.1 Instalar dependencias no ambiente novo
 
 Instalar:
 
 - Git
 - Node.js 20 LTS ou 22 LTS
 - DBeaver ou pgAdmin para acessar o PostgreSQL do Uniplus
-- Acesso de rede ao PostgreSQL local do Uniplus
+- Acesso de rede ao PostgreSQL do Uniplus pela VPS Linux, rede privada,
+  tunel/VPN ou container Docker que exponha o banco com usuario somente leitura
 
 5.2 Clonar o projeto
 
@@ -355,9 +377,9 @@ Teste do importador:
 
 npm run test
 
-Gerar fixture JSON a partir de CSV exportado do Uniplus:
+Gerar fixture JSON a partir de CSV/resultado exportado do Uniplus:
 
-node scripts/uniplus-sample-importer.mjs --input H:/uniplus_sample_result.csv --output src/data/generated/uniplus-sample.json --reference-date 2026-07-02
+node scripts/uniplus-sample-importer.mjs --input docs/sql/resultadosql --output src/data/generated/uniplus-sample.json --reference-date 2026-06-23
 
 Preparar Supabase com massa demo via producao:
 
@@ -378,27 +400,29 @@ Invoke-WebRequest -Uri 'https://gestao.nexarcompany.com.br/api/crm/bootstrap' -M
 
 7.1 Objetivo
 
-O Hennder Sync sera o agente local que roda no computador/rede que tem acesso ao
-PostgreSQL do Uniplus.
+O Hennder Sync sera o agente de integracao que roda no ambiente com acesso ao
+PostgreSQL do Uniplus. A prioridade atual e rodar esse agente em uma VPS Linux,
+com acesso ao banco do Uniplus via Docker, rede privada ou tunel/VPN.
 
 Ele deve ler o banco do Uniplus em modo SOMENTE LEITURA e enviar os dados para o
 Supabase do Hennder CRM.
 
 Fluxo correto:
 
-PostgreSQL Uniplus local
-  -> Hennder Sync local
-  -> Supabase
-  -> Hennder CRM Web
+PostgreSQL Uniplus (somente leitura)
+  -> VPS Linux / Hennder Sync
+  -> Supabase PostgreSQL na nuvem
+  -> Hennder CRM Web na Hostinger
 
-O CRM Web hospedado na Hostinger NAO deve conectar direto no PostgreSQL local do
-cliente.
+O CRM Web hospedado na Hostinger NAO deve conectar direto no PostgreSQL do
+Uniplus.
 
 7.2 Por que precisa ser local
 
-O PostgreSQL do Uniplus esta dentro da rede/maquina do cliente.
-A Hostinger normalmente nao consegue acessar esse banco local diretamente.
-Por isso o Hennder Sync deve rodar no computador que enxerga o PostgreSQL.
+O PostgreSQL do Uniplus fica no ambiente operacional do cliente ou em um
+container/rede controlada. A Hostinger normalmente nao deve acessar esse banco
+diretamente. Por isso o Hennder Sync roda na VPS Linux que enxerga o
+PostgreSQL, e apenas publica dados normalizados no Supabase.
 
 7.3 Formato tecnico recomendado
 
@@ -419,12 +443,14 @@ npm install pg
 
 7.4 Variaveis de ambiente futuras do Hennder Sync
 
-Adicionar ao .env.local do computador do Uniplus:
+Adicionar ao .env.local da VPS Linux/Hennder Sync:
 
 UNIPLUS_DATABASE_URL=postgres://USUARIO:SENHA@HOST:PORTA/BANCO
 UNIPLUS_SSL=false
 UNIPLUS_SYNC_BATCH_SIZE=5000
 UNIPLUS_SYNC_MODE=incremental
+HENNDER_SYNC_LOG_DIR=/var/log/hennder-sync
+HENNDER_SYNC_DRY_RUN=false
 
 Ja existentes:
 
@@ -433,6 +459,11 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
 SUPABASE_SECRET_KEY=
 CRM_DATA_PROVIDER=supabase
 CRM_OPERATIONAL_PROVIDER=supabase
+
+Na VPS do Sync, as variaveis NEXT_PUBLIC_* continuam sendo usadas apenas como
+identificador publico do projeto Supabase; a gravacao deve usar
+SUPABASE_SECRET_KEY no processo server-side/CLI. Nao expor essa chave em
+frontend, logs ou repositorio.
 
 7.5 Usuario PostgreSQL
 
@@ -451,7 +482,8 @@ Se houver schemas diferentes, ajustar o schema correto.
 
 7.6 Passos do Sync
 
-1. Conectar no PostgreSQL local do Uniplus.
+1. Conectar no PostgreSQL do Uniplus a partir da VPS Linux, usando usuario
+   somente leitura e acesso via Docker/rede privada/tunel.
 2. Executar o SQL corrigido deste TXT.
 3. Ler linhas de vendas + itens + clientes + produtos + vendedores.
 4. Transformar as linhas no formato dos tipos:
@@ -566,13 +598,15 @@ Ainda falta implementar:
 
 - Conexao real com PostgreSQL usando pg.
 - Repositorios PostgreSQL reais do Uniplus.
+- Configuracao para rodar em VPS Linux com Node.js 20/22.
+- Documentar execucao via systemd, cron ou container Docker.
 - CLI para rodar sync manual:
   node scripts/hennder-sync.mjs --since 2026-07-01
 
 - Modo incremental automatico.
 - Controle de erro com retry.
 - Log em arquivo local.
-- Agendamento pelo Windows Task Scheduler.
+- Agendamento na VPS Linux.
 - Opcao dry-run para validar sem enviar ao Supabase.
 
 8.2 Trocar dashboard para ler Supabase real
@@ -633,46 +667,48 @@ Futuro:
 - Nao enviar dados sensiveis sem necessidade.
 
 ================================================================================
-9. CHECKLIST DE AMANHA NO COMPUTADOR DO POSTGRESQL
+9. CHECKLIST DA VPS LINUX / POSTGRESQL DO UNIPLUS
 ================================================================================
 
-1. Clonar o projeto.
-2. Rodar npm ci.
-3. Criar .env.local com Supabase e conexao PostgreSQL.
-4. Rodar npm run build.
-5. Confirmar que a producao continua 200:
+1. Criar VPS Linux com acesso de rede ao PostgreSQL do Uniplus.
+2. Instalar Node.js 20 LTS ou 22 LTS.
+3. Clonar o projeto.
+4. Rodar npm ci.
+5. Criar .env.local com Supabase e conexao PostgreSQL.
+6. Rodar npm run build.
+7. Confirmar que a producao continua 200:
    https://gestao.nexarcompany.com.br/api/health
 
-6. Abrir DBeaver/pgAdmin no banco do Uniplus.
-7. Rodar primeiro o SQL de validacao da venda 330670.
-8. Confirmar:
+8. Abrir DBeaver/pgAdmin no banco do Uniplus ou executar psql pela VPS.
+9. Rodar primeiro o SQL de validacao da venda 330670.
+10. Confirmar:
    - d.codigo mostra 330670.
    - d.id pode ser diferente.
    - d.idrepresentante bate com vendedor comercial.
    - d.idusuario e apenas operador.
    - itens batem com a venda correta.
 
-9. Rodar SQL de diagnostico se ainda houver duvida.
-10. Rodar SQL de exportacao corrigida.
-11. Exportar CSV com:
+11. Rodar SQL de diagnostico se ainda houver duvida.
+12. Rodar SQL de exportacao corrigida.
+13. Exportar CSV/resultado com:
     - cabecalho
     - UTF-8
     - separador virgula, se possivel
     - datas no formato ISO quando possivel
 
-12. Salvar CSV em:
-    H:\uniplus_sample_result.csv
+14. Salvar resultado bruto em caminho ignorado pelo Git, por exemplo:
+    docs/sql/resultadosql
 
-13. Rodar:
+15. Rodar:
 
-node scripts/uniplus-sample-importer.mjs --input H:/uniplus_sample_result.csv --output src/data/generated/uniplus-sample.json --reference-date 2026-07-02
+node scripts/uniplus-sample-importer.mjs --input docs/sql/resultadosql --output src/data/generated/uniplus-sample.json --reference-date 2026-06-23
 
-14. Rodar:
+16. Rodar:
 
 npm run test
 npm run build
 
-15. Conferir metadata gerado no JSON:
+17. Conferir metadata gerado no JSON:
     - rowsRead
     - clients
     - sellers
@@ -682,8 +718,8 @@ npm run build
     - invalidRows
     - multiItemSales
 
-16. Se os dados estiverem corretos, implementar Hennder Sync real com pg.
-17. Nao publicar alteracao pesada direto em producao sem testar healthcheck.
+18. Se os dados estiverem corretos, implementar Hennder Sync real com pg.
+19. Nao publicar alteracao pesada direto em producao sem testar healthcheck.
 
 ================================================================================
 10. SQL FINAL RECOMENDADO PARA EXPORTACAO DO UNIPLUS
@@ -1416,10 +1452,10 @@ Etapa 5 - Enviar para Supabase
 
 Etapa 6 - Automatizar
 
-- Criar tarefa no Windows Task Scheduler.
+- Criar servico systemd, timer systemd, cron ou container Docker na VPS Linux.
 - Rodar a cada 15 ou 30 minutos.
-- Salvar logs em pasta local, por exemplo:
-  C:\HennderSync\logs
+- Salvar logs em pasta local da VPS, por exemplo:
+  /var/log/hennder-sync
 
 Etapa 7 - Dashboard real
 
@@ -1437,17 +1473,18 @@ O login ja esta ligado ao Supabase.
 O banco Supabase ja tem massa demo e dados operacionais de apresentacao.
 A Hostinger esta usando start por server.js para evitar 503.
 
-O trabalho de amanha e criar o Hennder Sync:
+O trabalho prioritario agora e criar o Hennder Sync:
 
-1. Validar SQL no PostgreSQL real do Uniplus.
+1. Preparar a VPS Linux com acesso ao PostgreSQL real do Uniplus.
 2. Confirmar venda 330670.
 3. Exportar dados com o SQL corrigido.
-4. Gerar fixture ou, preferencialmente, implementar conexao direta com pg.
+4. Gerar fixture para validacao ou, preferencialmente, implementar conexao direta com pg.
 5. Enviar dados para Supabase de forma idempotente.
 6. Depois trocar o snapshot do CRM para ler Supabase real.
 
 Regra de ouro:
 
-O CRM hospedado nao acessa o PostgreSQL local.
-Quem acessa o PostgreSQL local e o Hennder Sync rodando no computador do cliente.
-
+O CRM hospedado nao acessa o PostgreSQL do Uniplus.
+Quem acessa o PostgreSQL e o Hennder Sync rodando na VPS Linux/ambiente com
+rede para o banco. O front-end web exibe os dados que ja foram sincronizados no
+Supabase.

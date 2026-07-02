@@ -1,12 +1,12 @@
 # Handoff do Projeto Hennder CRM
 
-Atualizado em: 15/06/2026
+Atualizado em: 02/07/2026
 
 ## 1. Visao geral
 
 O Hennder CRM, com o slogan "Inteligencia Comercial e Recompra", e um CRM comercial para uma loja dos segmentos agro e pet shop. O objetivo e usar os dados do ERP para identificar clientes sem compra, oportunidades de recompra, vendas cruzadas e clientes em risco, transformando essas informacoes em tarefas praticas para os vendedores.
 
-O snapshot comercial usa agora uma massa demonstrativa gerada de um resultado SQL real com 43 vendas e 100 itens. Nomes de clientes, razoes sociais e vendedores foram preservados por solicitacao; os demais dados pessoais permanecem pseudonimizados. O projeto possui dominio, services, contratos de integracao e Supabase remoto operacional.
+O snapshot comercial usa agora uma massa demonstrativa gerada de um resultado SQL real com 500 linhas, 266 vendas unicas e 500 itens. A fixture preserva dados conforme o resultado recebido; tratar exportacoes reais como sensiveis e nao versionar CSV/resultado bruto. O projeto possui dominio, services, contratos de integracao e Supabase remoto operacional.
 
 Repositorio: `https://github.com/ueddergomes100-prog/henndercrm`
 
@@ -158,6 +158,7 @@ Os botoes usam links `https://wa.me/` com:
 
 - Codigo do Brasil (`55`).
 - Telefone normalizado.
+- Celular como primeira opcao e campo WhatsApp como fallback.
 - Mensagem contextual pre-preenchida.
 
 Isso apenas abre o WhatsApp do usuario. Nao e uma integracao de automacao.
@@ -171,13 +172,13 @@ O Supabase PostgreSQL sera alimentado com dados vindos do ERP da loja. A fonte o
 Fluxo obrigatorio:
 
 ```text
-ERP PostgreSQL local (somente leitura)
-Hennder Sync Agent local
-Supabase
-Hennder CRM Web
+ERP PostgreSQL Uniplus (somente leitura)
+VPS Linux / Hennder Sync Agent
+Supabase PostgreSQL (nuvem)
+Hennder CRM Web (Hostinger)
 ```
 
-O CRM Web nunca deve conectar diretamente ao PostgreSQL local do cliente.
+O CRM Web nunca deve conectar diretamente ao PostgreSQL do Uniplus. O Hennder Sync deve rodar em uma VPS Linux com acesso ao PostgreSQL do Uniplus via Docker, rede privada ou tunel/VPN, e enviar os dados para o Supabase.
 
 Dados minimos esperados:
 
@@ -186,7 +187,8 @@ Dados minimos esperados:
 - Produtos e categorias.
 - Vendas e itens das vendas.
 - Datas e valores.
-- Vendedor de cada venda.
+- Vendedor comercial de cada venda, usando `dav.idrepresentante`.
+- Operador de cada venda separado para auditoria, usando `dav.idusuario`.
 - Filial ou loja.
 - Cancelamentos e devolucoes.
 
@@ -262,12 +264,12 @@ Implementar em etapas:
 
 ## 9. Proxima ordem recomendada de trabalho
 
-1. Substituir as contas locais por Supabase Auth.
-2. Implementar o provider de leitura do snapshot no Supabase.
-3. Revisar seguranca, RLS e fluxo de publicacao.
-4. Manter a integracao PostgreSQL com o Uniplus para a etapa final.
-5. No computador com acesso ao ERP, validar o SQL de extracao contra o schema real.
-6. Executar sincronizacao incremental e idempotente.
+1. Implementar o Hennder Sync em VPS Linux com acesso ao PostgreSQL do Uniplus via Docker/rede privada.
+2. Criar os repositorios PostgreSQL reais para substituir os mocks do Uniplus.
+3. Executar sincronizacao incremental e idempotente para o Supabase.
+4. Revisar seguranca, logs, retry, dry-run e agendamento do Sync.
+5. Implementar o provider de leitura do snapshot no Supabase para o front-end.
+6. Substituir definitivamente contas de demonstracao por Supabase Auth real.
 7. Tratar devolucoes e regras especificas de status do Uniplus.
 8. Conectar WhatsApp Business e webhooks.
 9. Adicionar IA externa apenas depois que dados e historicos estiverem confiaveis.
@@ -279,9 +281,11 @@ Implementar em etapas:
 - A interface ainda esta concentrada em `src/app/page.tsx`, mas tipos, dados e regras ja foram extraidos.
 - Separar os componentes visuais de forma incremental, preservando o comportamento aprovado.
 - Os numeros atuais sao demonstrativos, embora agora sejam calculados a partir do conjunto mock.
-- O fixture atual foi gerado de `H:\uniplus_sample_result.csv`.
-- Nomes de clientes, razoes sociais e vendedores estao preservados no fixture por solicitacao do proprietario.
-- Documentos, telefones, enderecos e e-mails permanecem pseudonimizados.
+- O fixture atual foi gerado de `docs/sql/resultadosql`, arquivo local ignorado pelo Git.
+- O fixture atual tem 500 linhas, 266 vendas unicas, 500 itens, 246 clientes, 9 vendedores e 303 produtos.
+- Dados vindos de exportacao real devem ser tratados como sensiveis; nao commitar CSV/resultado bruto.
+- Nao usar `dav.id` como numero comercial da venda; usar `dav.codigo`.
+- Nao usar `dav.idusuario` como vendedor comercial; usar `dav.idrepresentante`.
 - O CSV bruto nao deve ser enviado ao GitHub.
 - O importador temporario consolida `uniplus_venda_id` e mantem uma linha por `uniplus_item_id`.
 - Datas invalidas viram nulo; a data da venda usa inclusao e alteracao como fallback.
@@ -310,9 +314,9 @@ Na ultima alteracao:
 - Dominio, regras comerciais e services foram criados.
 - Contratos e repositorios mockados do Uniplus foram criados.
 - `UniplusSyncService` implementa regras de importacao e auditoria de vendas ignoradas.
-- O importador temporario gerou 43 vendas, 100 itens, 43 clientes, 12 vendedores e 85 produtos.
-- Foram identificadas 24 vendas multi-item, com maximo de 11 itens em uma venda.
-- Nomes de clientes e vendedores foram preservados; os demais campos pessoais foram pseudonimizados.
+- O importador temporario gerou 266 vendas, 500 itens, 246 clientes, 9 vendedores e 303 produtos.
+- Foram identificadas 114 vendas multi-item, com maximo de 14 itens em uma venda.
+- A fixture atual preserva dados conforme o resultado SQL recebido; proteger qualquer exportacao real.
 - Migrations e seed Supabase foram criados e aplicados no projeto remoto.
 - As 14 tabelas `crm_*` foram verificadas.
 - O bootstrap importou 19 vendas, auditou 3 ignoradas e gerou 15 alertas, 4 oportunidades e 5 eventos.
@@ -331,6 +335,7 @@ Na ultima alteracao:
 - `src/data/generated/uniplus-sample.json`: fixture demonstrativo com nomes preservados.
 - `scripts/uniplus-sample-importer.mjs`: transformacao temporaria do CSV.
 - `scripts/uniplus-sample-importer.test.mjs`: testes do importador.
+- `docs/HENNDER_SYNC_VPS.md`: guia operacional do Sync na VPS Linux.
 - `src/integrations/uniplus`: contratos e repositorios mockados.
 - `src/services`: sincronizacao, services e view models.
 - `src/infrastructure/supabase`: cliente REST e destino de sincronizacao.

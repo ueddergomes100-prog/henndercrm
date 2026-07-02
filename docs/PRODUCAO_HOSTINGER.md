@@ -79,6 +79,29 @@ CRM_SESSION_SECRET=gere-um-segredo-forte
 CRM_COOKIE_SECURE=true
 ```
 
+Estas variaveis sao da aplicacao web. As variaveis `UNIPLUS_*` e
+`HENNDER_SYNC_*` pertencem ao Hennder Sync na VPS Linux e nao precisam ficar na
+Hostinger.
+
+## 5.1 Hennder Sync em VPS Linux
+
+O Hennder Sync deve rodar fora da Hostinger, em uma VPS Linux com acesso ao
+PostgreSQL do Uniplus via Docker, rede privada ou tunel/VPN.
+
+Fluxo de producao:
+
+```text
+PostgreSQL Uniplus (somente leitura)
+VPS Linux / Hennder Sync
+Supabase PostgreSQL
+Hennder CRM Web na Hostinger
+```
+
+Na VPS, configure `UNIPLUS_DATABASE_URL`, `UNIPLUS_SSL`,
+`UNIPLUS_SYNC_BATCH_SIZE`, `UNIPLUS_SYNC_MODE`, `HENNDER_SYNC_LOG_DIR`,
+`HENNDER_SYNC_DRY_RUN` e as chaves Supabase server-side. O usuario PostgreSQL do
+Uniplus deve ser somente leitura.
+
 ## 6. RLS e permissoes
 
 Validacoes obrigatorias antes de liberar usuarios reais:
