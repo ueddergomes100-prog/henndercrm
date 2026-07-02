@@ -11,7 +11,7 @@ type DemoUser = CrmSessionUser & { password: string };
 const fallbackDemoUsers: DemoUser[] = [
   {
     id: "demo-admin",
-    name: "Ana Administradora",
+    name: "Administrador",
     email: "admin@henndercrm.local",
     password: "Admin@123",
     role: "administrador",
