@@ -8,10 +8,16 @@ const port = Number(process.env.PORT || 3000);
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
 
-app.prepare().then(() => {
-  createServer((request, response) => {
-    handle(request, response);
-  }).listen(port, hostname, () => {
-    console.log(`Hennder CRM ready on http://${hostname}:${port}`);
+app
+  .prepare()
+  .then(() => {
+    createServer((request, response) => {
+      handle(request, response);
+    }).listen(port, hostname, () => {
+      console.log(`Hennder CRM ready on http://${hostname}:${port}`);
+    });
+  })
+  .catch((error) => {
+    console.error("Hennder CRM failed to start", error);
+    process.exit(1);
   });
-});
