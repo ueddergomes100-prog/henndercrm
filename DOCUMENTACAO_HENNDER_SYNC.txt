@@ -1,0 +1,1453 @@
+DOCUMENTACAO DE PASSAGEM - HENNDER CRM E HENNDER SYNC
+Atualizado em: 02/07/2026
+Projeto local atual: H:\CRM
+Repositorio Git: https://github.com/ueddergomes100-prog/henndercrm
+Producao: https://gestao.nexarcompany.com.br
+
+================================================================================
+1. OBJETIVO DESTE ARQUIVO
+================================================================================
+
+Este TXT foi feito para abrir o projeto em outro computador, principalmente no
+computador que tem acesso ao PostgreSQL do Uniplus.
+
+Ele explica:
+
+- O que ja foi feito no Hennder CRM.
+- Como esta a producao na Hostinger.
+- Como esta a base demonstrativa.
+- Quais arquivos principais existem.
+- Quais comandos usar no computador novo.
+- Como deve funcionar o Hennder Sync.
+- Qual SQL usar no PostgreSQL do Uniplus.
+- Quais validacoes fazer antes de importar dados reais.
+- O que ainda precisa ser implementado.
+
+IMPORTANTE:
+Nao colocar chaves secretas do Supabase, senha real de banco ou dados sensiveis
+dentro do Git. As variaveis secretas devem ser copiadas por canal seguro para o
+.env.local do computador novo e para as variaveis da Hostinger.
+
+================================================================================
+2. ESTADO ATUAL DO SISTEMA EM PRODUCAO
+================================================================================
+
+Dominio em producao:
+
+https://gestao.nexarcompany.com.br
+
+Healthcheck:
+
+https://gestao.nexarcompany.com.br/api/health
+
+Ultima verificacao feita em 02/07/2026:
+
+Status: 200
+Resposta esperada:
+
+{"ok":true,"service":"hennder-crm","timestamp":"..."}
+
+Login atual de apresentacao:
+
+Email: admin@henndercrm.local
+Senha: Admin@123
+Nome exibido: Administrador
+Perfil: administrador
+
+ATENCAO:
+Esse usuario e temporario/de apresentacao. Para producao real, criar usuarios
+reais no Supabase Auth e vincular em public.crm_usuarios.
+
+================================================================================
+3. O QUE JA FOI FEITO
+================================================================================
+
+3.1 Frontend e CRM
+
+- Projeto Next.js com App Router.
+- React 19, TypeScript, Tailwind CSS 4, Recharts, Framer Motion e Lucide.
+- Tela de login implementada.
+- Login conectado ao Supabase Auth.
+- Sessao em cookie HTTP-only.
+- Perfil operacional em public.crm_usuarios.
+- Apenas 1 usuario ativo de apresentacao no Supabase: Administrador.
+- Tela de cadastro/listagem de usuario dentro de Sistema > Configuracoes.
+- Dashboard comercial.
+- Clientes.
+- Perfil 360 do cliente.
+- Alertas de recompra.
+- Central de recuperacao.
+- Carteira por vendedor.
+- Saude da base.
+- Oportunidades.
+- Agenda.
+- IA comercial local/demonstrativa.
+- Relatorios com PDFs comerciais.
+- Tema claro e tema dark profundo.
+- Correcoes visuais recentes:
+  - Seletor de tema com contraste corrigido no dark.
+  - Popup "Nova acao" fecha ao clicar fora.
+  - Hover do popup "Nova acao" corrigido no dark.
+  - Tela inicial nao fica mais presa com fundo vazio quando recarrega.
+
+3.2 Supabase
+
+Migrations criadas:
+
+- supabase/migrations/202606110001_crm_schema.sql
+- supabase/migrations/202606110002_crm_operacional.sql
+
+Tabelas principais criadas:
+
+- crm_clientes
+- crm_vendedores
+- crm_produtos
+- crm_vendas
+- crm_itens_venda
+- crm_regras_recompra
+- crm_alertas_recompra
+- crm_historico_contatos
+- crm_oportunidades
+- crm_score_cliente
+- crm_vendas_ignoradas
+- crm_sincronizacoes
+- crm_usuarios
+- crm_agenda_eventos
+
+O Supabase esta recebendo a massa demo via rota administrativa:
+
+POST /api/crm/bootstrap
+
+Essa rota exige usuario administrador logado.
+
+Ultima carga demonstrativa feita:
+
+- 43 clientes/vendas
+- 100 itens de venda
+- 85 produtos
+- 12 vendedores
+- 98 alertas de recompra
+- 12 oportunidades
+- 5 eventos de agenda
+- 12 contatos/retornos comerciais
+
+3.3 Producao na Hostinger
+
+O sistema esta hospedado na Hostinger com Git.
+
+Ponto importante:
+O erro 503 foi corrigido trocando o start command do projeto para:
+
+npm run start
+
+E no package.json:
+
+"start": "node server.js"
+
+O arquivo server.js respeita a porta da Hostinger:
+
+const port = Number(process.env.PORT || 3000);
+hostname = "0.0.0.0";
+
+NAO voltar para um start que ignore o process.env.PORT.
+
+Commit importante:
+
+4bb5e32 - Use custom server for Hostinger startup
+
+3.4 Cuidado com commits de relatorios grandes
+
+Houve tentativa de preencher relatorios com dados extras diretamente no codigo.
+Isso gerou 503 na Hostinger. Foi revertido.
+
+Nao reaplicar sem testar em producao:
+
+9621496 - Populate presentation report data
+c4adc0b - Populate presentation report data
+
+Estado correto atual:
+
+- Startup corrigido mantido.
+- Relatorios preenchidos pela base demo/Supabase, nao por codigo pesado extra.
+- Producao voltou 200 depois do revert:
+  f19e0d5 - Revert "Populate presentation report data"
+
+================================================================================
+4. ARQUIVOS PRINCIPAIS DO PROJETO
+================================================================================
+
+Raiz:
+
+- package.json
+- server.js
+- next.config.ts
+- .env.example
+- AGENTS.md
+- README.md
+- DOCUMENTACAO_HENNDER_SYNC.txt
+
+App:
+
+- src/app/page.tsx
+  Tela principal do CRM. Ainda concentra bastante UI.
+
+- src/app/globals.css
+  Tema claro/dark e estilos globais.
+
+- src/app/layout.tsx
+  Layout raiz, metadata e aplicacao inicial do tema.
+
+APIs:
+
+- src/app/api/auth/session/route.ts
+  Login, logout e sessao.
+
+- src/app/api/crm/bootstrap/route.ts
+  Prepara massa demo no Supabase. Admin only.
+
+- src/app/api/crm/snapshot/route.ts
+  Snapshot comercial demonstrativo.
+
+- src/app/api/crm/workspace/route.ts
+  Contatos, status de alertas, agenda e oportunidades persistentes.
+
+- src/app/api/crm/users/route.ts
+  Cadastro e listagem de usuarios CRM.
+
+- src/app/api/health/route.ts
+  Healthcheck de producao.
+
+Dominio:
+
+- src/domain/crm/types.ts
+  Tipos principais do CRM e Uniplus.
+
+- src/domain/crm/rules.ts
+  Regras puras: UUID deterministico, qualidade cadastral, normalizacao etc.
+
+Servicos:
+
+- src/services/crm-demo-service.ts
+  Gera snapshot demonstrativo.
+
+- src/services/crm-services.ts
+  Regras de venda, cliente, produto, alerta, oportunidade, agenda, vendedor e
+  relatorio.
+
+- src/services/crm-view-service.ts
+  Converte snapshot em dados prontos para tela.
+
+- src/services/uniplus-sync-service.ts
+  Orquestra a sincronizacao Uniplus -> destino CRM.
+
+- src/services/crm-supabase-bootstrap-service.ts
+  Usa mock Uniplus para popular Supabase com massa demo.
+
+Integracao Uniplus:
+
+- src/integrations/uniplus/repositories.ts
+  Contratos que o Hennder Sync deve implementar.
+
+- src/integrations/uniplus/mock-repositories.ts
+  Repositorios mockados atuais.
+
+- src/integrations/uniplus/sql/sales-extraction.sql
+  SQL inicial antigo. Nao e o SQL final recomendado.
+
+Supabase:
+
+- src/infrastructure/supabase/supabase-rest-client.ts
+- src/infrastructure/supabase/supabase-crm-sync-repository.ts
+- src/infrastructure/supabase/supabase-crm-workspace-repository.ts
+
+Fixture demo:
+
+- src/data/generated/uniplus-sample.json
+- src/data/mock-uniplus.ts
+- scripts/uniplus-sample-importer.mjs
+- scripts/uniplus-sample-importer.test.mjs
+
+SQLs importantes:
+
+Os SQLs estavam tambem em docs/sql no computador atual, mas esse diretorio nao
+estava todo versionado. Por seguranca, o conteudo principal esta copiado nos
+anexos deste TXT.
+
+================================================================================
+5. COMO ABRIR NO COMPUTADOR NOVO
+================================================================================
+
+5.1 Instalar dependencias no computador novo
+
+Instalar:
+
+- Git
+- Node.js 20 LTS ou 22 LTS
+- DBeaver ou pgAdmin para acessar o PostgreSQL do Uniplus
+- Acesso de rede ao PostgreSQL local do Uniplus
+
+5.2 Clonar o projeto
+
+No terminal:
+
+git clone https://github.com/ueddergomes100-prog/henndercrm.git
+cd henndercrm
+
+Ou, se ja existir a pasta:
+
+git pull origin master
+
+5.3 Instalar dependencias
+
+npm ci
+
+5.4 Criar .env.local
+
+Copiar .env.example para .env.local:
+
+copy .env.example .env.local
+
+Preencher com os valores reais:
+
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
+SUPABASE_SECRET_KEY=
+CRM_DATA_PROVIDER=supabase
+CRM_OPERATIONAL_PROVIDER=supabase
+CRM_SESSION_SECRET=
+CRM_COOKIE_SECURE=false
+
+Para producao/Hostinger:
+
+CRM_COOKIE_SECURE=true
+
+NAO colocar a chave SUPABASE_SECRET_KEY com prefixo NEXT_PUBLIC.
+NAO subir .env.local para o Git.
+
+5.5 Testar local
+
+npm run build
+npm run dev
+
+Abrir:
+
+http://localhost:3000
+http://localhost:3000/api/health
+
+Se quiser testar modo producao local:
+
+npm run build
+npm run start
+
+================================================================================
+6. COMANDOS IMPORTANTES
+================================================================================
+
+Build:
+
+npm run build
+
+Lint:
+
+npm run lint
+
+Teste do importador:
+
+npm run test
+
+Gerar fixture JSON a partir de CSV exportado do Uniplus:
+
+node scripts/uniplus-sample-importer.mjs --input H:/uniplus_sample_result.csv --output src/data/generated/uniplus-sample.json --reference-date 2026-07-02
+
+Preparar Supabase com massa demo via producao:
+
+1. Fazer login no site com administrador.
+2. Chamar:
+
+POST https://gestao.nexarcompany.com.br/api/crm/bootstrap
+
+Exemplo PowerShell:
+
+$s=New-Object Microsoft.PowerShell.Commands.WebRequestSession
+Invoke-WebRequest -Uri 'https://gestao.nexarcompany.com.br/api/auth/session' -Method Post -ContentType 'application/json' -Body '{"email":"admin@henndercrm.local","password":"Admin@123"}' -WebSession $s
+Invoke-WebRequest -Uri 'https://gestao.nexarcompany.com.br/api/crm/bootstrap' -Method Post -WebSession $s
+
+================================================================================
+7. COMO O HENNDER SYNC DEVE FUNCIONAR
+================================================================================
+
+7.1 Objetivo
+
+O Hennder Sync sera o agente local que roda no computador/rede que tem acesso ao
+PostgreSQL do Uniplus.
+
+Ele deve ler o banco do Uniplus em modo SOMENTE LEITURA e enviar os dados para o
+Supabase do Hennder CRM.
+
+Fluxo correto:
+
+PostgreSQL Uniplus local
+  -> Hennder Sync local
+  -> Supabase
+  -> Hennder CRM Web
+
+O CRM Web hospedado na Hostinger NAO deve conectar direto no PostgreSQL local do
+cliente.
+
+7.2 Por que precisa ser local
+
+O PostgreSQL do Uniplus esta dentro da rede/maquina do cliente.
+A Hostinger normalmente nao consegue acessar esse banco local diretamente.
+Por isso o Hennder Sync deve rodar no computador que enxerga o PostgreSQL.
+
+7.3 Formato tecnico recomendado
+
+Implementar como CLI Node.js no proprio repositorio, por exemplo:
+
+scripts/hennder-sync.mjs
+
+Ou estrutura TypeScript futura:
+
+src/hennder-sync/
+  postgres-uniplus-repository.ts
+  hennder-sync-runner.ts
+  mapping.ts
+
+Dependencia que provavelmente sera adicionada:
+
+npm install pg
+
+7.4 Variaveis de ambiente futuras do Hennder Sync
+
+Adicionar ao .env.local do computador do Uniplus:
+
+UNIPLUS_DATABASE_URL=postgres://USUARIO:SENHA@HOST:PORTA/BANCO
+UNIPLUS_SSL=false
+UNIPLUS_SYNC_BATCH_SIZE=5000
+UNIPLUS_SYNC_MODE=incremental
+
+Ja existentes:
+
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
+SUPABASE_SECRET_KEY=
+CRM_DATA_PROVIDER=supabase
+CRM_OPERATIONAL_PROVIDER=supabase
+
+7.5 Usuario PostgreSQL
+
+Criar usuario de banco SOMENTE LEITURA.
+
+Nao usar usuario administrador do banco.
+Nao permitir INSERT/UPDATE/DELETE no banco do Uniplus.
+
+Permissoes esperadas:
+
+GRANT CONNECT ON DATABASE nome_do_banco TO hennder_sync_readonly;
+GRANT USAGE ON SCHEMA public TO hennder_sync_readonly;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO hennder_sync_readonly;
+
+Se houver schemas diferentes, ajustar o schema correto.
+
+7.6 Passos do Sync
+
+1. Conectar no PostgreSQL local do Uniplus.
+2. Executar o SQL corrigido deste TXT.
+3. Ler linhas de vendas + itens + clientes + produtos + vendedores.
+4. Transformar as linhas no formato dos tipos:
+   - UniplusClient
+   - UniplusProduct
+   - UniplusSeller
+   - UniplusSale
+   - UniplusSaleItem
+5. Passar esses repositorios para UniplusSyncService.
+6. Usar SupabaseCrmSyncRepository como destino.
+7. Fazer upsert no Supabase por uniplus_id.
+8. Registrar execucao em crm_sincronizacoes.
+9. Salvar vendas ignoradas em crm_vendas_ignoradas.
+10. Gerar alertas, oportunidades e agenda conforme regras do CRM.
+
+7.7 Contratos que devem ser implementados
+
+Arquivo:
+
+src/integrations/uniplus/repositories.ts
+
+Interfaces:
+
+- IUniplusClientRepository
+- IUniplusProductRepository
+- IUniplusSaleRepository
+- IUniplusSellerRepository
+
+Hoje existem mocks em:
+
+src/integrations/uniplus/mock-repositories.ts
+
+O Hennder Sync real deve substituir os mocks por repositorios PostgreSQL.
+
+7.8 Regras importantes de importacao
+
+O UniplusSyncService ja ignora venda quando:
+
+- cliente nao identificado
+- venda cancelada
+- item sem produto
+- cliente inativo
+- dados incompletos
+
+Essas vendas sao gravadas em:
+
+crm_vendas_ignoradas
+
+7.9 Idempotencia
+
+O Sync precisa ser idempotente.
+
+Isso significa que pode rodar de novo sem duplicar dados.
+
+Chaves atuais:
+
+- crm_clientes.uniplus_id unique
+- crm_vendedores.uniplus_id unique
+- crm_produtos.uniplus_id unique
+- crm_vendas.uniplus_id unique
+- crm_itens_venda.uniplus_id unique
+- crm_alertas_recompra tem unique em cliente/produto/venda/item
+
+7.10 Incremental
+
+O SQL corrigido atual tem LIMIT 5000 para exportacao/teste.
+No Hennder Sync real, implementar incremental por:
+
+- venda_data_alteracao
+- venda_data_inclusao
+- data_venda_final
+
+Exemplo de filtro futuro:
+
+AND (
+  d.dataalteracao >= :ultima_sincronizacao
+  OR d.datainclusao >= :ultima_sincronizacao
+  OR d.data >= :ultima_sincronizacao
+)
+
+O ultimo horario concluido pode ser buscado em:
+
+crm_sincronizacoes
+
+onde status = 'concluida'.
+
+7.11 Ponto mais importante do SQL
+
+NAO usar d.id como numero comercial da venda.
+
+Aprendido no caso da venda 330670:
+
+- d.id = ID interno do registro DAV.
+- d.codigo = numero comercial/visivel da venda no Uniplus.
+- d.idusuario = operador/usuario que lancou ou alterou a venda.
+- d.idrepresentante = vendedor/representante comercial.
+
+Para o CRM:
+
+uniplus_venda_id deve ser d.codigo
+uniplus_venda_internal_id deve ser d.id
+uniplus_vendedor_id deve ser d.idrepresentante
+operador_usuario_id deve ser d.idusuario
+
+================================================================================
+8. O QUE AINDA PRECISA SER IMPLEMENTADO
+================================================================================
+
+8.1 Hennder Sync real
+
+Ainda falta implementar:
+
+- Conexao real com PostgreSQL usando pg.
+- Repositorios PostgreSQL reais do Uniplus.
+- CLI para rodar sync manual:
+  node scripts/hennder-sync.mjs --since 2026-07-01
+
+- Modo incremental automatico.
+- Controle de erro com retry.
+- Log em arquivo local.
+- Agendamento pelo Windows Task Scheduler.
+- Opcao dry-run para validar sem enviar ao Supabase.
+
+8.2 Trocar dashboard para ler Supabase real
+
+Hoje parte da tela principal ainda usa snapshot demonstrativo local gerado em:
+
+src/data/generated/uniplus-sample.json
+
+O operacional ja persiste no Supabase:
+
+- contatos
+- status de alertas
+- agenda
+- oportunidades
+- usuarios
+
+Proximo passo recomendado:
+
+- Criar um provider de snapshot Supabase real.
+- Fazer /api/crm/snapshot ler crm_clientes, crm_vendas, crm_itens_venda,
+  crm_produtos, crm_vendedores e crm_alertas_recompra do Supabase.
+- Remover dependencia fixa do fixture JSON para producao.
+
+8.3 Regras de recompra
+
+Hoje as regras sao demonstrativas por produto/departamento/palavra-chave.
+
+Futuro:
+
+- Tela para configurar dias de recompra por produto.
+- Regra por departamento.
+- Regra manual cliente + produto.
+- Regra por fabricante/fornecedor.
+- Prioridade por valor e recencia.
+
+8.4 WhatsApp Business
+
+Hoje o CRM abre links wa.me.
+
+Ainda nao ha automacao oficial.
+
+Futuro:
+
+- Meta Cloud API ou provedor homologado.
+- Templates aprovados.
+- Webhook de resposta.
+- Consentimento/LGPD.
+- Registro automatico de retorno.
+
+8.5 IA real
+
+Hoje a IA comercial e local/demonstrativa.
+
+Futuro:
+
+- Conectar modelo externo somente depois que a base real estiver confiavel.
+- Enviar contexto limitado.
+- Nao enviar dados sensiveis sem necessidade.
+
+================================================================================
+9. CHECKLIST DE AMANHA NO COMPUTADOR DO POSTGRESQL
+================================================================================
+
+1. Clonar o projeto.
+2. Rodar npm ci.
+3. Criar .env.local com Supabase e conexao PostgreSQL.
+4. Rodar npm run build.
+5. Confirmar que a producao continua 200:
+   https://gestao.nexarcompany.com.br/api/health
+
+6. Abrir DBeaver/pgAdmin no banco do Uniplus.
+7. Rodar primeiro o SQL de validacao da venda 330670.
+8. Confirmar:
+   - d.codigo mostra 330670.
+   - d.id pode ser diferente.
+   - d.idrepresentante bate com vendedor comercial.
+   - d.idusuario e apenas operador.
+   - itens batem com a venda correta.
+
+9. Rodar SQL de diagnostico se ainda houver duvida.
+10. Rodar SQL de exportacao corrigida.
+11. Exportar CSV com:
+    - cabecalho
+    - UTF-8
+    - separador virgula, se possivel
+    - datas no formato ISO quando possivel
+
+12. Salvar CSV em:
+    H:\uniplus_sample_result.csv
+
+13. Rodar:
+
+node scripts/uniplus-sample-importer.mjs --input H:/uniplus_sample_result.csv --output src/data/generated/uniplus-sample.json --reference-date 2026-07-02
+
+14. Rodar:
+
+npm run test
+npm run build
+
+15. Conferir metadata gerado no JSON:
+    - rowsRead
+    - clients
+    - sellers
+    - products
+    - sales
+    - items
+    - invalidRows
+    - multiItemSales
+
+16. Se os dados estiverem corretos, implementar Hennder Sync real com pg.
+17. Nao publicar alteracao pesada direto em producao sem testar healthcheck.
+
+================================================================================
+10. SQL FINAL RECOMENDADO PARA EXPORTACAO DO UNIPLUS
+================================================================================
+
+Este e o SQL corrigido mais importante.
+Use ele como base principal.
+
+Motivo:
+O SQL antigo usava d.id como uniplus_venda_id, mas isso confundiu a venda
+visivel 330670 com ID interno 330777 em um caso validado.
+
+SQL:
+
+-- Hennder CRM - Exportacao corrigida Uniplus
+--
+-- Motivo desta versao:
+-- O SQL anterior usava:
+--   d.id        AS uniplus_venda_id
+--   d.idusuario AS uniplus_vendedor_id
+--
+-- Isso misturava conceitos:
+--   d.id        = ID interno do registro DAV.
+--   d.codigo    = numero comercial/visivel da venda no Uniplus.
+--   d.idusuario = usuario/operador que lancou ou alterou a venda.
+--
+-- Para o CRM, a venda deve usar o numero comercial visivel:
+--   d.codigo AS uniplus_venda_id
+--
+-- E o vendedor comercial deve usar representante:
+--   d.idrepresentante -> entidade.id
+
+SELECT
+    d.codigo AS uniplus_venda_id,
+    d.id AS uniplus_venda_internal_id,
+
+    COALESCE(
+        CASE
+            WHEN d.data BETWEEN DATE '2000-01-01' AND CURRENT_DATE + INTERVAL '1 day'
+            THEN d.data
+            ELSE NULL
+        END,
+        CASE
+            WHEN d.datainclusao BETWEEN DATE '2000-01-01' AND CURRENT_DATE + INTERVAL '1 day'
+            THEN d.datainclusao
+            ELSE NULL
+        END,
+        CASE
+            WHEN d.dataalteracao BETWEEN DATE '2000-01-01' AND CURRENT_DATE + INTERVAL '1 day'
+            THEN d.dataalteracao
+            ELSE NULL
+        END
+    ) AS data_venda_final,
+
+    CASE
+        WHEN d.datainclusao BETWEEN DATE '2000-01-01' AND CURRENT_DATE + INTERVAL '1 day'
+        THEN d.datainclusao
+        ELSE NULL
+    END AS venda_data_inclusao,
+
+    CASE
+        WHEN d.dataalteracao BETWEEN DATE '2000-01-01' AND CURRENT_DATE + INTERVAL '1 day'
+        THEN d.dataalteracao
+        ELSE NULL
+    END AS venda_data_alteracao,
+
+    d.valor AS valor_venda,
+    d.valordesconto AS valor_desconto,
+    d.status AS venda_status,
+    d.aprovado AS venda_aprovada,
+    d.datacancelamento AS venda_data_cancelamento,
+
+    d.idcliente AS uniplus_cliente_id,
+    d.nomecliente AS nome_cliente_venda,
+    d.cnpjcpfcliente AS cpf_cnpj_cliente_venda,
+
+    e.codigo AS cliente_codigo,
+    e.nome AS cliente_nome_cadastro,
+    e.razaosocial AS cliente_razao_social,
+    e.cnpjcpf AS cliente_cpf_cnpj,
+    e.telefone AS cliente_telefone,
+    e.celular AS cliente_celular,
+    e.whatsapp AS cliente_whatsapp,
+    e.email AS cliente_email,
+    e.endereco AS cliente_endereco,
+    e.bairro AS cliente_bairro,
+    e.idcidade AS cliente_id_cidade,
+    e.idestado AS cliente_id_estado,
+    e.cep AS cliente_cep,
+
+    CASE
+        WHEN e.datacadastro BETWEEN DATE '2000-01-01' AND CURRENT_DATE + INTERVAL '1 day'
+        THEN e.datacadastro
+        ELSE NULL
+    END AS cliente_data_cadastro,
+
+    CASE
+        WHEN e.dataultcompra BETWEEN DATE '2000-01-01' AND CURRENT_DATE + INTERVAL '1 day'
+        THEN e.dataultcompra
+        ELSE NULL
+    END AS cliente_data_ultima_compra,
+
+    e.inativo AS cliente_inativo,
+    e.idcategoriacliente AS cliente_categoria_id,
+    e.idclassificacaocliente AS cliente_classificacao_id,
+    e.ciclocompras AS cliente_ciclo_compras,
+
+    (
+        CASE WHEN e.nome IS NOT NULL AND TRIM(e.nome) <> '' THEN 15 ELSE 0 END +
+        CASE WHEN e.cnpjcpf IS NOT NULL AND TRIM(e.cnpjcpf) <> '' THEN 15 ELSE 0 END +
+        CASE
+            WHEN
+                (e.telefone IS NOT NULL AND TRIM(e.telefone) <> '')
+                OR (e.celular IS NOT NULL AND TRIM(e.celular) <> '')
+            THEN 20 ELSE 0
+        END +
+        CASE WHEN e.whatsapp IS NOT NULL AND TRIM(e.whatsapp) <> '' THEN 20 ELSE 0 END +
+        CASE WHEN e.email IS NOT NULL AND TRIM(e.email) <> '' THEN 10 ELSE 0 END +
+        CASE WHEN e.idcidade IS NOT NULL THEN 10 ELSE 0 END +
+        CASE WHEN e.bairro IS NOT NULL AND TRIM(e.bairro) <> '' THEN 5 ELSE 0 END +
+        CASE WHEN e.endereco IS NOT NULL AND TRIM(e.endereco) <> '' THEN 5 ELSE 0 END
+    ) AS qualidade_cadastro_score,
+
+    CASE
+        WHEN (
+            CASE WHEN e.nome IS NOT NULL AND TRIM(e.nome) <> '' THEN 15 ELSE 0 END +
+            CASE WHEN e.cnpjcpf IS NOT NULL AND TRIM(e.cnpjcpf) <> '' THEN 15 ELSE 0 END +
+            CASE WHEN (e.telefone IS NOT NULL AND TRIM(e.telefone) <> '') OR (e.celular IS NOT NULL AND TRIM(e.celular) <> '') THEN 20 ELSE 0 END +
+            CASE WHEN e.whatsapp IS NOT NULL AND TRIM(e.whatsapp) <> '' THEN 20 ELSE 0 END +
+            CASE WHEN e.email IS NOT NULL AND TRIM(e.email) <> '' THEN 10 ELSE 0 END +
+            CASE WHEN e.idcidade IS NOT NULL THEN 10 ELSE 0 END +
+            CASE WHEN e.bairro IS NOT NULL AND TRIM(e.bairro) <> '' THEN 5 ELSE 0 END +
+            CASE WHEN e.endereco IS NOT NULL AND TRIM(e.endereco) <> '' THEN 5 ELSE 0 END
+        ) >= 90 THEN 'excelente'
+        WHEN (
+            CASE WHEN e.nome IS NOT NULL AND TRIM(e.nome) <> '' THEN 15 ELSE 0 END +
+            CASE WHEN e.cnpjcpf IS NOT NULL AND TRIM(e.cnpjcpf) <> '' THEN 15 ELSE 0 END +
+            CASE WHEN (e.telefone IS NOT NULL AND TRIM(e.telefone) <> '') OR (e.celular IS NOT NULL AND TRIM(e.celular) <> '') THEN 20 ELSE 0 END +
+            CASE WHEN e.whatsapp IS NOT NULL AND TRIM(e.whatsapp) <> '' THEN 20 ELSE 0 END +
+            CASE WHEN e.email IS NOT NULL AND TRIM(e.email) <> '' THEN 10 ELSE 0 END +
+            CASE WHEN e.idcidade IS NOT NULL THEN 10 ELSE 0 END +
+            CASE WHEN e.bairro IS NOT NULL AND TRIM(e.bairro) <> '' THEN 5 ELSE 0 END +
+            CASE WHEN e.endereco IS NOT NULL AND TRIM(e.endereco) <> '' THEN 5 ELSE 0 END
+        ) >= 70 THEN 'bom'
+        WHEN (
+            CASE WHEN e.nome IS NOT NULL AND TRIM(e.nome) <> '' THEN 15 ELSE 0 END +
+            CASE WHEN e.cnpjcpf IS NOT NULL AND TRIM(e.cnpjcpf) <> '' THEN 15 ELSE 0 END +
+            CASE WHEN (e.telefone IS NOT NULL AND TRIM(e.telefone) <> '') OR (e.celular IS NOT NULL AND TRIM(e.celular) <> '') THEN 20 ELSE 0 END +
+            CASE WHEN e.whatsapp IS NOT NULL AND TRIM(e.whatsapp) <> '' THEN 20 ELSE 0 END +
+            CASE WHEN e.email IS NOT NULL AND TRIM(e.email) <> '' THEN 10 ELSE 0 END +
+            CASE WHEN e.idcidade IS NOT NULL THEN 10 ELSE 0 END +
+            CASE WHEN e.bairro IS NOT NULL AND TRIM(e.bairro) <> '' THEN 5 ELSE 0 END +
+            CASE WHEN e.endereco IS NOT NULL AND TRIM(e.endereco) <> '' THEN 5 ELSE 0 END
+        ) >= 40 THEN 'regular'
+        ELSE 'ruim'
+    END AS qualidade_cadastro_status,
+
+    d.idrepresentante AS uniplus_vendedor_id,
+    vr.codigo AS vendedor_codigo,
+    vr.nome AS vendedor_nome,
+    vr.email AS vendedor_email,
+    vr.celular AS vendedor_celular,
+    vr.whatsapp AS vendedor_whatsapp,
+    vr.inativo AS vendedor_inativo,
+
+    d.idusuario AS operador_usuario_id,
+    u.nome AS operador_usuario_nome,
+    d.idusuariofaturamento AS faturamento_usuario_id,
+    uf.nome AS faturamento_usuario_nome,
+
+    di.id AS uniplus_item_id,
+    COALESCE(di.codigodav, d.codigo) AS item_uniplus_venda_id,
+    di.iddav AS item_uniplus_venda_internal_id,
+    di.idproduto AS uniplus_produto_id,
+    di.codigoproduto AS produto_codigo_item,
+    di.nomeproduto AS produto_nome_item,
+    di.quantidade AS item_quantidade,
+
+    CASE
+        WHEN di.datainclusao BETWEEN DATE '2000-01-01' AND CURRENT_DATE + INTERVAL '1 day'
+        THEN di.datainclusao
+        ELSE NULL
+    END AS item_data_inclusao,
+
+    p.codigo AS produto_codigo,
+    p.nome AS produto_nome,
+    p.tipo AS produto_tipo,
+    p.departamento AS produto_departamento,
+    p.idfabricante AS produto_fabricante_id,
+    p.preco AS produto_preco,
+
+    CASE
+        WHEN di.total IS NOT NULL THEN di.total
+        WHEN di.preco IS NOT NULL AND di.quantidade IS NOT NULL THEN di.preco * di.quantidade
+        WHEN p.preco IS NOT NULL AND di.quantidade IS NOT NULL THEN p.preco * di.quantidade
+        ELSE NULL
+    END AS item_valor_estimado,
+
+    CASE
+        WHEN p.dataultimavenda BETWEEN DATE '2000-01-01' AND CURRENT_DATE + INTERVAL '1 day'
+        THEN p.dataultimavenda
+        ELSE NULL
+    END AS produto_data_ultima_venda,
+
+    CASE
+        WHEN p.dataultimacompra BETWEEN DATE '2000-01-01' AND CURRENT_DATE + INTERVAL '1 day'
+        THEN p.dataultimacompra
+        ELSE NULL
+    END AS produto_data_ultima_compra,
+
+    p.tipoproduto AS produto_tipo_produto,
+    p.utilizacrm AS produto_utiliza_crm
+
+FROM dav d
+
+LEFT JOIN davitem di
+    ON di.iddav = d.id
+
+LEFT JOIN produto p
+    ON p.id = di.idproduto
+
+LEFT JOIN entidade e
+    ON e.id = d.idcliente
+
+LEFT JOIN entidade vr
+    ON vr.id = d.idrepresentante
+
+LEFT JOIN usuario u
+    ON u.id = d.idusuario
+
+LEFT JOIN usuario uf
+    ON uf.id = d.idusuariofaturamento
+
+WHERE d.codigo IS NOT NULL
+  AND d.idcliente IS NOT NULL
+  AND d.nomecliente IS NOT NULL
+  AND TRIM(d.nomecliente) <> ''
+  AND d.datacancelamento IS NULL
+
+ORDER BY
+    COALESCE(d.datainclusao, d.dataalteracao, d.data) DESC,
+    d.codigo DESC,
+    di.id ASC
+
+LIMIT 5000;
+
+================================================================================
+11. SQL DE VALIDACAO DA VENDA 330670
+================================================================================
+
+Rode antes de exportar de novo.
+Objetivo: confirmar qual campo contem o numero de venda visivel no Uniplus e
+qual campo contem o vendedor comercial real.
+
+SELECT
+    d.codigo AS numero_venda_visivel,
+    d.id AS dav_id_interno,
+    d.datainclusao,
+    d.dataalteracao,
+    d.data,
+    d.idcliente,
+    d.nomecliente,
+    d.valor,
+    d.status,
+    d.datacancelamento,
+
+    d.idrepresentante AS representante_id,
+    rep.codigo AS representante_codigo,
+    rep.nome AS representante_nome,
+
+    d.idrepresentante2 AS representante2_id,
+    rep2.codigo AS representante2_codigo,
+    rep2.nome AS representante2_nome,
+
+    d.idusuario AS operador_usuario_id,
+    u.nome AS operador_usuario_nome,
+
+    d.idusuariofaturamento AS faturamento_usuario_id,
+    uf.nome AS faturamento_usuario_nome
+FROM dav d
+LEFT JOIN entidade rep
+    ON rep.id = d.idrepresentante
+LEFT JOIN entidade rep2
+    ON rep2.id = d.idrepresentante2
+LEFT JOIN usuario u
+    ON u.id = d.idusuario
+LEFT JOIN usuario uf
+    ON uf.id = d.idusuariofaturamento
+WHERE d.codigo = 330670
+   OR d.id = 330670
+   OR d.id = 330777
+ORDER BY d.codigo, d.id;
+
+SELECT
+    d.codigo AS numero_venda_visivel,
+    d.id AS dav_id_interno,
+    di.id AS item_id,
+    di.iddav AS item_dav_id_interno,
+    di.codigodav AS item_numero_venda_visivel,
+    di.idproduto,
+    di.codigoproduto,
+    di.nomeproduto,
+    di.quantidade,
+    di.preco,
+    di.total
+FROM dav d
+INNER JOIN davitem di
+    ON di.iddav = d.id
+WHERE d.codigo = 330670
+   OR d.id = 330670
+   OR d.id = 330777
+ORDER BY d.codigo, d.id, di.id;
+
+SELECT
+    v.documento,
+    v.documento_unique,
+    v.id AS venda_id_na_view,
+    v.iditem,
+    v.emissao,
+    v.datahoraemissao,
+    v.codigocliente,
+    v.nomecliente,
+    v.codigovendedor,
+    v.nomevendedor,
+    v.codigovendedor2,
+    v.nomevendedor2,
+    v.produto,
+    v.quantidade,
+    v.precounitario,
+    v.total,
+    v.valortotal,
+    v.status
+FROM vendas_itens_view v
+WHERE v.documento = '330670'
+   OR v.documento_unique = '330670'
+   OR v.id = 330670
+   OR v.id = 330777
+   OR v.nomecliente ILIKE '%MARILENE MAGELA%'
+ORDER BY v.documento, v.iditem;
+
+SELECT
+    c.documento,
+    c.id AS venda_id_na_view,
+    c.emissao,
+    c.hora,
+    c.codigocliente,
+    c.cliente,
+    c.vendedor,
+    c.valorprodutos,
+    c.valortotal,
+    c.status
+FROM vendas_cabecalho_view c
+WHERE c.documento = '330670'
+   OR c.id = 330670
+   OR c.id = 330777
+   OR c.cliente ILIKE '%MARILENE MAGELA%'
+ORDER BY c.documento, c.id;
+
+================================================================================
+12. SQL DE DIAGNOSTICO DE VENDEDOR E ITENS
+================================================================================
+
+Use se ainda houver duvida sobre vendedor real, operador e vinculo dos itens.
+
+SELECT
+    table_schema,
+    table_name,
+    column_name,
+    data_type
+FROM information_schema.columns
+WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
+  AND table_name IN ('dav', 'davitem')
+  AND (
+      lower(column_name) LIKE '%vend%'
+      OR lower(column_name) LIKE '%vendedor%'
+      OR lower(column_name) LIKE '%usuario%'
+      OR lower(column_name) LIKE '%user%'
+      OR lower(column_name) LIKE '%oper%'
+      OR lower(column_name) LIKE '%atend%'
+      OR lower(column_name) LIKE '%repres%'
+      OR lower(column_name) LIKE '%func%'
+      OR lower(column_name) LIKE '%comiss%'
+      OR lower(column_name) LIKE '%num%'
+      OR lower(column_name) LIKE '%doc%'
+      OR lower(column_name) LIKE '%pedido%'
+      OR lower(column_name) LIKE '%venda%'
+  )
+ORDER BY table_name, column_name;
+
+SELECT
+    d.id AS venda_id,
+    d.data AS data_venda,
+    d.datainclusao AS venda_data_inclusao,
+    d.dataalteracao AS venda_data_alteracao,
+    d.idcliente,
+    d.nomecliente,
+    d.valor,
+    d.status,
+    d.aprovado,
+    d.datacancelamento,
+    d.idusuario AS idusuario_lancamento_ou_operador,
+    u.nome AS usuario_lancamento_ou_operador_nome,
+    u.supervisor AS usuario_supervisor,
+    u.inativo AS usuario_inativo
+FROM dav d
+LEFT JOIN usuario u
+    ON u.id = d.idusuario
+WHERE d.id IN (330670, 330777)
+ORDER BY d.id;
+
+SELECT *
+FROM dav d
+WHERE d.id IN (330670, 330777)
+ORDER BY d.id;
+
+SELECT
+    di.id AS item_id,
+    di.iddav AS item_venda_id,
+    di.idproduto,
+    di.codigoproduto,
+    di.nomeproduto,
+    di.quantidade,
+    di.datainclusao AS item_data_inclusao
+FROM davitem di
+WHERE di.iddav IN (330670, 330777)
+ORDER BY di.iddav, di.id;
+
+SELECT *
+FROM davitem di
+WHERE di.iddav IN (330670, 330777)
+ORDER BY di.iddav, di.id;
+
+SELECT
+    d.id AS venda_id,
+    di.id AS item_id,
+    di.iddav AS item_venda_id,
+    d.nomecliente,
+    di.nomeproduto
+FROM dav d
+JOIN davitem di
+    ON di.iddav = d.id
+WHERE d.datainclusao::date BETWEEN DATE '2026-06-20' AND DATE '2026-06-23'
+  AND di.iddav <> d.id
+ORDER BY d.id, di.id;
+
+SELECT
+    d.id AS venda_id,
+    d.datainclusao,
+    d.nomecliente,
+    d.valor,
+    d.idusuario AS idusuario_lancamento_ou_operador,
+    u.nome AS usuario_lancamento_ou_operador_nome,
+    COUNT(di.id) AS qtd_itens
+FROM dav d
+LEFT JOIN usuario u
+    ON u.id = d.idusuario
+LEFT JOIN davitem di
+    ON di.iddav = d.id
+WHERE d.id IN (330670, 330777)
+GROUP BY
+    d.id,
+    d.datainclusao,
+    d.nomecliente,
+    d.valor,
+    d.idusuario,
+    u.nome
+ORDER BY d.id;
+
+================================================================================
+13. SQL ANTIGO/INICIAL - NAO USAR COMO FINAL
+================================================================================
+
+Este foi o SQL inicial. Ele ajuda a entender o caminho, mas NAO deve ser o SQL
+final porque usa d.id como uniplus_venda_id e d.idusuario como vendedor.
+
+select
+  d.id as uniplus_venda_id,
+  d.data as data_venda,
+  d.datainclusao,
+  d.dataalteracao,
+  d.idcliente as uniplus_cliente_id,
+  d.nomecliente,
+  d.cnpjcpfcliente,
+  d.idusuario as uniplus_vendedor_id,
+  u.nome as vendedor_nome,
+  u.email as vendedor_email,
+  u.celular as vendedor_celular,
+  u.telefonewhatsapp as vendedor_whatsapp,
+  d.valor as valor_venda,
+  d.valordesconto,
+  d.status,
+  d.aprovado,
+  d.datacancelamento,
+  di.id as uniplus_item_id,
+  di.iddav,
+  di.idproduto as uniplus_produto_id,
+  di.codigoproduto,
+  di.nomeproduto,
+  di.quantidade,
+  p.codigo as produto_codigo,
+  p.nome as produto_nome,
+  p.tipo as produto_tipo,
+  p.departamento as produto_departamento,
+  p.idfabricante,
+  p.preco as produto_preco,
+  p.dataultimavenda,
+  p.dataultimacompra,
+  p.tipoproduto,
+  p.utilizatacrm,
+  e.nome as cliente_nome_cadastro,
+  e.razaosocial,
+  e.cnpjcpf,
+  e.telefone,
+  e.celular,
+  e.whatsapp,
+  e.email,
+  e.endereco,
+  e.bairro,
+  e.idcidade,
+  e.idestado,
+  e.cep,
+  e.datacadastro,
+  e.dataultcompra,
+  e.inativo,
+  e.idcategoriacliente,
+  e.idclassificacaocliente,
+  e.ciclocompras
+from dav d
+left join davitem di on di.iddav = d.id
+left join produto p on p.id = di.idproduto
+left join usuario u on u.id = d.idusuario
+left join entidade e on e.id = d.idcliente
+where d.idcliente is not null
+  and d.nomecliente is not null
+  and trim(d.nomecliente) <> ''
+  and d.datacancelamento is null;
+
+================================================================================
+14. MAPA ENTRE COLUNAS DO SQL E CRM
+================================================================================
+
+Venda:
+
+- uniplus_venda_id -> crm_vendas.uniplus_id
+- uniplus_venda_internal_id -> auditoria futura, nao existe coluna hoje
+- data_venda_final -> crm_vendas.data_venda
+- venda_data_inclusao -> crm_vendas.data_inclusao
+- venda_data_alteracao -> crm_vendas.data_alteracao
+- valor_venda -> crm_vendas.valor_total
+- valor_desconto -> crm_vendas.valor_desconto
+- venda_status -> crm_vendas.status
+- venda_aprovada -> crm_vendas.aprovado
+- venda_data_cancelamento -> crm_vendas.data_cancelamento/cancelada
+
+Cliente:
+
+- uniplus_cliente_id -> crm_clientes.uniplus_id
+- cliente_codigo -> crm_clientes.codigo
+- cliente_nome_cadastro/nome_cliente_venda -> crm_clientes.nome
+- cliente_razao_social -> crm_clientes.razao_social
+- cliente_cpf_cnpj -> crm_clientes.cpf_cnpj
+- cliente_telefone -> crm_clientes.telefone
+- cliente_celular -> crm_clientes.celular
+- cliente_whatsapp -> crm_clientes.whatsapp
+- cliente_email -> crm_clientes.email
+- cliente_endereco -> crm_clientes.endereco
+- cliente_bairro -> crm_clientes.bairro
+- cliente_id_cidade -> crm_clientes.cidade_id
+- cliente_id_estado -> crm_clientes.estado_id
+- cliente_cep -> crm_clientes.cep
+- cliente_data_cadastro -> crm_clientes.data_cadastro
+- cliente_data_ultima_compra -> crm_clientes.data_ultima_compra
+- cliente_inativo -> crm_clientes.inativo
+- cliente_ciclo_compras -> crm_clientes.ciclo_compras
+
+Vendedor:
+
+- uniplus_vendedor_id -> crm_vendedores.uniplus_id
+- vendedor_nome -> crm_vendedores.nome
+- vendedor_email -> crm_vendedores.email
+- vendedor_celular -> crm_vendedores.celular
+- vendedor_whatsapp -> crm_vendedores.whatsapp
+- vendedor_inativo -> crm_vendedores.inativo
+
+Operador:
+
+- operador_usuario_id e operador_usuario_nome servem para auditoria.
+- Nao usar como vendedor comercial.
+
+Item:
+
+- uniplus_item_id -> crm_itens_venda.uniplus_id
+- item_uniplus_venda_id -> deve bater com uniplus_venda_id da venda
+- item_uniplus_venda_internal_id -> deve bater com d.id interno
+- uniplus_produto_id -> crm_produtos.uniplus_id
+- produto_codigo/produto_codigo_item -> crm_produtos.codigo / crm_itens_venda.codigo_produto
+- produto_nome/produto_nome_item -> crm_produtos.nome / crm_itens_venda.nome_produto
+- item_quantidade -> crm_itens_venda.quantidade
+- item_valor_estimado -> crm_itens_venda.valor_estimado
+
+Produto:
+
+- uniplus_produto_id -> crm_produtos.uniplus_id
+- produto_codigo -> crm_produtos.codigo
+- produto_nome -> crm_produtos.nome
+- produto_tipo -> crm_produtos.tipo
+- produto_departamento -> crm_produtos.departamento
+- produto_fabricante_id -> crm_produtos.fabricante_id
+- produto_preco -> crm_produtos.preco
+- produto_data_ultima_venda -> crm_produtos.data_ultima_venda
+- produto_data_ultima_compra -> crm_produtos.data_ultima_compra
+- produto_tipo_produto -> crm_produtos.tipo_produto
+- produto_utiliza_crm -> crm_produtos.utiliza_crm / recompra_ativa
+
+================================================================================
+15. CUIDADOS PARA NAO DAR ERRO
+================================================================================
+
+1. Nao usar d.id como venda visivel.
+2. Nao usar d.idusuario como vendedor comercial.
+3. Validar a venda 330670 antes da exportacao grande.
+4. Exportar CSV com cabecalho.
+5. Conferir se o separador e virgula; o importador atual espera CSV separado
+   por virgula.
+6. Conferir encoding. Se aparecer texto quebrado, ajustar exportacao para UTF-8.
+7. Conferir invalidRows no JSON gerado.
+8. Nao commitar .env.local.
+9. Nao commitar CSV bruto real se ele tiver dados sensiveis.
+10. Rodar npm run build antes de push.
+11. Depois de push para producao, conferir /api/health.
+12. Se voltar 503, verificar Hostinger logs e ultimo commit.
+
+================================================================================
+16. COMO RECRIAR DADOS DE APRESENTACAO NO SUPABASE
+================================================================================
+
+Se precisar preparar a base demonstrativa de novo:
+
+1. Entrar como admin.
+2. Rodar POST /api/crm/bootstrap.
+
+Isso popula:
+
+- clientes
+- vendedores
+- produtos
+- vendas
+- itens
+- alertas
+- oportunidades
+- agenda
+
+Os 12 contatos/retornos comerciais foram criados por API em /api/crm/workspace.
+Se a base for resetada e eles sumirem, recriar contatos pelo proprio CRM ou por
+script usando a acao:
+
+{
+  "action": "create_contact",
+  "record": {
+    "customerId": "...",
+    "customerName": "...",
+    "outcome": "interested",
+    "note": "Cliente confirmou interesse e pediu reserva para retirada.",
+    "nextContact": "2026-07-03",
+    "contactedAt": "2026-07-02",
+    "channel": "WhatsApp",
+    "responsible": "Nome do vendedor"
+  }
+}
+
+Outcomes aceitos:
+
+- not_interested
+- follow_up
+- no_answer
+- interested
+- invalid_number
+
+Canais aceitos:
+
+- WhatsApp
+- Telefone
+- Visita
+- Presencial
+- Email
+
+================================================================================
+17. PLANO DE IMPLEMENTACAO DO HENNDER SYNC
+================================================================================
+
+Etapa 1 - Validacao SQL manual
+
+- Rodar SQL de validacao 330670.
+- Confirmar d.codigo, d.id, d.idrepresentante, d.idusuario.
+- Rodar SQL corrigido com LIMIT 100.
+- Exportar CSV.
+- Gerar fixture JSON.
+- Conferir numeros.
+
+Etapa 2 - Importador local mais robusto
+
+- Ajustar scripts/uniplus-sample-importer.mjs se o CSV vier com ponto e virgula.
+- Adicionar opcao --delimiter.
+- Adicionar relatorio de erros mais claro.
+- Testar com venda multi-item.
+
+Etapa 3 - Repositorio PostgreSQL real
+
+- Instalar pg.
+- Criar conexao via UNIPLUS_DATABASE_URL.
+- Criar PostgresUniplusSaleRepository.
+- Criar PostgresUniplusClientRepository.
+- Criar PostgresUniplusProductRepository.
+- Criar PostgresUniplusSellerRepository.
+
+Etapa 4 - CLI Hennder Sync
+
+Comando desejado:
+
+node scripts/hennder-sync.mjs --since auto
+node scripts/hennder-sync.mjs --since 2026-07-01T00:00:00-03:00
+node scripts/hennder-sync.mjs --dry-run
+
+Etapa 5 - Enviar para Supabase
+
+- Usar SupabaseCrmSyncRepository.
+- Fazer upsert.
+- Registrar crm_sincronizacoes.
+- Registrar crm_vendas_ignoradas.
+
+Etapa 6 - Automatizar
+
+- Criar tarefa no Windows Task Scheduler.
+- Rodar a cada 15 ou 30 minutos.
+- Salvar logs em pasta local, por exemplo:
+  C:\HennderSync\logs
+
+Etapa 7 - Dashboard real
+
+- Criar provider Supabase para snapshot.
+- Fazer CRM ler Supabase como fonte principal.
+- Manter mock apenas como fallback/demo.
+
+================================================================================
+18. RESUMO EXECUTIVO PARA AMANHA
+================================================================================
+
+O Hennder CRM ja esta online e funcional para apresentacao.
+A parte visual e operacional ja esta pronta para demonstrar.
+O login ja esta ligado ao Supabase.
+O banco Supabase ja tem massa demo e dados operacionais de apresentacao.
+A Hostinger esta usando start por server.js para evitar 503.
+
+O trabalho de amanha e criar o Hennder Sync:
+
+1. Validar SQL no PostgreSQL real do Uniplus.
+2. Confirmar venda 330670.
+3. Exportar dados com o SQL corrigido.
+4. Gerar fixture ou, preferencialmente, implementar conexao direta com pg.
+5. Enviar dados para Supabase de forma idempotente.
+6. Depois trocar o snapshot do CRM para ler Supabase real.
+
+Regra de ouro:
+
+O CRM hospedado nao acessa o PostgreSQL local.
+Quem acessa o PostgreSQL local e o Hennder Sync rodando no computador do cliente.
+
