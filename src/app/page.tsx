@@ -1075,6 +1075,7 @@ function Topbar({
 }) {
   const ThemeIcon = theme === "dark" ? Moon : Sun;
   const [actionOpen, setActionOpen] = useState(false);
+  const quickActionRef = useRef<HTMLDivElement>(null);
   const quickActions: Array<{
     id: QuickAction;
     label: string;
@@ -1087,6 +1088,21 @@ function Topbar({
     { id: "agenda", label: "Novo compromisso", description: "Agendar ligacao, visita, retorno ou recompra.", icon: CalendarDays },
     { id: "contact", label: "Registrar retorno", description: "Salvar resultado de contato com cliente.", icon: MessageCircle },
   ];
+
+  useEffect(() => {
+    if (!actionOpen) {
+      return;
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      if (!quickActionRef.current?.contains(event.target as Node)) {
+        setActionOpen(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [actionOpen]);
 
   return (
     <header className="crm-topbar sticky top-0 z-20 border-b border-blue-700/30 bg-[#0753a6] text-white shadow-[0_4px_18px_rgba(6,61,128,0.18)]">
@@ -1119,7 +1135,7 @@ function Topbar({
               <option value="dark">Dark profundo</option>
             </select>
           </label>
-          <div className="relative hidden sm:block">
+          <div ref={quickActionRef} className="relative hidden sm:block">
             <button
               type="button"
               onClick={() => setActionOpen((current) => !current)}
