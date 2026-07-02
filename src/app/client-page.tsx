@@ -103,6 +103,10 @@ type ContactRecord = CrmContactRecord;
 type Theme = "light" | "dark";
 type CustomerRow = CustomerViewModel;
 type AlertRow = AlertViewModel;
+type SaleRow = (typeof crmViewModel.snapshot.sales)[number];
+type SaleItemRow = (typeof crmViewModel.snapshot.saleItems)[number];
+type ProductRow = (typeof crmViewModel.snapshot.products)[number];
+type SellerRow = (typeof crmViewModel.snapshot.sellers)[number];
 type QuickAction = "manual-alert" | "manual-customer" | "opportunity" | "agenda" | "contact";
 type ChatMessage = {
   id: string;
@@ -128,16 +132,11 @@ const contactOutcomeLabels: Record<ContactOutcome, string> = {
 
 const {
   snapshot,
-  kpis: serviceKpis,
   customers,
   alerts,
-  reportBars,
   repurchaseTrend,
-  categoryData,
 } = crmViewModel;
 const { sellers, sales, saleItems, dashboard } = snapshot;
-const kpiIcons = [UsersRound, Clock3, AlertTriangle, Target, CircleDollarSign, ShieldCheck];
-const kpis = serviceKpis.map((kpi, index) => ({ ...kpi, icon: kpiIcons[index] }));
 
 type NavItem = { id: View; label: string; description: string; icon: typeof Activity };
 type NavGroup = { title: string; items: NavItem[] };
@@ -188,7 +187,21 @@ const navGroups: NavGroup[] = [
   },
 ];
 
-const sellerAllowedViews: View[] = ["dashboard", "clientes", "recompra", "agenda", "carteira", "atividades", "ia"];
+const sellerAllowedViews: View[] = [
+  "dashboard",
+  "clientes",
+  "vendas",
+  "produtos",
+  "perfil",
+  "recuperacao",
+  "recompra",
+  "carteira",
+  "atividades",
+  "oportunidades",
+  "agenda",
+  "ia",
+  "relatorios",
+];
 const supervisorBlockedViews: View[] = ["configuracoes"];
 export default function Home() {
   const [user, setUser] = useState<CrmSessionUser | null>(null);
@@ -205,9 +218,6 @@ export default function Home() {
   const [manualAlerts, setManualAlerts] = useState<AlertRow[]>([]);
   const [quickAction, setQuickAction] = useState<QuickAction | null>(null);
   const [isSigningOut, setIsSigningOut] = useState(false);
-
-  const appCustomers = [...manualCustomers, ...customers];
-  const appAlerts = [...manualAlerts, ...alerts];
 
   useEffect(() => {
     let active = true;
@@ -294,6 +304,16 @@ export default function Home() {
       />
     );
   }
+
+  const scopedData = buildScopedCrmData(user, manualCustomers, manualAlerts, agendaItems, opportunityItems);
+  const appCustomers = scopedData.customers;
+  const appAlerts = scopedData.alerts;
+  const appContactRecords = filterContactRecordsForData(contactRecords, appCustomers);
+  const safeSelectedCustomer =
+    appCustomers.find((customer) => customer.id === selectedCustomer.id) ??
+    appCustomers[0] ??
+    selectedCustomer;
+  const visibleView = canAccessView(user, activeView) ? activeView : "dashboard";
 
   const openProfile = (customer: CustomerRow) => {
     setSelectedCustomer(customer);
@@ -390,95 +410,132 @@ export default function Home() {
             }}
           />
           <motion.div
-            key={activeView}
+            key={visibleView}
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.32 }}
             className="mx-auto w-full max-w-[1560px] px-3 py-4 sm:px-5 lg:px-6"
           >
-            {activeView === "dashboard" && (
+            {visibleView === "dashboard" && (
               <Dashboard
                 customers={appCustomers}
                 openProfile={openProfile}
-                contactRecords={contactRecords}
+                contactRecords={appContactRecords}
                 openRecovery={() => setActiveView("recuperacao")}
                 theme={theme}
+                sales={scopedData.sales}
+                saleItems={scopedData.saleItems}
+                products={scopedData.products}
+                sellers={scopedData.sellers}
               />
             )}
-            {activeView === "resultados" && (
+            {visibleView === "resultados" && (
               <CrmResults
                 customers={appCustomers}
                 alerts={appAlerts}
-                opportunities={opportunityItems}
-                contactRecords={contactRecords}
+                opportunities={scopedData.opportunities}
+                contactRecords={appContactRecords}
               />
             )}
-            {activeView === "clientes" && <Customers customers={appCustomers} openProfile={openProfile} />}
-            {activeView === "vendas" && <SalesModule customers={appCustomers} />}
-            {activeView === "produtos" && <ProductsModule customers={appCustomers} alerts={appAlerts} />}
-            {activeView === "recuperacao" && (
+            {visibleView === "clientes" && <Customers customers={appCustomers} openProfile={openProfile} />}
+            {visibleView === "vendas" && (
+              <SalesModule
+                customers={appCustomers}
+                sales={scopedData.sales}
+                saleItems={scopedData.saleItems}
+                alerts={appAlerts}
+              />
+            )}
+            {visibleView === "produtos" && (
+              <ProductsModule
+                customers={appCustomers}
+                alerts={appAlerts}
+                products={scopedData.products}
+                sales={scopedData.sales}
+                saleItems={scopedData.saleItems}
+              />
+            )}
+            {visibleView === "recuperacao" && (
               <RecoveryCustomers
                 customers={appCustomers}
                 openProfile={openProfile}
-                contactRecords={contactRecords}
+                contactRecords={appContactRecords}
                 onRegisterContact={registerContact}
               />
             )}
-            {activeView === "perfil" && (
+            {visibleView === "perfil" && (
               <CustomerProfile
                 alerts={appAlerts}
-                customer={selectedCustomer}
-                contactRecords={contactRecords.filter((record) => record.customerId === selectedCustomer.id)}
+                customer={safeSelectedCustomer}
+                contactRecords={appContactRecords.filter((record) => record.customerId === safeSelectedCustomer.id)}
+                sales={scopedData.sales}
+                saleItems={scopedData.saleItems}
+                sellers={scopedData.sellers}
               />
             )}
-            {activeView === "recompra" && (
+            {visibleView === "recompra" && (
               <RepurchaseAlerts
                 alerts={appAlerts}
                 customers={appCustomers}
                 alertStatuses={alertStatuses}
                 onStatusChange={updateAlertStatus}
+                onRegisterContact={registerContact}
               />
             )}
-            {activeView === "carteira" && <SellerPortfolio customers={appCustomers} alerts={appAlerts} openProfile={openProfile} />}
-            {activeView === "vendedores" && <SellersModule customers={appCustomers} alerts={appAlerts} />}
-            {activeView === "saude" && <DataHealth customers={appCustomers} openProfile={openProfile} />}
-            {activeView === "atividades" && <ActivitiesModule contactRecords={contactRecords} />}
-            {activeView === "campanhas" && <CampaignsModule customers={appCustomers} alerts={appAlerts} />}
-            {activeView === "oportunidades" && (
-              <Opportunities
-                items={opportunityItems}
+            {visibleView === "carteira" && (
+              <SellerPortfolio
+                customers={appCustomers}
+                alerts={appAlerts}
+                openProfile={openProfile}
+                onRegisterContact={registerContact}
                 user={user}
-                onSave={saveOpportunity}
-                onDelete={deleteOpportunity}
+                sellers={scopedData.sellers}
               />
             )}
-            {activeView === "agenda" && (
-              <Agenda
-                items={agendaItems}
-                user={user}
-                onSave={saveAgendaEvent}
-                onDelete={deleteAgendaEvent}
-              />
+            {visibleView === "vendedores" && <SellersModule customers={appCustomers} alerts={appAlerts} />}
+            {visibleView === "saude" && <DataHealth customers={appCustomers} openProfile={openProfile} />}
+            {visibleView === "atividades" && <ActivitiesModule contactRecords={appContactRecords} />}
+            {visibleView === "campanhas" && <CampaignsModule customers={appCustomers} alerts={appAlerts} />}
+            {visibleView === "oportunidades" && (
+            <Opportunities
+              items={scopedData.opportunities}
+              user={user}
+              customers={appCustomers}
+              sellers={scopedData.sellers}
+              onSave={saveOpportunity}
+              onDelete={deleteOpportunity}
+            />
             )}
-            {activeView === "ia" && (
+            {visibleView === "agenda" && (
+            <Agenda
+              items={scopedData.agenda}
+              user={user}
+              customers={appCustomers}
+              sellers={scopedData.sellers}
+              onSave={saveAgendaEvent}
+              onDelete={deleteAgendaEvent}
+            />
+            )}
+            {visibleView === "ia" && (
               <CommercialAi
                 customers={appCustomers}
                 alerts={appAlerts}
-                opportunities={opportunityItems}
-                agenda={agendaItems}
-                contactRecords={contactRecords}
+                opportunities={scopedData.opportunities}
+                agenda={scopedData.agenda}
+                contactRecords={appContactRecords}
               />
             )}
-            {activeView === "motor-recompra" && <RepurchaseEngineModule alerts={appAlerts} />}
-            {activeView === "sincronizacao" && <SyncModule />}
-            {activeView === "configuracoes" && <SettingsModule user={user} sellers={sellers} />}
-            {activeView === "relatorios" && (
+            {visibleView === "motor-recompra" && <RepurchaseEngineModule alerts={appAlerts} />}
+            {visibleView === "sincronizacao" && <SyncModule />}
+            {visibleView === "configuracoes" && <SettingsModule user={user} sellers={sellers} />}
+            {visibleView === "relatorios" && (
               <Reports
                 theme={theme}
                 customers={appCustomers}
                 alerts={appAlerts}
-                opportunities={opportunityItems}
-                contactRecords={contactRecords}
+                opportunities={scopedData.opportunities}
+                contactRecords={appContactRecords}
+                products={scopedData.products}
               />
             )}
           </motion.div>
@@ -506,6 +563,119 @@ export default function Home() {
       {isSigningOut && <SystemExitOverlay />}
     </main>
   );
+}
+
+type ScopedCrmData = {
+  customers: CustomerRow[];
+  alerts: AlertRow[];
+  sales: SaleRow[];
+  saleItems: SaleItemRow[];
+  products: ProductRow[];
+  sellers: SellerRow[];
+  opportunities: CrmOpportunity[];
+  agenda: CrmAgendaEvent[];
+};
+
+function canAccessView(user: CrmSessionUser, view: View) {
+  if (user.role === "vendedor") return sellerAllowedViews.includes(view);
+  if (user.role === "supervisor") return !supervisorBlockedViews.includes(view);
+  return true;
+}
+
+function buildScopedCrmData(
+  user: CrmSessionUser,
+  manualCustomers: CustomerRow[],
+  manualAlerts: AlertRow[],
+  agendaItems: CrmAgendaEvent[],
+  opportunityItems: CrmOpportunity[],
+): ScopedCrmData {
+  const baseData = {
+    customers: [...manualCustomers, ...customers],
+    alerts: [...manualAlerts, ...alerts],
+    sales,
+    saleItems,
+    products: snapshot.products,
+    sellers,
+    opportunities: opportunityItems,
+    agenda: agendaItems,
+  };
+
+  if (user.role !== "vendedor" || !user.sellerId) {
+    return baseData;
+  }
+
+  const seller = resolveSellerForUser(user.sellerId);
+  const scopedSellerId = seller?.id;
+  const scopedSales = sales.filter((sale) => sale.sellerId === scopedSellerId);
+  const saleIds = new Set(scopedSales.map((sale) => sale.id));
+  const scopedSaleItems = saleItems.filter((item) => saleIds.has(item.saleId));
+  const saleCustomerIds = new Set(scopedSales.map((sale) => sale.customerId));
+  const scopedAlerts = baseData.alerts.filter(
+    (alert) =>
+      alert.sellerId === scopedSellerId ||
+      (seller ? alert.seller === seller.name : false) ||
+      saleCustomerIds.has(alert.customerId),
+  );
+  const alertCustomerIds = new Set(scopedAlerts.map((alert) => alert.customerId));
+  const scopedOpportunities = opportunityItems.filter(
+    (opportunity) =>
+      opportunity.sellerId === scopedSellerId ||
+      saleCustomerIds.has(opportunity.customerId) ||
+      alertCustomerIds.has(opportunity.customerId),
+  );
+  const opportunityCustomerIds = new Set(scopedOpportunities.map((opportunity) => opportunity.customerId));
+  const allowedCustomerIds = new Set([
+    ...saleCustomerIds,
+    ...alertCustomerIds,
+    ...opportunityCustomerIds,
+  ]);
+  const scopedCustomers = baseData.customers.filter(
+    (customer) =>
+      customer.preferredSellerId === scopedSellerId ||
+      allowedCustomerIds.has(customer.id),
+  );
+  const customerIds = new Set(scopedCustomers.map((customer) => customer.id));
+  const productIds = new Set(scopedSaleItems.flatMap((item) => (item.productId ? [item.productId] : [])));
+  const alertProductNames = new Set(scopedAlerts.map((alert) => alert.product));
+  const scopedProducts = snapshot.products.filter(
+    (product) => productIds.has(product.id) || alertProductNames.has(product.name),
+  );
+
+  return {
+    customers: scopedCustomers,
+    alerts: scopedAlerts.filter((alert) => customerIds.has(alert.customerId)),
+    sales: scopedSales.filter((sale) => customerIds.has(sale.customerId)),
+    saleItems: scopedSaleItems,
+    products: scopedProducts,
+    sellers: seller ? [seller] : [],
+    opportunities: scopedOpportunities.filter((opportunity) => customerIds.has(opportunity.customerId)),
+    agenda: agendaItems.filter(
+      (event) =>
+            event.sellerId === scopedSellerId ||
+        (event.customerId ? customerIds.has(event.customerId) : false),
+    ),
+  };
+}
+
+function filterContactRecordsForData(records: ContactRecord[], scopedCustomers: CustomerRow[]) {
+  const customerIds = new Set(scopedCustomers.map((customer) => customer.id));
+  return records.filter((record) => customerIds.has(record.customerId));
+}
+
+function getAvailableSellers(user: CrmSessionUser) {
+  if (user.role !== "vendedor" || !user.sellerId) return sellers;
+  const seller = resolveSellerForUser(user.sellerId);
+  return seller ? [seller] : [];
+}
+
+function resolveSellerForUser(sellerId?: string) {
+  if (!sellerId) return undefined;
+  const exactSeller = sellers.find((item) => item.id === sellerId);
+  if (exactSeller) return exactSeller;
+  if (!sellers.length) return undefined;
+
+  const hash = [...sellerId].reduce((total, char) => total + char.charCodeAt(0), 0);
+  return sellers[hash % sellers.length];
 }
 
 async function mutateWorkspace<T = unknown>(command: unknown): Promise<T> {
@@ -620,10 +790,13 @@ function QuickActionModals({
   onCreateContact: (record: Omit<ContactRecord, "id">) => Promise<void>;
 }) {
   if (!action) return null;
+  const availableSellers = getAvailableSellers(user);
 
   if (action === "manual-customer") {
     return (
       <ManualCustomerModal
+        user={user}
+        sellers={availableSellers}
         onClose={onClose}
         onSave={(customer) => {
           onCreateCustomer(customer);
@@ -637,6 +810,7 @@ function QuickActionModals({
     return (
       <ManualAlertModal
         customers={customers}
+        sellers={availableSellers}
         user={user}
         onClose={onClose}
         onSave={(alert) => {
@@ -651,6 +825,8 @@ function QuickActionModals({
     return (
       <OpportunityModal
         user={user}
+        customers={customers}
+        sellers={availableSellers}
         onClose={onClose}
         onSave={async (opportunity) => {
           await onCreateOpportunity(opportunity);
@@ -665,6 +841,8 @@ function QuickActionModals({
     return (
       <AgendaEventModal
         user={user}
+        customers={customers}
+        sellers={availableSellers}
         onClose={onClose}
         onSave={async (event) => {
           await onCreateAgenda(event);
@@ -689,9 +867,13 @@ function QuickActionModals({
 }
 
 function ManualCustomerModal({
+  user,
+  sellers,
   onClose,
   onSave,
 }: {
+  user: CrmSessionUser;
+  sellers: SellerRow[];
   onClose: () => void;
   onSave: (customer: CustomerRow) => void;
 }) {
@@ -699,7 +881,8 @@ function ManualCustomerModal({
   const [phone, setPhone] = useState("");
   const [city, setCity] = useState("Manhuacu");
   const [category, setCategory] = useState("Cliente manual");
-  const [sellerId, setSellerId] = useState(sellers[0]?.id ?? "");
+  const defaultSeller = resolveSellerForUser(user.sellerId) ?? sellers[0];
+  const [sellerId, setSellerId] = useState(defaultSeller?.id ?? "");
   const [cycleDays, setCycleDays] = useState("45");
 
   return (
@@ -754,7 +937,7 @@ function ManualCustomerModal({
         <div className="grid gap-4 sm:grid-cols-3">
           <FormInput label="Categoria" value={category} onChange={setCategory} />
           <FormInput label="Ciclo estimado (dias)" value={cycleDays} onChange={setCycleDays} type="number" />
-          <FormSelect label="Vendedor responsavel" value={sellerId} onChange={setSellerId}>
+          <FormSelect label="Vendedor responsavel" value={sellerId} onChange={setSellerId} disabled={user.role === "vendedor"}>
             {sellers.map((seller) => <option key={seller.id} value={seller.id}>{seller.name}</option>)}
           </FormSelect>
         </div>
@@ -769,17 +952,19 @@ function ManualCustomerModal({
 
 function ManualAlertModal({
   customers,
+  sellers,
   user,
   onClose,
   onSave,
 }: {
   customers: CustomerRow[];
+  sellers: SellerRow[];
   user: CrmSessionUser;
   onClose: () => void;
   onSave: (alert: AlertRow) => void;
 }) {
   const defaultCustomer = customers[0];
-  const defaultSeller = sellers.find((seller) => seller.id === user.sellerId) ?? sellers[0];
+  const defaultSeller = resolveSellerForUser(user.sellerId) ?? sellers[0];
   const [customerId, setCustomerId] = useState(defaultCustomer?.id ?? "");
   const [product, setProduct] = useState("Racao premium 15kg");
   const [days, setDays] = useState("45");
@@ -809,6 +994,7 @@ function ManualAlertModal({
             priority: capitalizePriority(priority),
             priorityCode: priority,
             seller: seller?.name ?? customer.preferredSeller,
+            sellerId: seller?.id ?? customer.preferredSellerId,
             department: "Manual",
             status: "pendente",
             origin: "manual",
@@ -1319,10 +1505,20 @@ function CrmResults({
   );
 }
 
-function SalesModule({ customers }: { customers: CustomerRow[] }) {
+function SalesModule({
+  customers,
+  sales,
+  saleItems,
+  alerts,
+}: {
+  customers: CustomerRow[];
+  sales: SaleRow[];
+  saleItems: SaleItemRow[];
+  alerts: AlertRow[];
+}) {
   const [selectedSaleId, setSelectedSaleId] = useState(sales[0]?.id ?? "");
   const customerById = new Map(customers.map((customer) => [customer.id, customer]));
-  const itemsBySale = new Map<string, typeof saleItems>();
+  const itemsBySale = new Map<string, SaleItemRow[]>();
   for (const item of saleItems) {
     const current = itemsBySale.get(item.saleId) ?? [];
     current.push(item);
@@ -1338,7 +1534,7 @@ function SalesModule({ customers }: { customers: CustomerRow[] }) {
         <MetricCard label="Vendas importadas" value={`${sales.length}`} />
         <MetricCard label="Itens importados" value={`${saleItems.length}`} />
         <MetricCard label="Ticket médio" value={formatCurrency(sales.length ? sales.reduce((total, sale) => total + sale.totalValue, 0) / sales.length : 0)} />
-        <MetricCard label="Vinculadas a alertas" value={`${snapshot.alerts.filter((alert) => sales.some((sale) => sale.id === alert.saleId)).length}`} />
+        <MetricCard label="Alertas da carteira" value={`${alerts.length}`} />
       </div>
       <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
         <Panel title="Listagem de vendas" icon={ShoppingBag} action={`${sales.length} registros únicos`}>
@@ -1396,9 +1592,21 @@ function SalesModule({ customers }: { customers: CustomerRow[] }) {
   );
 }
 
-function ProductsModule({ customers, alerts }: { customers: CustomerRow[]; alerts: AlertRow[] }) {
+function ProductsModule({
+  customers,
+  alerts,
+  products,
+  sales,
+  saleItems,
+}: {
+  customers: CustomerRow[];
+  alerts: AlertRow[];
+  products: ProductRow[];
+  sales: SaleRow[];
+  saleItems: SaleItemRow[];
+}) {
   const salesById = new Map(sales.map((sale) => [sale.id, sale]));
-  const productStats = snapshot.products.map((product) => {
+  const productStats = products.map((product) => {
     const productItems = saleItems.filter((item) => item.productId === product.id);
     const buyerIds = new Set(productItems.flatMap((item) => {
       const sale = salesById.get(item.saleId);
@@ -1419,9 +1627,9 @@ function ProductsModule({ customers, alerts }: { customers: CustomerRow[]; alert
     <div className="space-y-5">
       <PageTitle eyebrow="Comercial" title="Produtos" description="Gestão comercial dos produtos, recorrência e potencial de recompra." />
       <div className="grid gap-4 md:grid-cols-4">
-        <MetricCard label="Produtos" value={`${snapshot.products.length}`} />
-        <MetricCard label="Usam CRM" value={`${snapshot.products.filter((product) => product.usesCrm).length}`} />
-        <MetricCard label="Recompra ativa" value={`${snapshot.products.filter((product) => product.repurchaseActive).length}`} />
+        <MetricCard label="Produtos" value={`${products.length}`} />
+        <MetricCard label="Usam CRM" value={`${products.filter((product) => product.usesCrm).length}`} />
+        <MetricCard label="Recompra ativa" value={`${products.filter((product) => product.repurchaseActive).length}`} />
         <MetricCard label="Com alertas" value={`${new Set(alerts.map((alert) => alert.product)).size}`} />
       </div>
       <Panel title="Catálogo comercial" icon={ClipboardList} action={`${productStats.length} produtos`}>
@@ -1937,17 +2145,28 @@ function Dashboard({
   contactRecords,
   openRecovery,
   theme,
+  sales,
+  saleItems,
+  products,
+  sellers,
 }: {
   customers: CustomerRow[];
   openProfile: (customer: CustomerRow) => void;
   contactRecords: ContactRecord[];
   openRecovery: () => void;
   theme: Theme;
+  sales: SaleRow[];
+  saleItems: SaleItemRow[];
+  products: ProductRow[];
+  sellers: SellerRow[];
 }) {
   const chartColors = getChartColors(theme);
   const inactiveCustomers = [...customers]
     .filter((customer) => customer.activityStatus !== "ativo")
     .sort((a, b) => b.days - a.days);
+  const dashboardKpis = buildDashboardKpis(customers);
+  const scopedTrend = buildRepurchaseTrendForSales(sales);
+  const scopedCategoryData = buildCategoryDataForItems(saleItems, products);
 
   return (
     <div className="space-y-5">
@@ -1957,7 +2176,7 @@ function Dashboard({
         description="Priorize recuperação, recompra e venda cruzada com dados acionáveis."
       />
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        {kpis.map((kpi, index) => (
+        {dashboardKpis.map((kpi, index) => (
           <motion.div
             key={kpi.label}
             initial={{ opacity: 0, y: 12 }}
@@ -2047,7 +2266,7 @@ function Dashboard({
           <div className="h-80">
             <MeasuredChart>
               {({ width, height }) => (
-                <AreaChart width={width} height={height} data={repurchaseTrend}>
+                  <AreaChart width={width} height={height} data={scopedTrend}>
                   <defs>
                     <linearGradient id="repurchase" x1="0" x2="0" y1="0" y2="1">
                       <stop offset="5%" stopColor="#10b981" stopOpacity={0.32} />
@@ -2070,8 +2289,8 @@ function Dashboard({
             <MeasuredChart>
               {({ width, height }) => (
                 <RePieChart width={width} height={height}>
-                  <Pie data={categoryData} dataKey="value" nameKey="name" innerRadius={62} outerRadius={96} paddingAngle={4}>
-                    {categoryData.map((entry) => (
+                  <Pie data={scopedCategoryData} dataKey="value" nameKey="name" innerRadius={62} outerRadius={96} paddingAngle={4}>
+                    {scopedCategoryData.map((entry) => (
                       <Cell key={entry.name} fill={entry.color} />
                     ))}
                   </Pie>
@@ -2081,7 +2300,7 @@ function Dashboard({
             </MeasuredChart>
           </div>
           <div className="grid grid-cols-2 gap-2">
-            {categoryData.map((item) => (
+            {scopedCategoryData.map((item) => (
               <div key={item.name} className="flex items-center gap-2 text-sm text-slate-600">
                 <span className="h-2.5 w-2.5 rounded-full" style={{ background: item.color }} />
                 {item.name}
@@ -2428,10 +2647,16 @@ function CustomerProfile({
   alerts,
   customer,
   contactRecords,
+  sales,
+  saleItems,
+  sellers,
 }: {
   alerts: AlertRow[];
   customer: CustomerRow;
   contactRecords: ContactRecord[];
+  sales: SaleRow[];
+  saleItems: SaleItemRow[];
+  sellers: SellerRow[];
 }) {
   const customerSales = sales
     .filter((sale) => sale.customerId === customer.id)
@@ -2620,14 +2845,17 @@ function RepurchaseAlerts({
   customers,
   alertStatuses,
   onStatusChange,
+  onRegisterContact,
 }: {
   alerts: AlertRow[];
   customers: CustomerRow[];
   alertStatuses: Record<string, RepurchaseAlertStatus>;
   onStatusChange: (id: string, status: RepurchaseAlertStatus) => Promise<void>;
+  onRegisterContact: (record: Omit<ContactRecord, "id">) => Promise<void>;
 }) {
   const [filter, setFilter] = useState("todos");
   const [page, setPage] = useState(1);
+  const [contactAlert, setContactAlert] = useState<AlertRow | null>(null);
   const pageSize = 20;
   const nextSevenDays = addIsoDays(crmReferenceDate, 7);
   const filteredAlerts = alerts.filter((alert) => {
@@ -2701,8 +2929,8 @@ function RepurchaseAlerts({
                         compact
                       />
                     )}
+                    {customer && <AlertAction label="Registrar retorno" onClick={() => setContactAlert(alert)} />}
                     <AlertAction label="Contatado" onClick={() => void onStatusChange(alert.id, "contatado")} />
-                    <AlertAction label="Convertido" onClick={() => void onStatusChange(alert.id, "convertido")} />
                     <AlertAction label="Ignorar" onClick={() => void onStatusChange(alert.id, "ignorado")} />
                   </div>
                 </div>
@@ -2743,6 +2971,23 @@ function RepurchaseAlerts({
           </div>
         )}
       </Panel>
+      {contactAlert && (() => {
+        const customer = customers.find((item) => item.id === contactAlert.customerId);
+        if (!customer) return null;
+
+        return (
+          <ContactOutcomeModal
+            customer={customer}
+            defaultResponsible={contactAlert.seller}
+            onClose={() => setContactAlert(null)}
+            onSave={async (record) => {
+              await onRegisterContact(record);
+              await onStatusChange(contactAlert.id, "contatado");
+              setContactAlert(null);
+            }}
+          />
+        );
+      })()}
     </div>
   );
 }
@@ -2804,15 +3049,34 @@ function SellerPortfolio({
   customers,
   alerts,
   openProfile,
+  onRegisterContact,
+  user,
+  sellers,
 }: {
   customers: CustomerRow[];
   alerts: AlertRow[];
   openProfile: (customer: CustomerRow) => void;
+  onRegisterContact: (record: Omit<ContactRecord, "id">) => Promise<void>;
+  user: CrmSessionUser;
+  sellers: SellerRow[];
 }) {
-  const [sellerId, setSellerId] = useState(sellers[0]?.id ?? "");
+  const [selectedSellerId, setSelectedSellerId] = useState(sellers[0]?.id ?? "");
+  const [contactCustomer, setContactCustomer] = useState<CustomerRow | null>(null);
+  const sellerId = user.role === "vendedor"
+    ? resolveSellerForUser(user.sellerId)?.id ?? ""
+    : sellers.some((item) => item.id === selectedSellerId)
+      ? selectedSellerId
+      : sellers[0]?.id ?? "";
   const seller = sellers.find((item) => item.id === sellerId) ?? sellers[0];
-  const sellerCustomers = customers.filter((customer) => customer.preferredSellerId === seller?.id);
-  const sellerAlerts = alerts.filter((alert) => alert.seller === seller?.name);
+  const sellerCustomers = user.role === "vendedor"
+    ? customers
+    : customers.filter((customer) => customer.preferredSellerId === seller?.id);
+  const sellerAlerts = alerts.filter((alert) => alert.sellerId === seller?.id || alert.seller === seller?.name);
+  const canSwitchSeller = user.role !== "vendedor";
+  const sellerRiskCustomers = sellerCustomers.filter(
+    (customer) => customer.activityStatus === "risco" || customer.activityStatus === "perdido",
+  ).length;
+  const sellerPotentialValue = sellerCustomers.reduce((total, customer) => total + customer.potentialValue, 0);
 
   return (
     <div className="space-y-5">
@@ -2821,18 +3085,21 @@ function SellerPortfolio({
         title="Carteira do vendedor"
         description="Clientes, alertas e potencial comercial atribuídos pelo histórico real de compras."
       />
-      <Panel title="Selecionar vendedor" icon={UserRound} action={`${sellers.length} vendedores ativos`}>
+      <Panel title={canSwitchSeller ? "Selecionar vendedor" : "Minha carteira"} icon={UserRound} action={`${sellers.length} vendedores ativos`}>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {sellers.map((item) => (
             <button
               key={item.id}
               type="button"
-              onClick={() => setSellerId(item.id)}
+              onClick={() => {
+                if (canSwitchSeller) setSelectedSellerId(item.id);
+              }}
+              disabled={!canSwitchSeller}
               className={`rounded-xl border p-4 text-left transition ${
                 item.id === seller?.id
                   ? "border-cyan-400 bg-cyan-50 shadow-sm"
                   : "border-blue-100 bg-[#f8fbff] hover:border-cyan-300"
-              }`}
+              } ${canSwitchSeller ? "" : "cursor-default"}`}
             >
               <p className="font-bold text-slate-900">{item.name}</p>
               <p className="mt-1 text-xs text-slate-500">{item.customerCount} clientes preferenciais</p>
@@ -2844,19 +3111,17 @@ function SellerPortfolio({
         <>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
             <MetricCard label="Clientes da carteira" value={`${sellerCustomers.length}`} />
-            <MetricCard label="Clientes em risco" value={`${seller.riskCustomerCount}`} />
+            <MetricCard label="Clientes em risco" value={`${sellerRiskCustomers}`} />
             <MetricCard label="Alertas abertos" value={`${sellerAlerts.length}`} />
-            <MetricCard label="Potencial perdido" value={formatCurrency(seller.potentialValue)} />
+            <MetricCard label="Potencial perdido" value={formatCurrency(sellerPotentialValue)} />
             <MetricCard label="Taxa de conversão" value={`${seller.conversionRate}%`} />
           </div>
           <Panel title={`Carteira de ${seller.name}`} icon={UsersRound} action={`${sellerCustomers.length} clientes`}>
             <div className="grid gap-3 lg:grid-cols-2">
               {sellerCustomers.map((customer) => (
-                <button
+                <div
                   key={customer.id}
-                  type="button"
-                  onClick={() => openProfile(customer)}
-                  className="grid gap-3 rounded-lg border border-blue-100 bg-[#f8fbff] p-4 text-left transition hover:border-cyan-400 hover:bg-white md:grid-cols-[1fr_auto]"
+                  className="grid gap-3 rounded-lg border border-blue-100 bg-[#f8fbff] p-4 transition hover:border-cyan-400 hover:bg-white md:grid-cols-[1fr_auto]"
                 >
                   <div>
                     <p className="font-bold text-slate-900">{customer.name}</p>
@@ -2869,12 +3134,39 @@ function SellerPortfolio({
                   <div className="text-right">
                     <p className="text-xs uppercase tracking-wide text-slate-400">Potencial</p>
                     <p className="mt-1 font-bold text-orange-700">{customer.potential}</p>
+                    <div className="mt-3 flex flex-wrap justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setContactCustomer(customer)}
+                        className="rounded-lg border border-cyan-200 bg-white px-3 py-2 text-xs font-semibold text-[#0753a6] transition hover:bg-cyan-50"
+                      >
+                        Registrar retorno
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openProfile(customer)}
+                        className="rounded-lg bg-[#0753a6] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#063d7c]"
+                      >
+                        Abrir perfil
+                      </button>
+                    </div>
                   </div>
-                </button>
+                </div>
               ))}
             </div>
           </Panel>
         </>
+      )}
+      {contactCustomer && (
+        <ContactOutcomeModal
+          customer={contactCustomer}
+          defaultResponsible={seller?.name ?? user.name}
+          onClose={() => setContactCustomer(null)}
+          onSave={async (record) => {
+            await onRegisterContact(record);
+            setContactCustomer(null);
+          }}
+        />
       )}
     </div>
   );
@@ -2957,17 +3249,22 @@ function DataHealth({
 function Opportunities({
   items,
   user,
+  customers,
+  sellers,
   onSave,
   onDelete,
 }: {
   items: CrmOpportunity[];
   user: CrmSessionUser;
+  customers: CustomerRow[];
+  sellers: SellerRow[];
   onSave: (opportunity: Omit<CrmOpportunity, "id">, id?: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
 }) {
   const [editing, setEditing] = useState<CrmOpportunity | "new" | null>(null);
+  const allowedSellerId = resolveSellerForUser(user.sellerId)?.id ?? user.sellerId;
   const canManage = (item?: CrmOpportunity) =>
-    user.role !== "vendedor" || !item || item.sellerId === user.sellerId;
+    user.role !== "vendedor" || !item || item.sellerId === allowedSellerId;
 
   return (
     <div className="space-y-5">
@@ -3023,6 +3320,8 @@ function Opportunities({
         <OpportunityModal
           opportunity={editing === "new" ? undefined : editing}
           user={user}
+          customers={customers}
+          sellers={sellers}
           onClose={() => setEditing(null)}
           onSave={async (opportunity) => {
             await onSave(opportunity, editing === "new" ? undefined : editing.id);
@@ -3037,11 +3336,15 @@ function Opportunities({
 function Agenda({
   items,
   user,
+  customers,
+  sellers,
   onSave,
   onDelete,
 }: {
   items: CrmAgendaEvent[];
   user: CrmSessionUser;
+  customers: CustomerRow[];
+  sellers: SellerRow[];
   onSave: (event: Omit<CrmAgendaEvent, "id">, id?: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
 }) {
@@ -3054,7 +3357,7 @@ function Agenda({
     ["Sex", "2026-06-12"],
   ] as const;
   const canManage = (event?: CrmAgendaEvent) =>
-    user.role !== "vendedor" || !event || event.sellerId === user.sellerId;
+    user.role !== "vendedor" || !event || event.sellerId === (resolveSellerForUser(user.sellerId)?.id ?? user.sellerId);
 
   return (
     <div className="space-y-5">
@@ -3103,6 +3406,8 @@ function Agenda({
         <AgendaEventModal
           event={editing === "new" ? undefined : editing}
           user={user}
+          customers={customers}
+          sellers={sellers}
           onClose={() => setEditing(null)}
           onSave={async (event) => {
             await onSave(event, editing === "new" ? undefined : editing.id);
@@ -3117,15 +3422,19 @@ function Agenda({
 function OpportunityModal({
   opportunity,
   user,
+  customers,
+  sellers,
   onClose,
   onSave,
 }: {
   opportunity?: CrmOpportunity;
   user: CrmSessionUser;
+  customers: CustomerRow[];
+  sellers: SellerRow[];
   onClose: () => void;
   onSave: (opportunity: Omit<CrmOpportunity, "id">) => Promise<void>;
 }) {
-  const defaultSeller = sellers.find((seller) => seller.id === user.sellerId) ?? sellers[0];
+  const defaultSeller = resolveSellerForUser(user.sellerId) ?? sellers[0];
   const [customerId, setCustomerId] = useState(opportunity?.customerId ?? customers[0]?.id ?? "");
   const [sourceProductName, setSourceProductName] = useState(opportunity?.sourceProductName ?? "");
   const [suggestedProductName, setSuggestedProductName] = useState(opportunity?.suggestedProductName ?? "");
@@ -3182,15 +3491,19 @@ function OpportunityModal({
 function AgendaEventModal({
   event,
   user,
+  customers,
+  sellers,
   onClose,
   onSave,
 }: {
   event?: CrmAgendaEvent;
   user: CrmSessionUser;
+  customers: CustomerRow[];
+  sellers: SellerRow[];
   onClose: () => void;
   onSave: (event: Omit<CrmAgendaEvent, "id">) => Promise<void>;
 }) {
-  const defaultSeller = sellers.find((seller) => seller.id === user.sellerId) ?? sellers[0];
+  const defaultSeller = resolveSellerForUser(user.sellerId) ?? sellers[0];
   const [title, setTitle] = useState(event?.title ?? "");
   const [date, setDate] = useState(event?.date ?? crmReferenceDate);
   const [time, setTime] = useState(event?.time ?? "09:00");
@@ -3380,12 +3693,14 @@ function Reports({
   alerts,
   opportunities,
   contactRecords,
+  products,
 }: {
   theme: Theme;
   customers: CustomerRow[];
   alerts: AlertRow[];
   opportunities: CrmOpportunity[];
   contactRecords: ContactRecord[];
+  products: ProductRow[];
 }) {
   const chartColors = getChartColors(theme);
   const pendingAlerts = alerts.filter((alert) => alert.status === "pendente");
@@ -3398,10 +3713,11 @@ function Reports({
   const reportCards = [
     ["Clientes perdidos", `${customers.filter((customer) => customer.activityStatus === "perdido").length}`],
     ["Alertas de recompra", `${alerts.length}`],
-    ["Produtos recorrentes", `${snapshot.products.filter((product) => product.repurchaseActive).length}`],
+    ["Produtos recorrentes", `${products.filter((product) => product.repurchaseActive).length}`],
     ["Potencial perdido", formatCurrency(customers.reduce((total, customer) => total + customer.potentialValue, 0))],
     ["Qualidade da base", `${customers.length ? Math.round(customers.reduce((total, customer) => total + customer.qualityScore, 0) / customers.length) : 0}%`],
   ];
+  const scopedReportBars = buildReportBars(customers, alerts);
   const pdfReports = [
     {
       title: "Clientes para ligar",
@@ -3531,7 +3847,7 @@ function Reports({
         <div className="h-96">
           <MeasuredChart>
             {({ width, height }) => (
-              <BarChart width={width} height={height} data={reportBars}>
+              <BarChart width={width} height={height} data={scopedReportBars}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartColors.grid} />
                 <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fill: chartColors.text }} />
                 <YAxis tickLine={false} axisLine={false} tick={{ fill: chartColors.text }} />
@@ -4146,17 +4462,19 @@ function ContactOutcomeModal({
   onClose,
   onSave,
   header,
+  defaultResponsible = "Hennder CRM",
 }: {
   customer: CustomerRow;
   onClose: () => void;
   onSave: (record: Omit<ContactRecord, "id">) => Promise<void>;
   header?: React.ReactNode;
+  defaultResponsible?: string;
 }) {
   const [outcome, setOutcome] = useState<ContactOutcome>("no_answer");
   const [note, setNote] = useState("");
   const [nextContact, setNextContact] = useState("");
   const [channel, setChannel] = useState<ContactChannel>("WhatsApp");
-  const [responsible, setResponsible] = useState("Hennder CRM");
+  const [responsible, setResponsible] = useState(defaultResponsible);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -4304,6 +4622,84 @@ function addIsoDays(value: string, days: number) {
   const date = new Date(`${value.slice(0, 10)}T12:00:00Z`);
   date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);
+}
+
+function buildDashboardKpis(customers: CustomerRow[]) {
+  const activeCustomers = customers.filter((customer) => customer.activityStatus === "ativo").length;
+  const attentionCustomers = customers.filter((customer) => customer.activityStatus === "atencao").length;
+  const riskCustomers = customers.filter((customer) => customer.activityStatus === "risco").length;
+  const lostCustomers = customers.filter((customer) => customer.activityStatus === "perdido").length;
+  const potentialLost = customers.reduce((total, customer) => total + customer.potentialValue, 0);
+  const averageQuality = customers.length
+    ? Math.round(customers.reduce((total, customer) => total + customer.qualityScore, 0) / customers.length)
+    : 0;
+
+  return [
+    { label: "Clientes ativos", value: String(activeCustomers), delta: "Ate 30 dias", icon: UsersRound },
+    { label: "Em atencao", value: String(attentionCustomers), delta: "31 a 60 dias", icon: Clock3 },
+    { label: "Em risco", value: String(riskCustomers), delta: "61 a 90 dias", icon: AlertTriangle },
+    { label: "Clientes perdidos", value: String(lostCustomers), delta: "+90 dias", icon: Target },
+    { label: "Potencial perdido", value: formatCurrency(potentialLost), delta: "Estimado", icon: CircleDollarSign },
+    { label: "Qualidade da base", value: `${averageQuality}%`, delta: "Media", icon: ShieldCheck },
+  ];
+}
+
+function buildRepurchaseTrendForSales(scopedSales: SaleRow[]) {
+  const months = [
+    ["01", "Jan"],
+    ["02", "Fev"],
+    ["03", "Mar"],
+    ["04", "Abr"],
+    ["05", "Mai"],
+    ["06", "Jun"],
+  ] as const;
+
+  return months.map(([month, label]) => {
+    const monthSales = scopedSales.filter((sale) => sale.soldAt.slice(5, 7) === month);
+    const recurringCustomers = new Set(
+      monthSales
+        .map((sale) => sale.customerId)
+        .filter((customerId) => scopedSales.filter((sale) => sale.customerId === customerId).length > 1),
+    );
+
+    return {
+      mes: label,
+      recompra: monthSales.length,
+      recuperados: recurringCustomers.size,
+    };
+  });
+}
+
+function buildCategoryDataForItems(items: SaleItemRow[], products: ProductRow[]) {
+  const productById = new Map(products.map((product) => [product.id, product]));
+  const totals = new Map<string, number>();
+
+  for (const item of items) {
+    const department = item.productId ? productById.get(item.productId)?.department || "Outros" : "Outros";
+    totals.set(department, (totals.get(department) ?? 0) + item.estimatedValue);
+  }
+
+  const colors = ["#16a34a", "#0f766e", "#f59e0b", "#2563eb"];
+  const grandTotal = [...totals.values()].reduce((total, value) => total + value, 0) || 1;
+
+  return [...totals.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4)
+    .map(([name, value], index) => ({
+      name,
+      value: Math.round((value / grandTotal) * 100),
+      color: colors[index],
+    }));
+}
+
+function buildReportBars(customers: CustomerRow[], alerts: AlertRow[]) {
+  return [
+    { name: "Ativos", value: customers.filter((customer) => customer.activityStatus === "ativo").length },
+    { name: "Atencao", value: customers.filter((customer) => customer.activityStatus === "atencao").length },
+    { name: "Risco", value: customers.filter((customer) => customer.activityStatus === "risco").length },
+    { name: "Perdidos", value: customers.filter((customer) => customer.activityStatus === "perdido").length },
+    { name: "Alertas", value: alerts.length },
+  ];
 }
 
 function capitalizePriority(value: AlertRow["priorityCode"]) {
@@ -4602,7 +4998,15 @@ function compareAlertPriority(a: AlertRow, b: AlertRow) {
 }
 
 function buildSellerAttentionRanking(context: CommercialAiContext) {
-  return sellers
+  const scopedSellerIds = new Set(
+    context.customers.flatMap((customer) => customer.preferredSellerId ? [customer.preferredSellerId] : []),
+  );
+  const scopedSellerNames = new Set(context.alerts.map((alert) => alert.seller));
+  const scopedSellers = sellers.filter(
+    (seller) => scopedSellerIds.has(seller.id) || scopedSellerNames.has(seller.name),
+  );
+
+  return scopedSellers
     .map((seller) => {
       const sellerCustomers = context.customers.filter((customer) => customer.preferredSellerId === seller.id);
       const riskCustomers = sellerCustomers.filter(

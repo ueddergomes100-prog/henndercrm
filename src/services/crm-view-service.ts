@@ -55,6 +55,7 @@ export interface AlertViewModel {
   priority: string;
   priorityCode: CrmRepurchaseAlert["priority"];
   seller: string;
+  sellerId?: string;
   department: string;
   status: CrmRepurchaseAlert["status"];
   origin: CrmRepurchaseAlert["origin"];
@@ -163,6 +164,7 @@ export class CrmViewService {
         priority: capitalize(alert.priority),
         priorityCode: alert.priority,
         seller: alert.sellerName,
+        sellerId: alert.sellerId,
         department: alert.department,
         status: alert.status,
         origin: alert.origin,

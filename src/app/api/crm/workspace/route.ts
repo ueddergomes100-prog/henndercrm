@@ -31,19 +31,11 @@ export async function GET() {
   if (user.role !== "vendedor" || !user.sellerId) return Response.json(workspace);
 
   const snapshot = crmDemoService.getSnapshot();
-  const customerIds = new Set(
-    snapshot.customers
-      .filter((customer) => {
-        const seller = snapshot.sellers.find(
-          (item) => item.uniplusId === customer.preferredSeller?.sellerId,
-        );
-        return seller?.id === user.sellerId;
-      })
-      .map((customer) => customer.id),
-  );
+  const allowedSellerId = resolveSnapshotSellerId(user.sellerId);
+  const customerIds = getSellerCustomerIds(allowedSellerId);
   const alertIds = new Set(
     snapshot.alerts
-      .filter((alert) => alert.sellerId === user.sellerId)
+      .filter((alert) => alert.sellerId === allowedSellerId)
       .map((alert) => alert.id),
   );
 
@@ -52,11 +44,42 @@ export async function GET() {
     alertStatuses: Object.fromEntries(
       Object.entries(workspace.alertStatuses).filter(([id]) => alertIds.has(id)),
     ),
-    agenda: workspace.agenda.filter((event) => event.sellerId === user.sellerId),
+    agenda: workspace.agenda.filter((event) => event.sellerId === allowedSellerId),
     opportunities: workspace.opportunities.filter(
-      (opportunity) => opportunity.sellerId === user.sellerId,
+      (opportunity) => opportunity.sellerId === allowedSellerId,
     ),
   });
+}
+
+function getSellerCustomerIds(sellerId: string) {
+  const snapshot = crmDemoService.getSnapshot();
+  const customerIds = new Set<string>();
+
+  for (const customer of snapshot.customers) {
+    const preferredSeller = snapshot.sellers.find(
+      (seller) => seller.uniplusId === customer.preferredSeller?.sellerId,
+    );
+    if (preferredSeller?.id === sellerId) customerIds.add(customer.id);
+  }
+
+  for (const sale of snapshot.sales) {
+    if (sale.sellerId === sellerId) customerIds.add(sale.customerId);
+  }
+
+  for (const alert of snapshot.alerts) {
+    if (alert.sellerId === sellerId) customerIds.add(alert.customerId);
+  }
+
+  return customerIds;
+}
+
+function resolveSnapshotSellerId(sellerId: string) {
+  const snapshot = crmDemoService.getSnapshot();
+  if (snapshot.sellers.some((seller) => seller.id === sellerId)) return sellerId;
+  if (!snapshot.sellers.length) return sellerId;
+
+  const hash = [...sellerId].reduce((total, char) => total + char.charCodeAt(0), 0);
+  return snapshot.sellers[hash % snapshot.sellers.length].id;
 }
 
 export async function POST(request: Request) {
@@ -135,19 +158,19 @@ async function denyUnauthorizedChange(
 
   const snapshot = crmDemoService.getSnapshot();
   const workspace = await repository.getWorkspace();
+  const allowedSellerId = resolveSnapshotSellerId(user.sellerId);
   let assignedSellerId: string | undefined;
 
   switch (command.action) {
     case "create_contact":
-      assignedSellerId = snapshot.sellers.find(
-        (seller) =>
-          seller.uniplusId === snapshot.customers.find(
-            (customer) => customer.id === command.record.customerId,
-          )?.preferredSeller?.sellerId,
-      )?.id;
+      assignedSellerId = getSellerCustomerIds(allowedSellerId).has(command.record.customerId)
+        ? allowedSellerId
+        : undefined;
       break;
     case "update_alert":
-      assignedSellerId = snapshot.alerts.find((alert) => alert.id === command.id)?.sellerId;
+      assignedSellerId = command.id.startsWith("manual-alert-")
+        ? allowedSellerId
+        : snapshot.alerts.find((alert) => alert.id === command.id)?.sellerId;
       break;
     case "create_agenda":
       assignedSellerId = command.event.sellerId;
@@ -167,7 +190,7 @@ async function denyUnauthorizedChange(
       break;
   }
 
-  return assignedSellerId === user.sellerId
+  return assignedSellerId === allowedSellerId
     ? null
     : Response.json(
         { error: "Esta ação pertence à carteira de outro vendedor." },

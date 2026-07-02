@@ -7,7 +7,10 @@ import { SupabaseCrmWorkspaceRepository } from "./supabase/supabase-crm-workspac
 let supabaseRepository: SupabaseCrmWorkspaceRepository | undefined;
 
 export function getCrmWorkspaceRepository(): ICrmWorkspaceRepository {
-  if (process.env.CRM_OPERATIONAL_PROVIDER !== "supabase") {
+  if (
+    process.env.CRM_OPERATIONAL_PROVIDER !== "supabase" ||
+    process.env.CRM_DATA_PROVIDER === "mock"
+  ) {
     return crmWorkspaceRepository;
   }
   supabaseRepository ??= new SupabaseCrmWorkspaceRepository();
