@@ -118,9 +118,32 @@ textarea:focus-visible {
     linear-gradient(180deg, #07111f 0%, #050a14 52%, #02050a 100%);
 }
 
+.crm-theme-picker select {
+  color-scheme: dark;
+}
+
+.crm-theme-picker option {
+  background: #0b1220;
+  color: #f8fafc;
+}
+
+.crm-theme-picker option:checked,
+.crm-theme-picker option:hover,
+.crm-theme-picker option:focus {
+  background: #155e75;
+  color: #ffffff;
+}
+
 [data-theme="dark"] .crm-theme-picker option {
   background: #0b1220;
   color: #f8fafc;
+}
+
+[data-theme="dark"] .crm-theme-picker option:checked,
+[data-theme="dark"] .crm-theme-picker option:hover,
+[data-theme="dark"] .crm-theme-picker option:focus {
+  background: #155e75;
+  color: #ffffff;
 }
 
 [data-theme="dark"] .crm-app .bg-white,
