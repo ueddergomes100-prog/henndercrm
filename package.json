@@ -12,7 +12,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "node server.js",
+    "start": "next start -H 0.0.0.0 -p 3000",
     "lint": "eslint",
     "test": "node --test scripts/*.test.mjs",
     "import:uniplus-sample": "node scripts/uniplus-sample-importer.mjs --input H:/uniplus_sample_result.csv --output src/data/generated/uniplus-sample.json --reference-date 2026-06-15"
