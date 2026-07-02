@@ -146,6 +146,22 @@ textarea:focus-visible {
   color: #ffffff;
 }
 
+[data-theme="dark"] .crm-quick-actions-menu {
+  border-color: #203047 !important;
+  background: #0a101c !important;
+  color: #f8fafc !important;
+}
+
+[data-theme="dark"] .crm-quick-action-item:hover,
+[data-theme="dark"] .crm-quick-action-item:focus-visible {
+  background: rgba(8, 145, 178, 0.22) !important;
+  color: #f8fafc !important;
+}
+
+[data-theme="dark"] .crm-quick-action-item .text-slate-500 {
+  color: #94a3b8 !important;
+}
+
 [data-theme="dark"] .crm-app .bg-white,
 [data-theme="dark"] .crm-app .bg-white\/72 {
   background-color: #0a101c !important;

@@ -1149,7 +1149,7 @@ function Topbar({
               <motion.div
                 initial={{ opacity: 0, y: -6, scale: 0.98 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
-                className="absolute right-0 top-12 z-40 w-80 overflow-hidden rounded-xl border border-blue-100 bg-white p-2 text-slate-900 shadow-2xl"
+                className="crm-quick-actions-menu absolute right-0 top-12 z-40 w-80 overflow-hidden rounded-xl border border-blue-100 bg-white p-2 text-slate-900 shadow-2xl"
               >
                 {quickActions.map((action) => {
                   const Icon = action.icon;
@@ -1161,7 +1161,7 @@ function Topbar({
                         setActionOpen(false);
                         onQuickAction(action.id);
                       }}
-                      className="flex w-full gap-3 rounded-lg px-3 py-3 text-left transition hover:bg-cyan-50"
+                      className="crm-quick-action-item flex w-full gap-3 rounded-lg px-3 py-3 text-left transition hover:bg-cyan-50"
                     >
                       <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#0753a6] text-white">
                         <Icon size={17} />
