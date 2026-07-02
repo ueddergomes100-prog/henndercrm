@@ -3672,6 +3672,18 @@ function DashboardPreview() {
     `${alerts.length}`,
     formatCurrency(dashboard.potentialLost),
   ];
+  const previewBars = [38, 52, 48, 66, 78, 92, 84, 100];
+  const priorities = [
+    ["Alta", "12 clientes em risco"],
+    ["Hoje", "5 retornos agendados"],
+    ["IA", "3 ofertas sugeridas"],
+  ];
+  const agendaPreview = [
+    ["09:30", "Ligacao pos-venda"],
+    ["14:00", "Recompra de racao"],
+    ["16:20", "Visita comercial"],
+  ];
+
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-3 gap-3">
@@ -3683,19 +3695,57 @@ function DashboardPreview() {
           </div>
         ))}
       </div>
-      <div className="flex h-48 items-end gap-3 rounded-lg border border-white/10 bg-white/6 p-4">
-        {[38, 52, 48, 66, 78, 92, 84, 100].map((height, index) => (
-          <div key={index} className="flex flex-1 items-end">
-            <div
-              className="w-full rounded-t-md bg-emerald-300/80 shadow-[0_0_24px_rgba(52,211,153,0.18)]"
-              style={{ height: `${height}%` }}
-            />
+      <div className="rounded-lg border border-white/10 bg-white/6 p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-200/80">Recuperacao</p>
+            <p className="mt-1 text-sm text-slate-300">Previsao de recompra por semana</p>
           </div>
-        ))}
+          <span className="rounded-full bg-emerald-300/10 px-2 py-1 text-xs font-bold text-emerald-200">+18%</span>
+        </div>
+        <div className="flex h-32 items-end gap-3">
+          {previewBars.map((height, index) => (
+            <div key={index} className="flex flex-1 flex-col items-center gap-2">
+              <div className="flex h-28 w-full items-end">
+                <div
+                  className="w-full rounded-t-md bg-emerald-300/80 shadow-[0_0_24px_rgba(52,211,153,0.18)]"
+                  style={{ height: `${height}%` }}
+                />
+              </div>
+              <span className="text-[10px] font-semibold text-slate-500">{index + 1}</span>
+            </div>
+          ))}
+        </div>
       </div>
       <div className="grid grid-cols-2 gap-3">
-        <div className="h-24 rounded-lg border border-white/10 bg-white/6" />
-        <div className="h-24 rounded-lg border border-white/10 bg-white/6" />
+        <div className="rounded-lg border border-white/10 bg-white/6 p-3">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Prioridades</p>
+            <AlertTriangle size={15} className="text-amber-300" />
+          </div>
+          <div className="space-y-2">
+            {priorities.map(([label, text]) => (
+              <div key={text} className="flex items-center justify-between gap-2 rounded-md bg-white/6 px-2 py-1.5">
+                <span className="rounded-full bg-white/8 px-2 py-0.5 text-[10px] font-bold text-emerald-200">{label}</span>
+                <span className="truncate text-xs text-slate-300">{text}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="rounded-lg border border-white/10 bg-white/6 p-3">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Agenda IA</p>
+            <CalendarDays size={15} className="text-cyan-300" />
+          </div>
+          <div className="space-y-2">
+            {agendaPreview.map(([time, text]) => (
+              <div key={`${time}-${text}`} className="flex items-center gap-2 rounded-md bg-white/6 px-2 py-1.5">
+                <span className="w-11 rounded bg-cyan-300/10 px-1.5 py-1 text-center text-[10px] font-bold text-cyan-200">{time}</span>
+                <span className="truncate text-xs text-slate-300">{text}</span>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );
