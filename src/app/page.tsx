@@ -210,13 +210,42 @@ export default function Home() {
   const appAlerts = [...manualAlerts, ...alerts];
 
   useEffect(() => {
-    void fetch("/api/auth/session", { cache: "no-store" })
-      .then((response) => response.json())
-      .then((result: { user: CrmSessionUser | null }) => {
+    let active = true;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 12000);
+
+    async function loadSession() {
+      try {
+        const response = await fetch("/api/auth/session", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const result = response.ok
+          ? ((await response.json()) as { user: CrmSessionUser | null })
+          : { user: null };
+
+        if (!active) return;
         setTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
-        setUser(result.user);
-      })
-      .finally(() => setAuthChecking(false));
+        setUser(result.user ?? null);
+      } catch {
+        if (!active) return;
+        setTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
+        setUser(null);
+      } finally {
+        window.clearTimeout(timeout);
+        if (active) {
+          setAuthChecking(false);
+        }
+      }
+    }
+
+    void loadSession();
+
+    return () => {
+      active = false;
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
   }, []);
 
   useEffect(() => {
@@ -231,6 +260,10 @@ export default function Home() {
         setAlertStatuses(workspace.alertStatuses);
         setAgendaItems(workspace.agenda);
         setOpportunityItems(workspace.opportunities);
+      })
+      .catch(() => {
+        setContactRecords([]);
+        setAlertStatuses({});
       });
   }, [user]);
 
@@ -497,12 +530,7 @@ function SystemLoadingScreen({
     <main className="crm-loading-screen flex min-h-screen items-center justify-center overflow-hidden bg-[#02040a] px-6 text-white">
       <div className="crm-loading-orb crm-loading-orb-a" />
       <div className="crm-loading-orb crm-loading-orb-b" />
-      <motion.div
-        initial={{ opacity: 0, y: 18, scale: 0.96 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        transition={{ duration: 0.45 }}
-        className="relative z-10 w-full max-w-md rounded-3xl border border-cyan-300/18 bg-white/8 p-8 text-center shadow-2xl shadow-cyan-950/30 backdrop-blur-xl"
-      >
+      <div className="crm-loading-card relative z-10 w-full max-w-md rounded-3xl border border-cyan-300/18 bg-white/8 p-8 text-center shadow-2xl shadow-cyan-950/30 backdrop-blur-xl">
         <LogoMark />
         <div className="crm-loader-grid mx-auto mt-8">
           {Array.from({ length: 9 }).map((_, index) => (
@@ -514,7 +542,7 @@ function SystemLoadingScreen({
         <div className="mt-6 h-1.5 overflow-hidden rounded-full bg-white/10">
           <div className="crm-loading-progress h-full rounded-full bg-gradient-to-r from-cyan-300 via-emerald-300 to-blue-400" />
         </div>
-      </motion.div>
+      </div>
     </main>
   );
 }
@@ -855,11 +883,7 @@ function LoginScreen({
       {submitting && <LoginLoadingOverlay />}
       <div className="grid min-h-screen lg:grid-cols-[0.9fr_1.1fr]">
         <section className="flex items-center px-6 py-10 sm:px-10 lg:px-16">
-          <motion.div
-            initial={{ opacity: 0, y: 18 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="w-full max-w-md"
-          >
+          <div className="crm-login-panel w-full max-w-md">
             <LogoMark />
             <h1 className="mt-10 text-4xl font-semibold leading-tight sm:text-5xl">
               Hennder CRM
@@ -933,16 +957,11 @@ function LoginScreen({
               <p>Vendedor: vendedor@henndercrm.local / Vendedor@123</p>
             </div>
             )}
-          </motion.div>
+          </div>
         </section>
         <section className="relative hidden items-center justify-center p-10 lg:flex">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_42%_32%,rgba(16,185,129,0.28),transparent_32%),radial-gradient(circle_at_80%_70%,rgba(59,130,246,0.18),transparent_28%)]" />
-          <motion.div
-            initial={{ opacity: 0, scale: 0.96, rotateX: 8 }}
-            animate={{ opacity: 1, scale: 1, rotateX: 0 }}
-            transition={{ delay: 0.12, duration: 0.5 }}
-            className="relative w-full max-w-3xl rounded-2xl border border-white/14 bg-white/10 p-4 shadow-2xl backdrop-blur-xl"
-          >
+          <div className="crm-login-preview relative w-full max-w-3xl rounded-2xl border border-white/14 bg-white/10 p-4 shadow-2xl backdrop-blur-xl">
             <div className="rounded-xl bg-slate-950/92 p-5">
               <div className="mb-5 flex items-center justify-between">
                 <div>
@@ -955,7 +974,7 @@ function LoginScreen({
               </div>
               <DashboardPreview />
             </div>
-          </motion.div>
+          </div>
         </section>
       </div>
     </main>
