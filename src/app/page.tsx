@@ -478,7 +478,6 @@ export default function Home() {
                 customers={appCustomers}
                 alerts={appAlerts}
                 opportunities={opportunityItems}
-                agenda={agendaItems}
                 contactRecords={contactRecords}
               />
             )}
@@ -3380,53 +3379,22 @@ function Reports({
   customers,
   alerts,
   opportunities,
-  agenda,
   contactRecords,
 }: {
   theme: Theme;
   customers: CustomerRow[];
   alerts: AlertRow[];
   opportunities: CrmOpportunity[];
-  agenda: CrmAgendaEvent[];
   contactRecords: ContactRecord[];
 }) {
   const chartColors = getChartColors(theme);
   const pendingAlerts = alerts.filter((alert) => alert.status === "pendente");
-  const calledCustomers = contactRecords.length
-    ? contactRecords
-    : buildPresentationContactRecords(customers, alerts);
-  const reportOpportunities = opportunities.length
-    ? opportunities
-    : snapshot.opportunities.length
-      ? snapshot.opportunities
-      : buildPresentationOpportunities(customers, alerts);
-  const reportAgenda = agenda.length
-    ? agenda
-    : buildPresentationAgenda(customers, alerts);
+  const calledCustomers = contactRecords;
   const potentialCustomers = [...customers].sort((a, b) => b.potentialValue - a.potentialValue).slice(0, 30);
-  const highConversion = [...reportOpportunities]
+  const highConversion = [...opportunities]
     .filter((item) => item.status === "aberta" || item.status === "em_contato")
     .sort((a, b) => b.confidence - a.confidence)
     .slice(0, 30);
-  const productRanking = buildProductRepurchaseRanking(alerts);
-  const reportProductRanking = productRanking.length
-    ? productRanking
-    : snapshot.products
-        .filter((product) => product.repurchaseActive)
-        .slice(0, 8)
-        .map((product) => ({
-          name: product.name,
-          count: 1,
-          priority: 2.4,
-          days: product.defaultRepurchaseDays ?? 45,
-        }));
-  const sellerRanking = buildSellerAttentionRanking({
-    customers,
-    alerts,
-    opportunities: reportOpportunities,
-    agenda: reportAgenda,
-    contactRecords: calledCustomers,
-  }).slice(0, 12);
   const reportCards = [
     ["Clientes perdidos", `${customers.filter((customer) => customer.activityStatus === "perdido").length}`],
     ["Alertas de recompra", `${alerts.length}`],
@@ -3474,7 +3442,7 @@ function Reports({
           contactOutcomeLabels[record.outcome],
           record.responsible,
           formatContactDate(record.contactedAt),
-          record.nextContact ? formatContactDate(record.nextContact) : "Retorno conforme aceite do cliente",
+          record.nextContact ? formatContactDate(record.nextContact) : "-",
         ]),
       }),
     },
@@ -3515,69 +3483,6 @@ function Reports({
           item.status,
           item.sellerName,
           item.reason,
-        ]),
-      }),
-    },
-    {
-      title: "Agenda de retornos",
-      description: "Compromissos comerciais organizados por data, horario e responsavel.",
-      count: reportAgenda.length,
-      icon: CalendarDays,
-      onClick: () => openPrintableReport({
-        title: "Relatorio - Agenda de retornos",
-        subtitle: "Rotina comercial sugerida para ligacoes, visitas e recompra",
-        summary: [`${reportAgenda.length} compromisso(s) no roteiro`, `${reportAgenda.filter((item) => item.type === "Recompra").length} retorno(s) de recompra`],
-        columns: ["Data", "Horario", "Tipo", "Titulo", "Cliente", "Responsavel"],
-        rows: reportAgenda.map((event) => {
-          const customer = customers.find((item) => item.id === event.customerId);
-          const seller = sellers.find((item) => item.id === event.sellerId);
-          return [
-            formatContactDate(event.date),
-            event.time,
-            event.type,
-            event.title,
-            customer?.name ?? "Cliente de carteira",
-            seller?.name ?? customer?.preferredSeller ?? "Equipe comercial",
-          ];
-        }),
-      }),
-    },
-    {
-      title: "Produtos recorrentes",
-      description: "Produtos com maior sinal de recompra e ciclo medio observado.",
-      count: reportProductRanking.length,
-      icon: ClipboardList,
-      onClick: () => openPrintableReport({
-        title: "Relatorio - Produtos recorrentes",
-        subtitle: "Produtos que mais geram oportunidade de recompra",
-        summary: [`${reportProductRanking.length} produto(s) priorizados`, `${pendingAlerts.length} alerta(s) pendente(s)`],
-        columns: ["Produto", "Alertas", "Prioridade media", "Ciclo medio", "Abordagem sugerida"],
-        rows: reportProductRanking.map((product) => [
-          product.name,
-          `${product.count} alerta(s)`,
-          product.priority,
-          `${product.days} dias`,
-          "Confirmar estoque do cliente e oferecer reposicao programada",
-        ]),
-      }),
-    },
-    {
-      title: "Carteira por vendedor",
-      description: "Ranking da carteira por risco, alertas e potencial recuperavel.",
-      count: sellerRanking.length,
-      icon: UsersRound,
-      onClick: () => openPrintableReport({
-        title: "Relatorio - Carteira por vendedor",
-        subtitle: "Prioridade de acompanhamento por responsavel comercial",
-        summary: [`${sellerRanking.length} vendedor(es) com carteira analisada`, `${formatCurrency(sellerRanking.reduce((total, seller) => total + seller.potentialValue, 0))} em potencial listado`],
-        columns: ["Vendedor", "Pontuacao", "Clientes em risco", "Alertas pendentes", "Potencial", "Acao recomendada"],
-        rows: sellerRanking.map((seller) => [
-          seller.name,
-          seller.score,
-          `${seller.riskCustomers} cliente(s)`,
-          `${seller.pendingAlerts} alerta(s)`,
-          formatCurrency(seller.potentialValue),
-          "Separar 5 contatos prioritarios para hoje",
         ]),
       }),
     },
@@ -4399,114 +4304,6 @@ function addIsoDays(value: string, days: number) {
   const date = new Date(`${value.slice(0, 10)}T12:00:00Z`);
   date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);
-}
-
-function buildPresentationContactRecords(customers: CustomerRow[], alerts: AlertRow[]): ContactRecord[] {
-  const sortedAlerts = [...alerts].sort(compareAlertPriority);
-  const outcomes: ContactOutcome[] = ["interested", "follow_up", "no_answer", "interested", "not_interested", "follow_up"];
-  const channels: ContactChannel[] = ["WhatsApp", "Telefone", "WhatsApp", "Visita", "Presencial", "Email"];
-  const notes = [
-    "Cliente confirmou interesse e pediu reserva para retirada.",
-    "Solicitou novo contato no fim da tarde para decidir quantidade.",
-    "Primeira tentativa sem resposta; manter na fila de prioridade.",
-    "Aceitou receber proposta com produto complementar.",
-    "Nao quer comprar agora, mas autorizou novo contato no proximo ciclo.",
-    "Pediu para comparar precos e receber condicao de pagamento.",
-  ];
-
-  const records = sortedAlerts.slice(0, 14).map((alert, index) => {
-    const customer = customers.find((item) => item.id === alert.customerId);
-    return {
-      id: `demo-contact-${index + 1}`,
-      customerId: alert.customerId,
-      customerName: alert.client,
-      outcome: outcomes[index % outcomes.length],
-      note: notes[index % notes.length],
-      nextContact: addIsoDays(crmReferenceDate, (index % 5) + 1),
-      contactedAt: addIsoDays(crmReferenceDate, -((index % 8) + 1)),
-      channel: customer?.whatsapp ? "WhatsApp" : channels[index % channels.length],
-      responsible: alert.seller || customer?.preferredSeller || "Equipe comercial",
-    };
-  });
-
-  if (records.length) {
-    return records;
-  }
-
-  return customers.slice(0, 8).map((customer, index) => ({
-    id: `demo-contact-${index + 1}`,
-    customerId: customer.id,
-    customerName: customer.name,
-    outcome: outcomes[index % outcomes.length],
-    note: notes[index % notes.length],
-    nextContact: addIsoDays(crmReferenceDate, index + 1),
-    contactedAt: addIsoDays(crmReferenceDate, -(index + 1)),
-    channel: customer.whatsapp ? "WhatsApp" : "Telefone",
-    responsible: customer.preferredSeller || "Equipe comercial",
-  }));
-}
-
-function buildPresentationAgenda(customers: CustomerRow[], alerts: AlertRow[]): CrmAgendaEvent[] {
-  const sortedAlerts = [...alerts].sort(compareAlertPriority);
-  const times = ["08:40", "09:20", "10:10", "11:00", "13:30", "14:15", "15:40", "16:30", "17:10", "17:45"];
-  const types: CrmAgendaEvent["type"][] = ["Ligacao", "Retorno", "Recompra", "Visita"];
-
-  const events = sortedAlerts.slice(0, 12).map((alert, index) => {
-    const customer = customers.find((item) => item.id === alert.customerId);
-    const seller = sellers.find((item) => item.name === alert.seller);
-    return {
-      id: `demo-agenda-${index + 1}`,
-      date: addIsoDays(crmReferenceDate, Math.floor(index / 4)),
-      time: times[index % times.length],
-      title: `${types[index % types.length]} - ${alert.product}`,
-      type: types[index % types.length],
-      customerId: alert.customerId,
-      sellerId: seller?.id ?? customer?.preferredSellerId,
-    };
-  });
-
-  if (events.length) {
-    return events;
-  }
-
-  return customers.slice(0, 8).map((customer, index) => ({
-    id: `demo-agenda-${index + 1}`,
-    date: addIsoDays(crmReferenceDate, Math.floor(index / 3)),
-    time: times[index % times.length],
-    title: `Retorno comercial - ${customer.name}`,
-    type: types[index % types.length],
-    customerId: customer.id,
-    sellerId: customer.preferredSellerId,
-  }));
-}
-
-function buildPresentationOpportunities(customers: CustomerRow[], alerts: AlertRow[]): CrmOpportunity[] {
-  const products = [...new Set(alerts.map((alert) => alert.product))].filter(Boolean);
-  const reasons = [
-    "Historico indica recompra proxima e abertura para item complementar.",
-    "Cliente comprou item base e ainda nao levou produto relacionado.",
-    "Ticket medio permite oferta consultiva com alto potencial de aceite.",
-    "Ultimo contato demonstrou interesse em condicao de pagamento.",
-  ];
-
-  return customers
-    .slice(0, 12)
-    .map((customer, index) => {
-      const source = products[index % Math.max(products.length, 1)] || "Produto recorrente";
-      const suggested = products[(index + 3) % Math.max(products.length, 1)] || "Reposicao programada";
-      return {
-        id: `demo-opportunity-${index + 1}`,
-        customerId: customer.id,
-        customerName: customer.name,
-        sourceProductName: source,
-        suggestedProductName: suggested === source ? "Reposicao programada" : suggested,
-        reason: reasons[index % reasons.length],
-        confidence: Math.max(68, Math.min(96, customer.probability || 82) - (index % 5)),
-        status: index % 4 === 1 ? "em_contato" : "aberta",
-        sellerId: customer.preferredSellerId,
-        sellerName: customer.preferredSeller || "Equipe comercial",
-      };
-    });
 }
 
 function capitalizePriority(value: AlertRow["priorityCode"]) {
