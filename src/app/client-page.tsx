@@ -2067,8 +2067,8 @@ function RepurchaseEngineModule({ alerts, user }: { alerts: AlertRow[]; user: Cr
   async function saveProductRule(product: ProductRow, mode: "manual" | "auto") {
     if (!canEditRules) return;
     const rawDays = daysByProduct[product.id] ?? "";
-    const days = mode === "auto" ? null : Number(rawDays);
-    if (mode === "manual" && (!Number.isFinite(days) || days <= 0)) {
+    const manualDays = Number(rawDays);
+    if (mode === "manual" && (!Number.isFinite(manualDays) || manualDays <= 0)) {
       setMessage("Informe uma quantidade valida de dias.");
       return;
     }
@@ -2081,7 +2081,7 @@ function RepurchaseEngineModule({ alerts, user }: { alerts: AlertRow[]; user: Cr
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           id: product.id,
-          defaultRepurchaseDays: mode === "auto" ? null : Math.round(days as number),
+          defaultRepurchaseDays: mode === "auto" ? null : Math.round(manualDays),
         }),
       });
       const result = (await response.json()) as { defaultRepurchaseDays?: number | null; error?: string };
