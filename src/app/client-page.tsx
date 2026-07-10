@@ -626,7 +626,7 @@ export default function Home() {
                 contactRecords={appContactRecords}
               />
             )}
-            {visibleView === "motor-recompra" && <RepurchaseEngineModule alerts={appAlerts} />}
+            {visibleView === "motor-recompra" && <RepurchaseEngineModule alerts={appAlerts} user={user} />}
             {visibleView === "sincronizacao" && <SyncModule />}
             {visibleView === "configuracoes" && <SettingsModule user={user} sellers={sellers} />}
             {visibleView === "relatorios" && (
@@ -2045,38 +2045,149 @@ function CampaignsModule({ customers, alerts }: { customers: CustomerRow[]; aler
   );
 }
 
-function RepurchaseEngineModule({ alerts }: { alerts: AlertRow[] }) {
+function RepurchaseEngineModule({ alerts, user }: { alerts: AlertRow[]; user: CrmSessionUser }) {
   const activeProducts = snapshot.products.filter((product) => product.repurchaseActive);
   const departments = [...new Set(activeProducts.map((product) => product.department || "Sem departamento"))];
   const manualRules = alerts.filter((alert) => alert.origin === "manual");
+  const [query, setQuery] = useState("");
+  const [daysByProduct, setDaysByProduct] = useState<Record<string, string>>(() =>
+    Object.fromEntries(activeProducts.map((product) => [product.id, product.defaultRepurchaseDays ? String(product.defaultRepurchaseDays) : ""])),
+  );
+  const [savingProductId, setSavingProductId] = useState<string | null>(null);
+  const [message, setMessage] = useState("");
+  const canEditRules = user.role !== "vendedor";
+
+  useEffect(() => {
+    setDaysByProduct((current) => ({
+      ...Object.fromEntries(activeProducts.map((product) => [product.id, product.defaultRepurchaseDays ? String(product.defaultRepurchaseDays) : ""])),
+      ...current,
+    }));
+  }, [activeProducts.length]);
+
+  async function saveProductRule(product: ProductRow, mode: "manual" | "auto") {
+    if (!canEditRules) return;
+    const rawDays = daysByProduct[product.id] ?? "";
+    const days = mode === "auto" ? null : Number(rawDays);
+    if (mode === "manual" && (!Number.isFinite(days) || days <= 0)) {
+      setMessage("Informe uma quantidade valida de dias.");
+      return;
+    }
+
+    setSavingProductId(product.id);
+    setMessage("");
+    try {
+      const response = await fetch("/api/crm/products", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          id: product.id,
+          defaultRepurchaseDays: mode === "auto" ? null : Math.round(days as number),
+        }),
+      });
+      const result = (await response.json()) as { defaultRepurchaseDays?: number | null; error?: string };
+      if (!response.ok) throw new Error(result.error ?? "Falha ao salvar regra.");
+      product.defaultRepurchaseDays = result.defaultRepurchaseDays ?? undefined;
+      setDaysByProduct((current) => ({
+        ...current,
+        [product.id]: result.defaultRepurchaseDays ? String(result.defaultRepurchaseDays) : "",
+      }));
+      setMessage(mode === "auto" ? "Produto voltou para a regra automatica." : "Regra de recompra salva.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Falha ao salvar regra.");
+    } finally {
+      setSavingProductId(null);
+    }
+  }
+
+  const filteredProducts = activeProducts.filter((product) => {
+    const normalized = query.trim().toLowerCase();
+    return !normalized || product.name.toLowerCase().includes(normalized) || product.code.toLowerCase().includes(normalized);
+  });
 
   return (
     <div className="space-y-5">
-      <PageTitle eyebrow="Sistema" title="Motor de Recompra" description="Visualização das regras que alimentam alertas por produto, departamento e comportamento." />
+      <PageTitle eyebrow="Sistema" title="Motor de Recompra" description="Configure dias de recompra por produto. Sem ajuste manual, o CRM usa a regra automatica por item e departamento." />
       <div className="grid gap-4 md:grid-cols-4">
-        <MetricCard label="Regras por produto" value={`${activeProducts.length}`} />
-        <MetricCard label="Departamentos" value={`${departments.length}`} />
-        <MetricCard label="Regras manuais" value={`${manualRules.length}`} />
-        <MetricCard label="Alertas gerados" value={`${alerts.length}`} />
+        <MetricCard label="Produtos recorrentes" value={String(activeProducts.length)} />
+        <MetricCard label="Regras manuais" value={String(activeProducts.filter((product) => product.defaultRepurchaseDays).length)} />
+        <MetricCard label="Departamentos" value={String(departments.length)} />
+        <MetricCard label="Alertas gerados" value={String(alerts.length)} />
       </div>
-      <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
-        <Panel title="Regras por produto" icon={SlidersHorizontal}>
-          <SimpleRows
-            rows={activeProducts.slice(0, 12).map((product) => [
-              product.name,
-              product.department || "Sem departamento",
-              `${product.defaultRepurchaseDays ?? 45} dias`,
-            ])}
-            empty="Nenhuma regra de produto ativa."
-          />
+      <div className="grid gap-5 xl:grid-cols-[1.25fr_0.75fr]">
+        <Panel title="Dias por produto" icon={SlidersHorizontal} action={filteredProducts.length + " produtos"}>
+          <div className="mb-4 flex h-11 items-center gap-2 rounded-lg border border-blue-100 bg-[#f8fbff] px-3 focus-within:border-cyan-400">
+            <Search size={17} className="text-slate-400" />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Buscar produto ou codigo"
+              className="w-full bg-transparent text-sm outline-none"
+            />
+          </div>
+          {message && <p className="mb-4 rounded-lg border border-cyan-100 bg-cyan-50 px-3 py-2 text-sm font-semibold text-cyan-800">{message}</p>}
+          <div className="space-y-3">
+            {filteredProducts.slice(0, 80).map((product) => {
+              const automaticDays = inferAutomaticRepurchaseDays(product);
+              const configuredDays = product.defaultRepurchaseDays;
+              const activeDays = configuredDays ?? automaticDays;
+              const saving = savingProductId === product.id;
+              return (
+                <div key={product.id} className="rounded-lg border border-blue-100 bg-[#f8fbff] p-3">
+                  <div className="grid gap-3 lg:grid-cols-[1fr_130px_150px_auto] lg:items-end">
+                    <div className="min-w-0">
+                      <p className="truncate font-bold text-[#123252]">{product.name}</p>
+                      <p className="mt-1 text-xs text-slate-500">{product.code || "Sem codigo"} ? {product.department || "Sem departamento"}</p>
+                      <p className="mt-1 text-xs font-semibold text-cyan-700">Em uso: {activeDays} dias ? {configuredDays ? "manual" : "automatico"}</p>
+                    </div>
+                    <label className="block">
+                      <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Dias</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={730}
+                        value={daysByProduct[product.id] ?? ""}
+                        onChange={(event) => setDaysByProduct((current) => ({ ...current, [product.id]: event.target.value }))}
+                        placeholder={String(automaticDays)}
+                        disabled={!canEditRules}
+                        className="mt-2 h-10 w-full rounded-lg border border-blue-100 bg-white px-3 text-sm outline-none focus:border-cyan-400 disabled:opacity-60"
+                      />
+                    </label>
+                    <div className="rounded-lg border border-blue-100 bg-white px-3 py-2 text-xs text-slate-600">
+                      Fallback automatico: <span className="font-bold text-[#0753a6]">{automaticDays} dias</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        disabled={!canEditRules || saving}
+                        onClick={() => void saveProductRule(product, "manual")}
+                        className="h-10 rounded-lg bg-[#0753a6] px-3 text-xs font-bold text-white transition hover:bg-[#063d7c] disabled:opacity-55"
+                      >
+                        {saving ? "Salvando" : "Salvar"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!canEditRules || saving}
+                        onClick={() => void saveProductRule(product, "auto")}
+                        className="h-10 rounded-lg border border-blue-100 px-3 text-xs font-bold text-slate-600 transition hover:bg-white disabled:opacity-55"
+                      >
+                        Automatico
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            {!filteredProducts.length && <EmptyState text="Nenhum produto recorrente encontrado." />}
+          </div>
         </Panel>
         <Panel title="Regras complementares" icon={Database}>
           <SimpleRows
             rows={[
-              ["Palavra-chave", "ração, vermífugo, vacina", "Ativa"],
-              ["Departamento", departments.slice(0, 3).join(", ") || "Sem dados", "Ativa"],
-              ["Histórico do cliente", "Média de recompra observada", "Ativa"],
-              ["Manual cliente/produto", `${manualRules.length} regra(s)`, "Operacional"],
+              ["Produto", "Prioridade para dias definidos manualmente", "Editavel"],
+              ["Palavra-chave", "racao, vermifugo, vacina", "Fallback"],
+              ["Departamento", departments.slice(0, 3).join(", ") || "Sem dados", "Fallback"],
+              ["Historico do cliente", "Media de recompra observada", "Fallback"],
+              ["Manual cliente/produto", String(manualRules.length) + " regra(s)", "Operacional"],
             ]}
             empty="Sem regras complementares."
           />
@@ -2084,6 +2195,19 @@ function RepurchaseEngineModule({ alerts }: { alerts: AlertRow[] }) {
       </div>
     </div>
   );
+}
+
+function inferAutomaticRepurchaseDays(product: ProductRow) {
+  const text = `${product.name} ${product.department}`
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLocaleUpperCase("pt-BR");
+  if (/(SACHE|PETISCO)/u.test(text)) return 20;
+  if (/(RACAO|AREIA HIGI)/u.test(text)) return 30;
+  if (/(VERM|ANTIPULG|CARRAP|VACINA)/u.test(text)) return 90;
+  if (text.includes("VETERINARIA")) return 90;
+  if (text.includes("AGRO")) return 60;
+  return 45;
 }
 
 function SyncModule() {

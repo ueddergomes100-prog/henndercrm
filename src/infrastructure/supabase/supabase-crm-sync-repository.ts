@@ -17,7 +17,7 @@ import type { ICrmSyncTargetRepository } from "@/integrations/uniplus/repositori
 import { SupabaseRestClient } from "./supabase-rest-client";
 
 type ExternalIdRow = { id: string; uniplus_id: number };
-type ProductExternalIdRow = ExternalIdRow & { preco: number | null };
+type ProductExternalIdRow = ExternalIdRow & { codigo: string | null; preco: number | null };
 
 export class SupabaseCrmSyncRepository implements ICrmSyncTargetRepository {
   constructor(private readonly client = new SupabaseRestClient()) {}
@@ -38,7 +38,7 @@ export class SupabaseCrmSyncRepository implements ICrmSyncTargetRepository {
 
   async upsertProducts(products: UniplusProduct[]) {
     if (products.length === 0) return;
-    await this.client.upsert("crm_produtos", products.map(mapProduct), "uniplus_id");
+    await this.client.upsert("crm_produtos", uniqueProductsByCode(products).map(mapProduct), "uniplus_id");
   }
 
   async upsertSellers(sellers: UniplusSeller[]) {
@@ -52,11 +52,17 @@ export class SupabaseCrmSyncRepository implements ICrmSyncTargetRepository {
     const [clients, sellers, products] = await Promise.all([
       this.client.select<ExternalIdRow>("crm_clientes", { select: "id,uniplus_id" }),
       this.client.select<ExternalIdRow>("crm_vendedores", { select: "id,uniplus_id" }),
-      this.client.select<ProductExternalIdRow>("crm_produtos", { select: "id,uniplus_id,preco" }),
+      this.client.select<ProductExternalIdRow>("crm_produtos", { select: "id,uniplus_id,codigo,preco" }),
     ]);
     const clientIds = new Map(clients.map((row) => [row.uniplus_id, row.id]));
     const sellerIds = new Map(sellers.map((row) => [row.uniplus_id, row.id]));
     const productIds = new Map(products.map((row) => [row.uniplus_id, row.id]));
+    const productIdsByCode = new Map(
+      products.flatMap((row) => {
+        const code = normalizeProductCode(row.codigo);
+        return code ? [[code, row.id]] : [];
+      }),
+    );
     const productPrices = new Map(products.map((row) => [row.uniplus_id, row.preco ?? 0]));
 
     await this.client.upsert(
@@ -90,9 +96,7 @@ export class SupabaseCrmSyncRepository implements ICrmSyncTargetRepository {
       items.map((item) => ({
         uniplus_id: item.id,
         venda_id: saleIds.get(item.saleId),
-        produto_id: item.productId
-          ? productIds.get(item.productId) ?? null
-          : null,
+        produto_id: resolveProductRowId(item, productIds, productIdsByCode),
         codigo_produto: item.productCode ?? null,
         nome_produto: item.productName ?? "",
         quantidade: item.quantity,
@@ -180,8 +184,51 @@ function mapProduct(product: UniplusProduct) {
     tipo_produto: product.productType ?? null,
     utiliza_crm: product.usesCrm,
     recompra_ativa: product.usesCrm,
-    dias_recompra_padrao: null,
   };
+}
+
+function uniqueProductsByCode(products: UniplusProduct[]) {
+  const unique = new Map<string, UniplusProduct>();
+  for (const product of products) {
+    const key = normalizeProductCode(product.code) ?? `id:${product.id}`;
+    const current = unique.get(key);
+    if (!current) {
+      unique.set(key, product);
+      continue;
+    }
+
+    unique.set(key, {
+      ...current,
+      name: current.name || product.name,
+      department: current.department || product.department,
+      price: current.price || product.price,
+      usesCrm: current.usesCrm || product.usesCrm,
+      lastSaleAt: maxDate(current.lastSaleAt, product.lastSaleAt),
+      lastPurchaseAt: maxDate(current.lastPurchaseAt, product.lastPurchaseAt),
+    });
+  }
+  return [...unique.values()];
+}
+
+function resolveProductRowId(
+  item: UniplusSaleItem,
+  productIds: Map<number, string>,
+  productIdsByCode: Map<string, string>,
+) {
+  const byCode = item.productCode ? productIdsByCode.get(normalizeProductCode(item.productCode) ?? "") : undefined;
+  if (byCode) return byCode;
+  return item.productId ? productIds.get(item.productId) ?? null : null;
+}
+
+function normalizeProductCode(code?: string | null) {
+  const normalized = String(code ?? "").trim().toUpperCase();
+  return normalized || null;
+}
+
+function maxDate(left?: string, right?: string) {
+  if (!left) return right;
+  if (!right) return left;
+  return right > left ? right : left;
 }
 
 function mapSeller(seller: UniplusSeller) {

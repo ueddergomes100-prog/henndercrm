@@ -373,7 +373,7 @@ class SupabaseTarget {
 
   async upsertProducts(products) {
     if (products.length === 0) return;
-    await this.upsert("crm_produtos", products.map(mapProduct), "uniplus_id");
+    await this.upsert("crm_produtos", uniqueProductsByCode(products).map(mapProduct), "uniplus_id");
   }
 
   async upsertSellers(sellers) {
@@ -386,11 +386,17 @@ class SupabaseTarget {
     const [clients, sellers, products] = await Promise.all([
       this.select("crm_clientes", { select: "id,uniplus_id" }),
       this.select("crm_vendedores", { select: "id,uniplus_id" }),
-      this.select("crm_produtos", { select: "id,uniplus_id,preco" }),
+      this.select("crm_produtos", { select: "id,uniplus_id,codigo,preco" }),
     ]);
     const clientIds = new Map(clients.map((row) => [Number(row.uniplus_id), row.id]));
     const sellerIds = new Map(sellers.map((row) => [Number(row.uniplus_id), row.id]));
     const productIds = new Map(products.map((row) => [Number(row.uniplus_id), row.id]));
+    const productIdsByCode = new Map(
+      products.flatMap((row) => {
+        const code = normalizeProductCode(row.codigo);
+        return code ? [[code, row.id]] : [];
+      }),
+    );
 
     await this.upsert(
       "crm_vendas",
@@ -419,7 +425,7 @@ class SupabaseTarget {
       items.map((item) => ({
         uniplus_id: item.id,
         venda_id: saleIds.get(item.saleId),
-        produto_id: item.productId ? productIds.get(item.productId) ?? null : null,
+        produto_id: resolveProductRowId(item, productIds, productIdsByCode),
         codigo_produto: item.productCode ?? null,
         nome_produto: item.productName ?? "",
         quantidade: item.quantity,
@@ -563,8 +569,49 @@ function mapProduct(product) {
     tipo_produto: product.productType ?? null,
     utiliza_crm: product.usesCrm,
     recompra_ativa: product.usesCrm,
-    dias_recompra_padrao: null,
   };
+}
+
+function uniqueProductsByCode(products) {
+  const unique = new Map();
+  for (const product of products) {
+    const key = normalizeProductCode(product.code) || `id:${product.id}`;
+    if (!unique.has(key)) {
+      unique.set(key, product);
+      continue;
+    }
+
+    const current = unique.get(key);
+    unique.set(key, {
+      ...current,
+      name: current.name || product.name,
+      department: current.department || product.department,
+      price: current.price || product.price,
+      usesCrm: current.usesCrm || product.usesCrm,
+      lastSaleAt: maxDate(current.lastSaleAt, product.lastSaleAt),
+      lastPurchaseAt: maxDate(current.lastPurchaseAt, product.lastPurchaseAt),
+    });
+  }
+  return [...unique.values()];
+}
+
+function resolveProductRowId(item, productIds, productIdsByCode) {
+  if (item.productCode) {
+    const byCode = productIdsByCode.get(normalizeProductCode(item.productCode));
+    if (byCode) return byCode;
+  }
+  return item.productId ? productIds.get(item.productId) ?? null : null;
+}
+
+function normalizeProductCode(code) {
+  const normalized = String(code ?? "").trim().toUpperCase();
+  return normalized || null;
+}
+
+function maxDate(left, right) {
+  if (!left) return right;
+  if (!right) return left;
+  return right > left ? right : left;
 }
 
 function mapSeller(seller) {

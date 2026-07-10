@@ -252,6 +252,8 @@ Atualizacao de 10/07/2026:
 - A tela **Vendas** agora separa **Ultima sincronizacao** e **Todas**, com busca por venda/cliente, filtro por status, filtro por data e carregamento incremental de 25 registros.
 - A tela **Logs e Sincronizacao** exibe o resumo diario do Sync, erros e vendas ignoradas.
 - O transformador do Sync normaliza mojibake comum vindo do PostgreSQL/exportacao, evitando nomes como `GONÃALVES` quando a origem representa `GONÇALVES`.
+- Produtos vindos do ERP sao consolidados por `codigo`, evitando cadastro duplicado quando o mesmo item aparece com outro identificador interno.
+- O **Motor de Recompra** permite definir dias por produto. Se nenhum dia manual for definido, o CRM usa a regra automatica por produto/departamento/palavra-chave.
 - Dry-run historico de 2026-05-10 ate 2026-07-11, sem gravar no Supabase: 5000 linhas lidas, 2664 vendas identificadas, 4999 itens validos e 1 venda ignorada por cliente inativo.
 
 Proximos passos antes da liberacao oficial:
