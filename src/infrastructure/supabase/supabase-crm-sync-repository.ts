@@ -50,9 +50,9 @@ export class SupabaseCrmSyncRepository implements ICrmSyncTargetRepository {
     if (sales.length === 0) return;
 
     const [clients, sellers, products] = await Promise.all([
-      this.client.select<ExternalIdRow>("crm_clientes", { select: "id,uniplus_id" }),
-      this.client.select<ExternalIdRow>("crm_vendedores", { select: "id,uniplus_id" }),
-      this.client.select<ProductExternalIdRow>("crm_produtos", { select: "id,uniplus_id,codigo,preco" }),
+      this.client.select<ExternalIdRow>("crm_clientes", { select: "id,uniplus_id", limit: 100000 }),
+      this.client.select<ExternalIdRow>("crm_vendedores", { select: "id,uniplus_id", limit: 100000 }),
+      this.client.select<ProductExternalIdRow>("crm_produtos", { select: "id,uniplus_id,codigo,preco", limit: 100000 }),
     ]);
     const clientIds = new Map(clients.map((row) => [row.uniplus_id, row.id]));
     const sellerIds = new Map(sellers.map((row) => [row.uniplus_id, row.id]));
@@ -67,7 +67,7 @@ export class SupabaseCrmSyncRepository implements ICrmSyncTargetRepository {
 
     await this.client.upsert(
       "crm_vendas",
-      sales.map((sale) => ({
+      sales.map((sale) => completeRow({
         uniplus_id: sale.id,
         cliente_id: clientIds.get(sale.clientId as number),
         vendedor_id: sale.sellerId
@@ -88,12 +88,13 @@ export class SupabaseCrmSyncRepository implements ICrmSyncTargetRepository {
 
     const storedSales = await this.client.select<ExternalIdRow>("crm_vendas", {
       select: "id,uniplus_id",
+      limit: 100000,
     });
     const saleIds = new Map(storedSales.map((row) => [row.uniplus_id, row.id]));
 
     await this.client.upsert(
       "crm_itens_venda",
-      items.map((item) => ({
+      items.map((item) => completeRow({
         uniplus_id: item.id,
         venda_id: saleIds.get(item.saleId),
         produto_id: resolveProductRowId(item, productIds, productIdsByCode),
@@ -110,7 +111,7 @@ export class SupabaseCrmSyncRepository implements ICrmSyncTargetRepository {
     if (ignoredSales.length === 0) return;
     const existing = await this.client.select<{ uniplus_venda_id: number | null }>(
       "crm_vendas_ignoradas",
-      { select: "uniplus_venda_id" },
+      { select: "uniplus_venda_id", limit: 100000 },
     );
     const existingIds = new Set(
       existing.flatMap((row) =>
@@ -229,6 +230,12 @@ function maxDate(left?: string, right?: string) {
   if (!left) return right;
   if (!right) return left;
   return right > left ? right : left;
+}
+
+function completeRow<T extends Record<string, unknown>>(row: T) {
+  return Object.fromEntries(
+    Object.entries(row).map(([key, value]) => [key, value === undefined ? null : value]),
+  );
 }
 
 function mapSeller(seller: UniplusSeller) {

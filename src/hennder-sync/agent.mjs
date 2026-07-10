@@ -384,9 +384,9 @@ class SupabaseTarget {
   async upsertSales(sales, items) {
     if (sales.length === 0) return;
     const [clients, sellers, products] = await Promise.all([
-      this.select("crm_clientes", { select: "id,uniplus_id" }),
-      this.select("crm_vendedores", { select: "id,uniplus_id" }),
-      this.select("crm_produtos", { select: "id,uniplus_id,codigo,preco" }),
+      this.selectAll("crm_clientes", { select: "id,uniplus_id" }),
+      this.selectAll("crm_vendedores", { select: "id,uniplus_id" }),
+      this.selectAll("crm_produtos", { select: "id,uniplus_id,codigo,preco" }),
     ]);
     const clientIds = new Map(clients.map((row) => [Number(row.uniplus_id), row.id]));
     const sellerIds = new Map(sellers.map((row) => [Number(row.uniplus_id), row.id]));
@@ -400,7 +400,7 @@ class SupabaseTarget {
 
     await this.upsert(
       "crm_vendas",
-      sales.map((sale) => ({
+      sales.map((sale) => completeRow({
         uniplus_id: sale.id,
         cliente_id: clientIds.get(sale.clientId),
         vendedor_id: sale.sellerId ? sellerIds.get(sale.sellerId) ?? null : null,
@@ -417,12 +417,12 @@ class SupabaseTarget {
       "uniplus_id",
     );
 
-    const storedSales = await this.select("crm_vendas", { select: "id,uniplus_id" });
+    const storedSales = await this.selectAll("crm_vendas", { select: "id,uniplus_id" });
     const saleIds = new Map(storedSales.map((row) => [Number(row.uniplus_id), row.id]));
 
     await this.upsert(
       "crm_itens_venda",
-      items.map((item) => ({
+      items.map((item) => completeRow({
         uniplus_id: item.id,
         venda_id: saleIds.get(item.saleId),
         produto_id: resolveProductRowId(item, productIds, productIdsByCode),
@@ -437,7 +437,7 @@ class SupabaseTarget {
 
   async saveIgnoredSales(ignoredSales) {
     if (ignoredSales.length === 0) return;
-    const existing = await this.select("crm_vendas_ignoradas", { select: "uniplus_venda_id" });
+    const existing = await this.selectAll("crm_vendas_ignoradas", { select: "uniplus_venda_id" });
     const existingIds = new Set(existing.flatMap((row) => row.uniplus_venda_id === null ? [] : [Number(row.uniplus_venda_id)]));
     const rows = ignoredSales.filter((sale) => !existingIds.has(sale.saleId));
     if (rows.length === 0) return;
@@ -472,6 +472,16 @@ class SupabaseTarget {
 
   async select(table, query = {}) {
     return this.request(table, { query });
+  }
+
+  async selectAll(table, query = {}) {
+    const pageSize = 1000;
+    const rows = [];
+    for (let offset = 0; ; offset += pageSize) {
+      const page = await this.select(table, { ...query, limit: pageSize, offset });
+      rows.push(...page);
+      if (page.length < pageSize) return rows;
+    }
   }
 
   async insert(table, rows, returnRepresentation = true) {
@@ -612,6 +622,12 @@ function maxDate(left, right) {
   if (!left) return right;
   if (!right) return left;
   return right > left ? right : left;
+}
+
+function completeRow(row) {
+  return Object.fromEntries(
+    Object.entries(row).map(([key, value]) => [key, value === undefined ? null : value]),
+  );
 }
 
 function mapSeller(seller) {

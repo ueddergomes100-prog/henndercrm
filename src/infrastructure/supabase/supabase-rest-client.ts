@@ -19,7 +19,19 @@ export class SupabaseRestClient {
     table: string,
     query: Record<string, QueryValue> = {},
   ): Promise<T[]> {
-    return this.request<T[]>(table, { query });
+    if (query.limit !== undefined) {
+      return this.request<T[]>(table, { query });
+    }
+
+    const pageSize = 1000;
+    const rows: T[] = [];
+    for (let offset = 0; ; offset += pageSize) {
+      const page = await this.request<T[]>(table, {
+        query: { ...query, limit: pageSize, offset },
+      });
+      rows.push(...page);
+      if (page.length < pageSize) return rows;
+    }
   }
 
   async insert<T>(table: string, rows: unknown[], returnRepresentation = true): Promise<T[]> {
