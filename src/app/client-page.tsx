@@ -399,6 +399,7 @@ export default function Home() {
 
   const scopedData = buildScopedCrmData(user, manualCustomers, manualAlerts, agendaItems, opportunityItems);
   const appCustomers = scopedData.customers;
+  const appSaleCustomers = includeSaleCustomers(appCustomers, customers, scopedData.sales);
   const appAlerts = scopedData.alerts;
   const appContactRecords = filterContactRecordsForData(contactRecords, appCustomers);
   const safeSelectedCustomer =
@@ -541,7 +542,7 @@ export default function Home() {
             {visibleView === "clientes" && <Customers customers={appCustomers} openProfile={openProfile} />}
             {visibleView === "vendas" && (
               <SalesModule
-                customers={appCustomers}
+                customers={appSaleCustomers}
                 sales={scopedData.sales}
                 saleItems={scopedData.saleItems}
               />
@@ -760,6 +761,20 @@ function buildScopedCrmData(
 function filterContactRecordsForData(records: ContactRecord[], scopedCustomers: CustomerRow[]) {
   const customerIds = new Set(scopedCustomers.map((customer) => customer.id));
   return records.filter((record) => customerIds.has(record.customerId));
+}
+
+function includeSaleCustomers(scopedCustomers: CustomerRow[], allCustomers: CustomerRow[], scopedSales: SaleRow[]) {
+  const customerById = new Map(scopedCustomers.map((customer) => [customer.id, customer]));
+  const missingCustomerIds = new Set(scopedSales.map((sale) => sale.customerId).filter((id) => !customerById.has(id)));
+  if (!missingCustomerIds.size) return scopedCustomers;
+
+  for (const customer of allCustomers) {
+    if (missingCustomerIds.has(customer.id)) {
+      customerById.set(customer.id, customer);
+    }
+  }
+
+  return [...customerById.values()];
 }
 
 function getAvailableSellers(user: CrmSessionUser) {
