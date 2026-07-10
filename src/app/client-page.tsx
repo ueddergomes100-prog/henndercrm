@@ -544,7 +544,6 @@ export default function Home() {
                 customers={appCustomers}
                 sales={scopedData.sales}
                 saleItems={scopedData.saleItems}
-                alerts={appAlerts}
               />
             )}
             {visibleView === "produtos" && (
@@ -1610,12 +1609,10 @@ function SalesModule({
   customers,
   sales,
   saleItems,
-  alerts,
 }: {
   customers: CustomerRow[];
   sales: SaleRow[];
   saleItems: SaleItemRow[];
-  alerts: AlertRow[];
 }) {
   const [viewMode, setViewMode] = useState<"latest" | "all">("latest");
   const [query, setQuery] = useState("");
@@ -1650,12 +1647,8 @@ function SalesModule({
     };
   }, []);
 
-  useEffect(() => {
-    setVisibleLimit(25);
-  }, [viewMode, query, statusFilter, dateFilter]);
-
   const latestStartedAt = syncLogs?.latest?.inicio ? Date.parse(syncLogs.latest.inicio) : null;
-  const latestFinishedAt = syncLogs?.latest?.fim ? Date.parse(syncLogs.latest.fim) : Date.now();
+  const latestFinishedAt = syncLogs?.latest?.fim ? Date.parse(syncLogs.latest.fim) : Number.POSITIVE_INFINITY;
   const latestSales = latestStartedAt
     ? sales.filter((sale) => {
         const updatedAt = sale.updatedAt ? Date.parse(sale.updatedAt) : Number.NaN;
@@ -2050,19 +2043,10 @@ function RepurchaseEngineModule({ alerts, user }: { alerts: AlertRow[]; user: Cr
   const departments = [...new Set(activeProducts.map((product) => product.department || "Sem departamento"))];
   const manualRules = alerts.filter((alert) => alert.origin === "manual");
   const [query, setQuery] = useState("");
-  const [daysByProduct, setDaysByProduct] = useState<Record<string, string>>(() =>
-    Object.fromEntries(activeProducts.map((product) => [product.id, product.defaultRepurchaseDays ? String(product.defaultRepurchaseDays) : ""])),
-  );
+  const [daysByProduct, setDaysByProduct] = useState<Record<string, string>>({});
   const [savingProductId, setSavingProductId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const canEditRules = user.role !== "vendedor";
-
-  useEffect(() => {
-    setDaysByProduct((current) => ({
-      ...Object.fromEntries(activeProducts.map((product) => [product.id, product.defaultRepurchaseDays ? String(product.defaultRepurchaseDays) : ""])),
-      ...current,
-    }));
-  }, [activeProducts.length]);
 
   async function saveProductRule(product: ProductRow, mode: "manual" | "auto") {
     if (!canEditRules) return;
@@ -2086,7 +2070,6 @@ function RepurchaseEngineModule({ alerts, user }: { alerts: AlertRow[]; user: Cr
       });
       const result = (await response.json()) as { defaultRepurchaseDays?: number | null; error?: string };
       if (!response.ok) throw new Error(result.error ?? "Falha ao salvar regra.");
-      product.defaultRepurchaseDays = result.defaultRepurchaseDays ?? undefined;
       setDaysByProduct((current) => ({
         ...current,
         [product.id]: result.defaultRepurchaseDays ? String(result.defaultRepurchaseDays) : "",
@@ -2128,7 +2111,8 @@ function RepurchaseEngineModule({ alerts, user }: { alerts: AlertRow[]; user: Cr
           <div className="space-y-3">
             {filteredProducts.slice(0, 80).map((product) => {
               const automaticDays = inferAutomaticRepurchaseDays(product);
-              const configuredDays = product.defaultRepurchaseDays;
+              const configuredValue = daysByProduct[product.id] ?? (product.defaultRepurchaseDays ? String(product.defaultRepurchaseDays) : "");
+              const configuredDays = configuredValue ? Number(configuredValue) : undefined;
               const activeDays = configuredDays ?? automaticDays;
               const saving = savingProductId === product.id;
               return (
@@ -2145,7 +2129,7 @@ function RepurchaseEngineModule({ alerts, user }: { alerts: AlertRow[]; user: Cr
                         type="number"
                         min={1}
                         max={730}
-                        value={daysByProduct[product.id] ?? ""}
+                        value={configuredValue}
                         onChange={(event) => setDaysByProduct((current) => ({ ...current, [product.id]: event.target.value }))}
                         placeholder={String(automaticDays)}
                         disabled={!canEditRules}
