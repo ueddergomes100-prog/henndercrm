@@ -15,7 +15,9 @@
     "start": "node server.js",
     "lint": "eslint",
     "test": "node --test scripts/*.test.mjs",
-    "import:uniplus-sample": "node scripts/uniplus-sample-importer.mjs --input docs/sql/resultadosql --output src/data/generated/uniplus-sample.json --reference-date 2026-06-23"
+    "sync:uniplus": "node scripts/hennder-sync.mjs --dry-run",
+    "sync:uniplus:apply": "node scripts/hennder-sync.mjs --apply",
+    "sync:uniplus:auto": "node scripts/hennder-sync.mjs --apply"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.1.11",
@@ -28,6 +30,7 @@
     "framer-motion": "^12.40.0",
     "lucide-react": "^1.17.0",
     "next": "^15.5.19",
+    "pg": "^8.22.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "recharts": "^3.8.1",

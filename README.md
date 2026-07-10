@@ -6,14 +6,14 @@ CRM comercial para lojas dos segmentos agro e pet shop, com foco em recuperaçã
 
 Repositório: [github.com/ueddergomes100-prog/henndercrm](https://github.com/ueddergomes100-prog/henndercrm)
 
-Esta etapa usa uma massa demonstrativa gerada a partir do formato real de uma consulta de ERP. A fixture atual foi gerada de um resultado SQL maior e preserva dados conforme o material recebido; trate qualquer exportacao real como sensivel e nao versionavel. O banco do Uniplus deve ser tratado como uma fonte estritamente somente leitura.
+Esta etapa usa dados reais sincronizados do PostgreSQL do Uniplus para o Supabase. Qualquer exportacao real deve ser tratada como sensivel e nao versionavel. O banco do Uniplus deve ser tratado como uma fonte estritamente somente leitura.
 
 ## Arquitetura
 
 ```text
 ERP PostgreSQL Uniplus (somente leitura)
         |
-VPS Linux / Hennder Sync Agent
+Hennder Sync local ou VPS Linux
         |
 Supabase PostgreSQL (nuvem)
         |
@@ -22,7 +22,7 @@ API Next.js + services de dominio (Hostinger)
 Frontend web Hennder CRM
 ```
 
-O frontend não conhece tabelas ou consultas do ERP. O Hennder CRM Web nunca deve conectar diretamente ao PostgreSQL do Uniplus. O Hennder Sync roda fora da Hostinger, em uma VPS Linux com acesso ao PostgreSQL do Uniplus via Docker, rede privada ou tunel/VPN, e envia os dados normalizados para o Supabase.
+O frontend não conhece tabelas ou consultas do ERP. O Hennder CRM Web nunca deve conectar diretamente ao PostgreSQL do Uniplus. O Hennder Sync roda fora da Hostinger: primeiro nesta maquina com PostgreSQL acessivel localmente, depois em uma VPS Linux com Docker/rede privada/tunel/VPN. Ele envia os dados normalizados para o Supabase.
 
 ## Execução local
 
@@ -51,17 +51,16 @@ npm run build
 ## Estrutura
 
 - `src/domain/crm`: tipos de domínio e regras puras.
-- `src/data/mock-uniplus.ts`: adaptador tipado para a massa demonstrativa gerada.
-- `src/data/generated/uniplus-sample.json`: fixture demonstrativo gerado do CSV.
-- `scripts/uniplus-sample-importer.mjs`: importador temporário e reproduzível do CSV.
-- `scripts/uniplus-sample-importer.test.mjs`: testes de agrupamento, datas e anonimização.
-- `src/integrations/uniplus`: interfaces e implementações mockadas dos repositórios.
+- `src/hennder-sync`: agente real de sincronizacao Uniplus -> Supabase.
+- `scripts/hennder-sync.mjs`: wrapper CLI do agente.
+- `scripts/hennder-sync-transformer.test.mjs`: testes de agrupamento, datas e transformacao.
+- `src/integrations/uniplus`: contratos de integracao com o Uniplus.
 - `docs/sql/uniplus_exportacao_crm_corrigida.sql`: consulta corrigida para exportacao/validacao do Uniplus.
 - `src/integrations/uniplus/sql/sales-extraction.sql`: consulta antiga mantida como referencia; nao usar como SQL final.
-- `src/services`: sincronização, cálculos comerciais e view models.
-- `src/infrastructure/supabase`: cliente REST e destino de sincronização Supabase.
-- `src/infrastructure/crm-workspace-repository.ts`: persistência operacional local durável.
+- `src/services`: view models do CRM.
+- `src/infrastructure/supabase`: cliente REST, snapshot e destino de sincronizacao Supabase.
 - `src/app/api/auth/session`: login, restauração e encerramento de sessão.
+- `src/app/api/crm/snapshot`: leitura real do snapshot comercial no Supabase.
 - `src/app/api/crm/workspace`: contatos, alertas, agenda e oportunidades.
 - `src/app/page.tsx`: interface navegável.
 - `supabase/migrations`: schema versionado.
@@ -77,39 +76,25 @@ Foram criadas as interfaces:
 - `IUniplusSellerRepository`
 - `ICrmSyncTargetRepository`
 
-As implementações atuais são `MockUniplus*Repository`. O `UniplusSyncService` depende apenas das interfaces e nunca grava no Uniplus.
+O agente real fica em `src/hennder-sync` e nunca grava no Uniplus.
 
-## Massa demonstrativa baseada no resultado SQL
-
-O arquivo local ignorado `docs/sql/resultadosql` foi usado como fonte para gerar a fixture atual em `src/data/generated/uniplus-sample.json`. O CSV/resultado bruto não deve ser versionado.
-
-O importador:
-
-- consolida uma venda por `uniplus_venda_id`;
-- cria um item para cada `uniplus_item_id`;
-- mantém a relação de uma venda para vários produtos;
-- converte datas com anos fora de `1900..2100` para nulo;
-- usa `venda_data_inclusao` e depois `venda_data_alteracao` quando `data_venda` é inválida ou nula;
-- preserva valores, quantidades, produtos e padrões de compra;
-- preserva os nomes de clientes, razões sociais e vendedores como vieram no banco;
-- preserva os dados conforme o resultado SQL recebido; proteger qualquer exportacao real;
-- considera o celular como contato principal de WhatsApp e usa o campo WhatsApp como alternativa;
-- gera regras temporárias de recompra por tipo de produto.
-
-Resultado atual:
-
-- 500 linhas lidas;
-- 266 vendas únicas;
-- 500 itens únicos;
-- 114 vendas com mais de um item;
-- até 14 itens vinculados à mesma venda;
-- 246 clientes, 9 vendedores e 303 produtos.
-
-Para regenerar:
+Para testar o Sync real em modo seguro:
 
 ```bash
-npm run import:uniplus-sample
-npm test
+npm run sync:uniplus
+```
+
+Por padrao, o Sync busca somente vendas de hoje pelo campo `d.data`, evitando
+carga grande no primeiro uso. Para uma janela controlada:
+
+```bash
+node scripts/hennder-sync.mjs --from 2026-05-10 --to 2026-07-11 --dry-run
+```
+
+Para gravar no Supabase, use explicitamente:
+
+```bash
+npm run sync:uniplus:apply
 ```
 
 Mapeamento principal:
@@ -149,7 +134,7 @@ Registros rejeitados são classificados como:
 - `cliente_inativo`
 - `dados_incompletos`
 
-A prévia pode ser executada por `POST /api/crm/sync/preview`.
+A previa segura e executada pelo CLI `npm run sync:uniplus`.
 
 ## Supabase
 
@@ -179,10 +164,10 @@ Para preparar outro projeto Supabase:
 3. Execute `supabase/seed.sql`.
 4. Copie `.env.example` para `.env.local`.
 5. Preencha `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` e `SUPABASE_SECRET_KEY`.
-6. Defina `CRM_OPERATIONAL_PROVIDER=supabase` para persistir as operações no banco remoto.
-7. Troque `CRM_DATA_PROVIDER` para `supabase` quando o provider do snapshot comercial for implementado.
+6. Rode `npm run sync:uniplus` para validar a leitura de hoje em dry-run.
+7. Rode `npm run sync:uniplus:apply` somente quando o resumo estiver correto.
 
-Com `CRM_OPERATIONAL_PROVIDER=local`, as operações são persistidas em `.data/crm-workspace.json`, ignorado pelo Git. Com `CRM_OPERATIONAL_PROVIDER=supabase`, contatos, status de alertas, oportunidades e agenda são gravados nas tabelas `crm_*`.
+Contatos, status de alertas, oportunidades e agenda sao gravados diretamente nas tabelas `crm_*` do Supabase.
 
 Nunca exponha `SUPABASE_SECRET_KEY` no navegador.
 
@@ -197,8 +182,6 @@ O projeto Supabase do Hennder CRM já está configurado:
 - O bootstrap demonstrativo importou 19 vendas e auditou 3 vendas ignoradas.
 - Foram gerados 15 alertas, 4 oportunidades e 5 eventos de agenda.
 - O escopo por perfil de usuário e o CRUD operacional foram validados.
-
-O bootstrap pode ser reexecutado por um administrador em `POST /api/crm/bootstrap`. A operação é idempotente para a massa demonstrativa.
 
 As credenciais de ambiente ficam fora do Git. Como a chave secreta foi compartilhada durante a configuração, ela deve ser rotacionada antes da publicação em produção.
 
@@ -262,9 +245,19 @@ ticket médio * ciclos de compra estimados como perdidos
 
 ## Próximos passos
 
-1. Substituir as contas locais por Supabase Auth.
-2. Implementar o Hennder Sync em VPS Linux com acesso ao PostgreSQL do Uniplus via Docker/rede privada.
-3. Executar sincronização incremental e idempotente para o Supabase.
-4. Consolidar o snapshot comercial no Supabase sem alterar a interface.
-5. Validar regras especificas do Uniplus para status, cancelamentos e devolucoes.
-6. Integrar WhatsApp Business somente após consentimento, templates e webhooks.
+Atualizacao de 10/07/2026:
+
+- O CRM Web ja le o snapshot comercial diretamente do Supabase.
+- O Hennder Sync local esta sincronizando vendas do dia atual em modo idempotente.
+- A tela **Vendas** agora separa **Ultima sincronizacao** e **Todas**, com busca por venda/cliente, filtro por status, filtro por data e carregamento incremental de 25 registros.
+- A tela **Logs e Sincronizacao** exibe o resumo diario do Sync, erros e vendas ignoradas.
+- O transformador do Sync normaliza mojibake comum vindo do PostgreSQL/exportacao, evitando nomes como `GONÃALVES` quando a origem representa `GONÇALVES`.
+- Dry-run historico de 2026-05-10 ate 2026-07-11, sem gravar no Supabase: 5000 linhas lidas, 2664 vendas identificadas, 4999 itens validos e 1 venda ignorada por cliente inativo.
+
+Proximos passos antes da liberacao oficial:
+
+1. Criar usuarios reais no Supabase Auth e vincular em `crm_usuarios`.
+2. Garantir na Hostinger `CRM_COOKIE_SECURE=true`, `CRM_SESSION_SECRET` forte e chaves Supabase rotacionadas.
+3. Aplicar a carga historica de 2 meses somente depois de revisar o dry-run e, se necessario, subir o limite/janelas em lotes.
+4. Validar regras especificas do Uniplus para status, cancelamentos e devolucoes.
+5. Integrar WhatsApp Business somente apos consentimento, templates e webhooks.

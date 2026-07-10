@@ -1,6 +1,8 @@
-# Hennder Sync na VPS Linux
+# Hennder Sync local e VPS Linux
 
-Este documento define o alvo operacional do Hennder Sync.
+Este documento define o alvo operacional do Hennder Sync. Por enquanto ele pode
+rodar nesta maquina Windows com acesso ao PostgreSQL do Uniplus; depois a mesma
+rotina migra para VPS Linux/Docker.
 
 ## Objetivo
 
@@ -12,15 +14,22 @@ Fluxo esperado:
 
 ```text
 PostgreSQL Uniplus (somente leitura)
-VPS Linux / Hennder Sync
+Hennder Sync local ou VPS Linux
 Supabase PostgreSQL (nuvem)
 Hennder CRM Web (Hostinger)
 ```
 
-## Onde Roda
+## Onde Roda Agora
 
-O agente deve rodar em uma VPS Linux que consiga acessar o PostgreSQL do
-Uniplus por um destes caminhos:
+Etapa atual:
+
+- maquina Windows de desenvolvimento;
+- PostgreSQL do Uniplus acessivel localmente ou pela rede;
+- Node.js rodando `scripts/hennder-sync.mjs`.
+
+Etapa futura:
+
+- VPS Linux que consiga acessar o PostgreSQL do Uniplus por um destes caminhos:
 
 - container Docker na mesma rede do PostgreSQL;
 - rede privada entre VPS e ambiente do Uniplus;
@@ -31,7 +40,7 @@ A Hostinger hospeda apenas a aplicacao web.
 
 ## Variaveis De Ambiente
 
-Na VPS do Sync:
+Na maquina local ou VPS do Sync:
 
 ```env
 NEXT_PUBLIC_SUPABASE_URL=
@@ -42,8 +51,7 @@ UNIPLUS_DATABASE_URL=postgres://readonly-user:readonly-password@uniplus-host:543
 UNIPLUS_SSL=false
 UNIPLUS_SYNC_BATCH_SIZE=5000
 UNIPLUS_SYNC_MODE=incremental
-HENNDER_SYNC_LOG_DIR=/var/log/hennder-sync
-HENNDER_SYNC_DRY_RUN=false
+HENNDER_SYNC_LOG_DIR=.data/hennder-sync-logs
 ```
 
 Nunca usar usuario administrador do banco do Uniplus. O usuario do Sync deve ter
@@ -60,44 +68,61 @@ apenas `CONNECT`, `USAGE` no schema correto e `SELECT` nas tabelas necessarias.
 Antes de carga grande, validar a venda `330670` com o SQL em
 `docs/sql/uniplus_validacao_venda_330670.sql`.
 
-## Comandos Desejados
+## Comandos
 
-Ainda precisam ser implementados:
+Disponiveis agora:
 
 ```bash
-node scripts/hennder-sync.mjs --since auto
-node scripts/hennder-sync.mjs --since 2026-07-01T00:00:00-03:00
+npm run sync:uniplus
+npm run sync:uniplus:apply
 node scripts/hennder-sync.mjs --dry-run
+node scripts/hennder-sync.mjs --apply
+node scripts/hennder-sync.mjs --date 2026-07-10 --dry-run
+node scripts/hennder-sync.mjs --from 2026-05-10 --to 2026-07-11 --dry-run
+node scripts/hennder-sync.mjs --since auto --dry-run
+node scripts/hennder-sync.mjs --since 2026-07-01T00:00:00-03:00 --apply
 ```
 
 O modo `--dry-run` deve conectar, ler, transformar e auditar, mas nao gravar no
-Supabase.
+Supabase. Ele e o comportamento padrao e recomendado para o primeiro teste.
+Para gravar no Supabase, use `--apply` explicitamente.
+Na VPS Linux, `HENNDER_SYNC_LOG_DIR` pode ser trocado para `/var/log/hennder-sync`.
+Sem `--since`, `--date`, `--from` ou `--to`, o Sync busca somente vendas de hoje
+pelo campo `d.data`.
 
 ## Ordem De Implementacao
 
-1. Instalar `pg`.
-2. Criar repositorios PostgreSQL reais para as interfaces em
-   `src/integrations/uniplus/repositories.ts`.
-3. Criar `scripts/hennder-sync.mjs`.
-4. Reutilizar `UniplusSyncService`.
-5. Usar `SupabaseCrmSyncRepository` como destino.
-6. Registrar inicio/fim em `crm_sincronizacoes`.
-7. Registrar descartes em `crm_vendas_ignoradas`.
-8. Adicionar logs em arquivo na VPS.
-9. Agendar por systemd timer, cron ou container Docker.
-10. Depois, implementar provider Supabase para `/api/crm/snapshot`.
+1. Validar `UNIPLUS_DATABASE_URL` nesta maquina.
+2. Rodar `npm run sync:uniplus` em dry-run somente com vendas de hoje.
+3. Conferir `rowsRead`, `imported`, `ignoredSales` e `digest`.
+4. Depois, testar janela maior com `node scripts/hennder-sync.mjs --from 2026-05-10 --to 2026-07-11 --dry-run`.
+5. Quando o resumo estiver correto, rodar `npm run sync:uniplus:apply`.
+6. Conferir `crm_sincronizacoes` e `crm_vendas_ignoradas` no Supabase.
+7. Conferir `/api/crm/snapshot` lendo as tabelas reais do Supabase.
+8. Migrar a rotina para VPS Linux/Docker e agendar por systemd timer, cron ou
+   container.
 
-## Fixture Atual
+## Estado Atual
 
-A fixture local atual em `src/data/generated/uniplus-sample.json` foi gerada de
-`docs/sql/resultadosql`, arquivo ignorado pelo Git:
+O CRM nao carrega mais fixture mockada. O front-end le o snapshot comercial do
+Supabase, e o agente real fica em `src/hennder-sync`.
 
-- 500 linhas lidas;
-- 266 vendas unicas;
-- 500 itens;
-- 246 clientes;
-- 303 produtos;
-- 9 vendedores;
-- 114 vendas multi-item;
-- maximo de 14 itens por venda;
-- 0 linhas invalidas.
+Em 10/07/2026, a rotina local Windows esta ativa no Agendador de Tarefas com
+`npm run sync:uniplus:auto`, sincronizando somente vendas do dia. A ultima
+execucao validada importou 25 vendas e 36 itens, sem erros e sem ignoradas.
+
+A tela **Vendas** usa `crm_vendas.updated_at` para separar as vendas tocadas
+pela ultima sincronizacao da lista completa. A aba **Todas** continua
+disponivel, mas a interface aplica busca, filtros e carregamento incremental
+para evitar uma tabela grande demais.
+
+Dry-run historico executado sem gravar no Supabase:
+
+```bash
+node scripts/hennder-sync.mjs --from 2026-05-10 --to 2026-07-11 --dry-run
+```
+
+Resultado: 5000 linhas lidas, 2664 vendas identificadas, 4999 itens validos e 1
+venda ignorada por cliente inativo. Antes de aplicar a carga historica real,
+revisar se o limite de 5000 linhas deve ser aumentado ou se a carga sera feita
+em janelas menores.

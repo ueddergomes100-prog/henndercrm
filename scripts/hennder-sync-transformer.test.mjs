@@ -5,7 +5,7 @@ import {
   resolveSaleDate,
   sanitizeDate,
   transformRows,
-} from "./uniplus-sample-importer.mjs";
+} from "../src/hennder-sync/uniplus-row-transformer.mjs";
 
 const headers = [
   "uniplus_venda_id",

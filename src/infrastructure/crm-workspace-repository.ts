@@ -10,7 +10,6 @@ import type {
   CrmWorkspace,
   RepurchaseAlertStatus,
 } from "@/domain/crm/types";
-import { crmDemoService } from "@/services/crm-demo-service";
 import type { ICrmWorkspaceRepository } from "./crm-workspace-contract";
 
 const dataDirectory = path.join(process.cwd(), ".data");
@@ -114,12 +113,11 @@ export class CrmWorkspaceRepository implements ICrmWorkspaceRepository {
 }
 
 function createInitialWorkspace(): CrmWorkspace {
-  const snapshot = crmDemoService.getSnapshot();
   return {
     contacts: [],
     alertStatuses: {},
-    agenda: snapshot.agenda,
-    opportunities: snapshot.opportunities,
+    agenda: [],
+    opportunities: [],
   };
 }
 

@@ -94,6 +94,42 @@ export async function POST(request: Request) {
   }
 }
 
+export async function DELETE(request: Request) {
+  const user = await requireAdmin();
+  if (user instanceof Response) return user;
+
+  const { searchParams } = new URL(request.url);
+  const id = searchParams.get("id");
+  if (!id) return Response.json({ error: "Informe o usuario." }, { status: 400 });
+  if (id === user.id) {
+    return Response.json({ error: "Voce nao pode excluir o proprio usuario." }, { status: 400 });
+  }
+
+  try {
+    const [target] = await supabaseRequest<CrmUserRow[]>(
+      `/rest/v1/crm_usuarios?select=id,auth_user_id,nome,email,perfil,vendedor_id,ativo&id=eq.${encodeURIComponent(id)}&limit=1`,
+    );
+    if (!target) return Response.json({ error: "Usuario nao encontrado." }, { status: 404 });
+    if (target.perfil === "administrador") {
+      return Response.json({ error: "Administradores nao podem ser excluidos." }, { status: 400 });
+    }
+
+    await supabaseRequest<CrmUserRow[]>(`/rest/v1/crm_usuarios?id=eq.${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: { ativo: false },
+      prefer: "return=minimal",
+    });
+    await deleteAuthUser(target.auth_user_id);
+
+    return Response.json({ ok: true, id });
+  } catch (error) {
+    return Response.json(
+      { error: error instanceof Error ? error.message : "Falha ao excluir usuario." },
+      { status: 400 },
+    );
+  }
+}
+
 async function requireAdmin(): Promise<CrmSessionUser | Response> {
   const cookieStore = await cookies();
   const user = readSessionToken(cookieStore.get(CRM_SESSION_COOKIE)?.value);
@@ -102,6 +138,13 @@ async function requireAdmin(): Promise<CrmSessionUser | Response> {
     return Response.json({ error: "Somente administradores podem gerenciar usuarios." }, { status: 403 });
   }
   return user;
+}
+
+async function deleteAuthUser(authUserId: string) {
+  if (!authUserId) return;
+  await supabaseRequest(`/auth/v1/admin/users/${encodeURIComponent(authUserId)}`, {
+    method: "DELETE",
+  });
 }
 
 async function createAuthUser(email: string, password: string, name: string) {

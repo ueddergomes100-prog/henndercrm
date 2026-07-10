@@ -4,11 +4,12 @@ import type {
   CrmContactRecord,
   CrmOpportunity,
   CrmSessionUser,
+  CrmSnapshot,
   RepurchaseAlertStatus,
 } from "@/domain/crm/types";
 import { getCrmWorkspaceRepository } from "@/infrastructure/crm-workspace-provider";
+import { SupabaseCrmSnapshotRepository } from "@/infrastructure/supabase/supabase-crm-snapshot-repository";
 import { CRM_SESSION_COOKIE, readSessionToken } from "@/lib/crm-auth";
-import { crmDemoService } from "@/services/crm-demo-service";
 
 type WorkspaceAction =
   | { action: "create_contact"; record: Omit<CrmContactRecord, "id"> }
@@ -30,9 +31,9 @@ export async function GET() {
   const workspace = await getCrmWorkspaceRepository().getWorkspace();
   if (user.role !== "vendedor" || !user.sellerId) return Response.json(workspace);
 
-  const snapshot = crmDemoService.getSnapshot();
-  const allowedSellerId = resolveSnapshotSellerId(user.sellerId);
-  const customerIds = getSellerCustomerIds(allowedSellerId);
+  const snapshot = await new SupabaseCrmSnapshotRepository().getSnapshot();
+  const allowedSellerId = resolveSnapshotSellerId(user.sellerId, snapshot);
+  const customerIds = getSellerCustomerIds(allowedSellerId, snapshot);
   const alertIds = new Set(
     snapshot.alerts
       .filter((alert) => alert.sellerId === allowedSellerId)
@@ -51,8 +52,7 @@ export async function GET() {
   });
 }
 
-function getSellerCustomerIds(sellerId: string) {
-  const snapshot = crmDemoService.getSnapshot();
+function getSellerCustomerIds(sellerId: string, snapshot: CrmSnapshot) {
   const customerIds = new Set<string>();
 
   for (const customer of snapshot.customers) {
@@ -73,8 +73,7 @@ function getSellerCustomerIds(sellerId: string) {
   return customerIds;
 }
 
-function resolveSnapshotSellerId(sellerId: string) {
-  const snapshot = crmDemoService.getSnapshot();
+function resolveSnapshotSellerId(sellerId: string, snapshot: CrmSnapshot) {
   if (snapshot.sellers.some((seller) => seller.id === sellerId)) return sellerId;
   if (!snapshot.sellers.length) return sellerId;
 
@@ -156,14 +155,14 @@ async function denyUnauthorizedChange(
     return Response.json({ error: "Vendedor sem carteira vinculada." }, { status: 403 });
   }
 
-  const snapshot = crmDemoService.getSnapshot();
+  const snapshot = await new SupabaseCrmSnapshotRepository().getSnapshot();
   const workspace = await repository.getWorkspace();
-  const allowedSellerId = resolveSnapshotSellerId(user.sellerId);
+  const allowedSellerId = resolveSnapshotSellerId(user.sellerId, snapshot);
   let assignedSellerId: string | undefined;
 
   switch (command.action) {
     case "create_contact":
-      assignedSellerId = getSellerCustomerIds(allowedSellerId).has(command.record.customerId)
+      assignedSellerId = getSellerCustomerIds(allowedSellerId, snapshot).has(command.record.customerId)
         ? allowedSellerId
         : undefined;
       break;

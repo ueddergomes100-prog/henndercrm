@@ -9,9 +9,7 @@ import type {
   CrmWorkspace,
   RepurchaseAlertStatus,
 } from "@/domain/crm/types";
-import { crmUuid } from "@/domain/crm/rules";
 import type { ICrmWorkspaceRepository } from "@/infrastructure/crm-workspace-contract";
-import { crmDemoService } from "@/services/crm-demo-service";
 import { SupabaseRestClient } from "./supabase-rest-client";
 
 type ClientRow = { id: string; uniplus_id: number; nome: string };
@@ -53,17 +51,6 @@ export class SupabaseCrmWorkspaceRepository implements ICrmWorkspaceRepository {
   constructor(private readonly client = new SupabaseRestClient()) {}
 
   async getWorkspace(): Promise<CrmWorkspace> {
-    const snapshot = crmDemoService.getSnapshot();
-    const currentClientIds = new Set(
-      snapshot.customers.map((customer) => customer.uniplusId),
-    );
-    const currentSellerIds = new Set(
-      snapshot.sellers.map((seller) => seller.uniplusId),
-    );
-    const currentProductIds = new Set(
-      snapshot.products.map((product) => product.uniplusId),
-    );
-    const currentAlertIds = new Set(snapshot.alerts.map((alert) => alert.id));
     const [clients, sellers, products, contacts, alerts, agenda, opportunities] =
       await Promise.all([
         this.client.select<ClientRow>("crm_clientes", {
@@ -95,21 +82,9 @@ export class SupabaseCrmWorkspaceRepository implements ICrmWorkspaceRepository {
         }),
       ]);
 
-    const clientById = new Map(
-      clients
-        .filter((row) => currentClientIds.has(row.uniplus_id))
-        .map((row) => [row.id, row]),
-    );
-    const sellerById = new Map(
-      sellers
-        .filter((row) => currentSellerIds.has(row.uniplus_id))
-        .map((row) => [row.id, row]),
-    );
-    const productById = new Map(
-      products
-        .filter((row) => currentProductIds.has(row.uniplus_id))
-        .map((row) => [row.id, row]),
-    );
+    const clientById = new Map(clients.map((row) => [row.id, row]));
+    const sellerById = new Map(sellers.map((row) => [row.id, row]));
+    const productById = new Map(products.map((row) => [row.id, row]));
 
     return {
       contacts: contacts.flatMap((row) => {
@@ -117,7 +92,7 @@ export class SupabaseCrmWorkspaceRepository implements ICrmWorkspaceRepository {
         if (!customer) return [];
         return [{
           id: row.id,
-          customerId: crmUuid("customer", customer.uniplus_id),
+          customerId: customer.id,
           customerName: customer.nome,
           outcome: fromDatabaseOutcome(row.resultado),
           note: row.observacao ?? "",
@@ -131,9 +106,7 @@ export class SupabaseCrmWorkspaceRepository implements ICrmWorkspaceRepository {
         }];
       }),
       alertStatuses: Object.fromEntries(
-        alerts
-          .filter((row) => currentAlertIds.has(row.id))
-          .map((row) => [row.id, row.status]),
+        alerts.map((row) => [row.id, row.status]),
       ),
       agenda: agenda
         .filter((row) => !row.cliente_id || clientById.has(row.cliente_id))
@@ -143,12 +116,8 @@ export class SupabaseCrmWorkspaceRepository implements ICrmWorkspaceRepository {
           time: row.hora_evento.slice(0, 5),
           title: row.titulo,
           type: row.tipo,
-          customerId: row.cliente_id
-            ? toCustomerDomainId(clientById.get(row.cliente_id))
-            : undefined,
-          sellerId: row.vendedor_id
-            ? toSellerDomainId(sellerById.get(row.vendedor_id))
-            : undefined,
+          customerId: row.cliente_id ?? undefined,
+          sellerId: row.vendedor_id ?? undefined,
         })),
       opportunities: opportunities.flatMap((row) => {
         const customer = clientById.get(row.cliente_id);
@@ -158,17 +127,17 @@ export class SupabaseCrmWorkspaceRepository implements ICrmWorkspaceRepository {
           : undefined;
         return [{
           id: row.id,
-          customerId: crmUuid("customer", customer.uniplus_id),
+          customerId: customer.id,
           customerName: customer.nome,
           sourceProductName: row.produto_origem_id
-            ? productById.get(row.produto_origem_id)?.nome ?? "Produto não informado"
-            : "Produto não informado",
+            ? productById.get(row.produto_origem_id)?.nome ?? "Produto nao informado"
+            : "Produto nao informado",
           suggestedProductName: row.produto_sugerido_nome,
           reason: row.motivo ?? "",
           confidence: row.confianca ?? 0,
           status: row.status,
-          sellerId: seller ? crmUuid("seller", seller.uniplus_id) : undefined,
-          sellerName: seller?.nome ?? "Não atribuído",
+          sellerId: seller?.id,
+          sellerName: seller?.nome ?? "Nao atribuido",
         }];
       }),
     };
@@ -199,7 +168,7 @@ export class SupabaseCrmWorkspaceRepository implements ICrmWorkspaceRepository {
       { id },
       { status },
     );
-    if (rows.length === 0) throw new Error("Alerta não encontrado no Supabase.");
+    if (rows.length === 0) throw new Error("Alerta nao encontrado no Supabase.");
     return { id, status };
   }
 
@@ -221,7 +190,7 @@ export class SupabaseCrmWorkspaceRepository implements ICrmWorkspaceRepository {
       mapped,
     );
     const row = rows[0];
-    if (!row) throw new Error("Evento de agenda não encontrado.");
+    if (!row) throw new Error("Evento de agenda nao encontrado.");
     return {
       id: row.id,
       date: row.data_evento,
@@ -254,10 +223,10 @@ export class SupabaseCrmWorkspaceRepository implements ICrmWorkspaceRepository {
       { id },
       mapped,
     );
-    if (rows.length === 0) throw new Error("Oportunidade não encontrada.");
+    if (rows.length === 0) throw new Error("Oportunidade nao encontrada.");
     const workspace = await this.getWorkspace();
     const opportunity = workspace.opportunities.find((item) => item.id === id);
-    if (!opportunity) throw new Error("Oportunidade não encontrada.");
+    if (!opportunity) throw new Error("Oportunidade nao encontrada.");
     return opportunity;
   }
 
@@ -266,49 +235,40 @@ export class SupabaseCrmWorkspaceRepository implements ICrmWorkspaceRepository {
   }
 
   private async resolveCustomer(domainId: string) {
-    const snapshot = crmDemoService.getSnapshot();
-    const customer = snapshot.customers.find((item) => item.id === domainId);
-    if (!customer) throw new Error("Cliente não encontrado.");
     const rows = await this.client.select<ClientRow>("crm_clientes", {
       select: "id,uniplus_id,nome",
-      uniplus_id: `eq.${customer.uniplusId}`,
+      id: `eq.${domainId}`,
       limit: 1,
     });
-    if (!rows[0]) throw new Error("Cliente ainda não foi carregado no Supabase.");
+    if (!rows[0]) throw new Error("Cliente ainda nao foi carregado no Supabase.");
     return rows[0];
   }
 
   private async resolveSeller(domainId?: string) {
     if (!domainId) return undefined;
-    const snapshot = crmDemoService.getSnapshot();
-    const seller = snapshot.sellers.find((item) => item.id === domainId);
-    if (!seller) return undefined;
     const rows = await this.client.select<SellerRow>("crm_vendedores", {
       select: "id,uniplus_id,nome",
-      uniplus_id: `eq.${seller.uniplusId}`,
+      id: `eq.${domainId}`,
       limit: 1,
     });
     return rows[0];
   }
 
   private async resolvePreferredSellerId(customerDomainId: string) {
-    const snapshot = crmDemoService.getSnapshot();
-    const customer = snapshot.customers.find((item) => item.id === customerDomainId);
-    const seller = snapshot.sellers.find(
-      (item) => item.uniplusId === customer?.preferredSeller?.sellerId,
-    );
-    return seller ? (await this.resolveSeller(seller.id))?.id ?? null : null;
+    const rows = await this.client.select<{ vendedor_id: string | null }>("crm_vendas", {
+      select: "vendedor_id",
+      cliente_id: `eq.${customerDomainId}`,
+      order: "data_venda.desc",
+      limit: 1,
+    });
+    return rows[0]?.vendedor_id ?? null;
   }
 
   private async resolveProductId(name?: string) {
     if (!name) return null;
-    const product = crmDemoService
-      .getSnapshot()
-      .products.find((item) => item.name === name);
-    if (!product) return null;
     const rows = await this.client.select<ProductRow>("crm_produtos", {
       select: "id,uniplus_id,nome",
-      uniplus_id: `eq.${product.uniplusId}`,
+      nome: `eq.${name}`,
       limit: 1,
     });
     return rows[0]?.id ?? null;
@@ -347,19 +307,13 @@ export class SupabaseCrmWorkspaceRepository implements ICrmWorkspaceRepository {
         ? { cliente_id: (await this.resolveCustomer(values.customerId)).id }
         : {}),
       ...(values.sourceProductName !== undefined
-        ? {
-            produto_origem_id: await this.resolveProductId(
-              values.sourceProductName,
-            ),
-          }
+        ? { produto_origem_id: await this.resolveProductId(values.sourceProductName) }
         : {}),
       ...(values.suggestedProductName !== undefined
         ? { produto_sugerido_nome: values.suggestedProductName }
         : {}),
       ...(values.reason !== undefined ? { motivo: values.reason } : {}),
-      ...(values.confidence !== undefined
-        ? { confianca: values.confidence }
-        : {}),
+      ...(values.confidence !== undefined ? { confianca: values.confidence } : {}),
       ...(values.status !== undefined ? { status: values.status } : {}),
       ...(values.sellerId !== undefined
         ? {
@@ -370,14 +324,6 @@ export class SupabaseCrmWorkspaceRepository implements ICrmWorkspaceRepository {
         : {}),
     };
   }
-}
-
-function toCustomerDomainId(row?: ClientRow) {
-  return row ? crmUuid("customer", row.uniplus_id) : undefined;
-}
-
-function toSellerDomainId(row?: SellerRow) {
-  return row ? crmUuid("seller", row.uniplus_id) : undefined;
 }
 
 function formatContactDate(value: string) {

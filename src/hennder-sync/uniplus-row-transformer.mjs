@@ -1,7 +1,4 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { basename, dirname, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 
 const MIN_YEAR = 1900;
 const MAX_YEAR = 2100;
@@ -81,7 +78,7 @@ export function resolveSaleDate(row) {
 
 export function transformRows(rows, options = {}) {
   const referenceDate = options.referenceDate ?? new Date().toISOString().slice(0, 10);
-  const sourceName = options.sourceName ?? "uniplus_sample_result.csv";
+  const sourceName = options.sourceName ?? "postgres-uniplus";
   const clients = new Map();
   const sellers = new Map();
   const products = new Map();
@@ -239,7 +236,7 @@ export function transformRows(rows, options = {}) {
   const repurchaseRules = [...products.values()]
     .filter((product) => product.usesCrm)
     .map((product) => ({
-      id: `sample-product-${product.id}`,
+      id: `uniplus-product-${product.id}`,
       type: "produto",
       productId: product.id,
       days: inferRepurchaseDays(product.name, product.department),
@@ -281,21 +278,6 @@ export function transformRows(rows, options = {}) {
   };
 }
 
-export async function importSample({
-  input,
-  output,
-  referenceDate,
-}) {
-  const source = await readFile(input, "utf8");
-  const result = transformRows(parseCsv(source.replace(/^\uFEFF/, "")), {
-    referenceDate,
-    sourceName: basename(input),
-  });
-  await mkdir(dirname(output), { recursive: true });
-  await writeFile(output, `${JSON.stringify(result, null, 2)}\n`, "utf8");
-  return result.metadata;
-}
-
 function nullable(value) {
   const normalized = String(value ?? "").trim();
   return !normalized || normalized.toUpperCase() === "NULL" ? null : normalized;
@@ -306,28 +288,14 @@ function text(value) {
 }
 
 function fixEncoding(value) {
-  return value
-    .replaceAll("Ã‡", "Ç")
-    .replaceAll("Ãƒ", "Ã")
-    .replaceAll("Ã§", "ç")
-    .replaceAll("Ã£", "ã")
-    .replaceAll("Ã¡", "á")
-    .replaceAll("Ã¢", "â")
-    .replaceAll("Ã©", "é")
-    .replaceAll("Ãª", "ê")
-    .replaceAll("Ã­", "í")
-    .replaceAll("Ã³", "ó")
-    .replaceAll("Ã´", "ô")
-    .replaceAll("Ãµ", "õ")
-    .replaceAll("Ãº", "ú")
-    .replaceAll("Ã¼", "ü")
-    .replaceAll("Ã€", "À")
-    .replaceAll("ÃÁ", "Á")
-    .replaceAll("Ã‰", "É")
-    .replaceAll("Ã“", "Ó")
-    .replaceAll("Ãš", "Ú")
-    .replaceAll("Âº", "º")
-    .replaceAll("Âª", "ª");
+  let current = value;
+  for (let index = 0; index < 3; index += 1) {
+    if (!/[\u00c3\u00c2]|[\u0080-\u009f]/u.test(current)) break;
+    const decoded = Buffer.from(current, "latin1").toString("utf8");
+    if (decoded === current || decoded.includes("\uFFFD")) break;
+    current = decoded;
+  }
+  return current.replace(/\u00a0/gu, " ");
 }
 
 function integer(value) {
@@ -354,7 +322,7 @@ function booleanValue(value) {
 }
 
 function cityName(id) {
-  if (id === 2698) return "Manhuaçu";
+  if (id === 2698) return "Manhua\u00e7u";
   return id ? `Cidade ${id}` : undefined;
 }
 
@@ -366,43 +334,32 @@ function saleStatus(value) {
 }
 
 function inferDepartment(name, sourceDepartment) {
-  const upper = name.toLocaleUpperCase("pt-BR");
-  if (/(RAÇÃO|RACAO|SACHÊ|SACHE|AREIA HIGI|PETISCO|CÃES|CAES|GATOS|COLEIRA)/u.test(upper)) {
+  const upper = normalizeSearch(name);
+  if (/(RACAO|SACHE|AREIA HIGI|PETISCO|CAES|GATOS|COLEIRA)/u.test(upper)) {
     return "PET";
   }
   if (/(SEMENTE|ADUBO|FERTIL|HERBIC|INSETIC|FUNGIC|PULVER)/u.test(upper)) {
     return "AGRO";
   }
-  if (/(ML|MG|VERM|INJET|VACINA|ANTIBI|COLÍRIO|COLIRIO|VET)/u.test(upper)) {
-    return "VETERINÁRIA";
+  if (/(ML|MG|VERM|INJET|VACINA|ANTIBI|COLIRIO|VET)/u.test(upper)) {
+    return "VETERIN\u00c1RIA";
   }
-  return text(sourceDepartment) === "1" ? "PET" : "AGRO E VETERINÁRIA";
+  return text(sourceDepartment) === "1" ? "PET" : "AGRO E VETERIN\u00c1RIA";
 }
 
 function inferRepurchaseDays(name, department) {
-  const upper = name.toLocaleUpperCase("pt-BR");
-  if (/(SACHÊ|SACHE|PETISCO)/u.test(upper)) return 20;
-  if (/(RAÇÃO|RACAO|AREIA HIGI)/u.test(upper)) return 30;
+  const upper = normalizeSearch(name);
+  if (/(SACHE|PETISCO)/u.test(upper)) return 20;
+  if (/(RACAO|AREIA HIGI)/u.test(upper)) return 30;
   if (/(VERM|ANTIPULG|CARRAP|VACINA)/u.test(upper)) return 90;
-  if (department === "VETERINÁRIA") return 90;
+  if (department === "VETERIN\u00c1RIA") return 90;
   if (department === "AGRO") return 60;
   return 45;
 }
 
-async function main() {
-  const args = process.argv.slice(2);
-  const inputIndex = args.indexOf("--input");
-  const outputIndex = args.indexOf("--output");
-  const dateIndex = args.indexOf("--reference-date");
-  const input = resolve(inputIndex >= 0 ? args[inputIndex + 1] : "H:/uniplus_sample_result.csv");
-  const output = resolve(
-    outputIndex >= 0 ? args[outputIndex + 1] : "src/data/generated/uniplus-sample.json",
-  );
-  const referenceDate = dateIndex >= 0 ? args[dateIndex + 1] : undefined;
-  const metadata = await importSample({ input, output, referenceDate });
-  process.stdout.write(`${JSON.stringify(metadata, null, 2)}\n`);
-}
-
-if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
-  await main();
+function normalizeSearch(value) {
+  return fixEncoding(String(value ?? ""))
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLocaleUpperCase("pt-BR");
 }

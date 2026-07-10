@@ -193,6 +193,7 @@ export interface CrmSale {
   customerId: string;
   sellerId?: string;
   soldAt: string;
+  updatedAt?: string;
   totalValue: number;
   discountValue: number;
   status: string;

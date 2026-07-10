@@ -1,5 +1,5 @@
 DOCUMENTACAO DE PASSAGEM - HENNDER CRM E HENNDER SYNC
-Atualizado em: 02/07/2026
+Atualizado em: 10/07/2026
 Projeto local atual: H:\CRM
 Repositorio Git: https://github.com/ueddergomes100-prog/henndercrm
 Producao: https://gestao.nexarcompany.com.br
@@ -9,20 +9,41 @@ Producao: https://gestao.nexarcompany.com.br
 ================================================================================
 
 Este TXT foi feito para abrir o projeto em outro ambiente e continuar o
-desenvolvimento do Hennder Sync, principalmente na VPS Linux que tera acesso ao
-PostgreSQL do Uniplus via Docker/rede privada.
+desenvolvimento do Hennder Sync. A etapa atual roda o agente nesta maquina com
+acesso ao PostgreSQL do Uniplus; depois a mesma rotina migra para VPS Linux com
+Docker/rede privada.
 
 Ele explica:
 
 - O que ja foi feito no Hennder CRM.
 - Como esta a producao na Hostinger.
-- Como esta a base demonstrativa.
+- Como o CRM le dados reais do Supabase.
 - Quais arquivos principais existem.
 - Quais comandos usar no ambiente novo.
 - Como deve funcionar o Hennder Sync.
 - Qual SQL usar no PostgreSQL do Uniplus.
 - Quais validacoes fazer antes de importar dados reais.
 - O que ainda precisa ser implementado.
+
+NOTA OPERACIONAL ATUAL:
+O CRM nao carrega mais fixture mockada. Os arquivos mockados, bootstrap
+demonstrativo e preview mockado foram removidos. O agente real fica em
+src/hennder-sync e o front-end le o snapshot comercial pelo Supabase.
+
+ATUALIZACAO 10/07/2026:
+- Hennder Sync local esta rodando no Agendador do Windows a cada 5 minutos.
+- Ultima sincronizacao do dia importou 25 vendas e 36 itens, sem vendas
+  ignoradas e sem erro.
+- A tela Vendas possui abas "Ultima sincronizacao" e "Todas", com busca por
+  venda/cliente, filtro por status, filtro por data e carregamento incremental
+  de 25 registros.
+- A identificacao das vendas da ultima sincronizacao usa o updated_at das vendas
+  tocadas entre inicio e fim do ultimo Sync.
+- O transformador corrige mojibake comum de UTF-8/latin1 antes de gravar dados
+  no Supabase.
+- Dry-run historico de 2026-05-10 ate 2026-07-11 foi executado sem gravar:
+  5000 linhas lidas, 2664 vendas, 4999 itens validos e 1 venda ignorada por
+  cliente inativo. A carga historica ainda NAO foi aplicada.
 
 IMPORTANTE:
 Nao colocar chaves secretas do Supabase, senha real de banco ou dados sensiveis
@@ -401,8 +422,10 @@ Invoke-WebRequest -Uri 'https://gestao.nexarcompany.com.br/api/crm/bootstrap' -M
 7.1 Objetivo
 
 O Hennder Sync sera o agente de integracao que roda no ambiente com acesso ao
-PostgreSQL do Uniplus. A prioridade atual e rodar esse agente em uma VPS Linux,
-com acesso ao banco do Uniplus via Docker, rede privada ou tunel/VPN.
+PostgreSQL do Uniplus. A prioridade atual e rodar esse agente nesta maquina
+local, que ja tem acesso ao PostgreSQL. Depois, a mesma rotina deve migrar para
+uma VPS Linux, com acesso ao banco do Uniplus via Docker, rede privada ou
+tunel/VPN.
 
 Ele deve ler o banco do Uniplus em modo SOMENTE LEITURA e enviar os dados para o
 Supabase do Hennder CRM.
@@ -410,7 +433,7 @@ Supabase do Hennder CRM.
 Fluxo correto:
 
 PostgreSQL Uniplus (somente leitura)
-  -> VPS Linux / Hennder Sync
+  -> Hennder Sync local ou VPS Linux
   -> Supabase PostgreSQL na nuvem
   -> Hennder CRM Web na Hostinger
 
@@ -421,8 +444,9 @@ Uniplus.
 
 O PostgreSQL do Uniplus fica no ambiente operacional do cliente ou em um
 container/rede controlada. A Hostinger normalmente nao deve acessar esse banco
-diretamente. Por isso o Hennder Sync roda na VPS Linux que enxerga o
-PostgreSQL, e apenas publica dados normalizados no Supabase.
+diretamente. Por isso o Hennder Sync roda primeiro nesta maquina local que
+enxerga o PostgreSQL e, depois, na VPS Linux que tera esse mesmo acesso. O Sync
+apenas publica dados normalizados no Supabase.
 
 7.3 Formato tecnico recomendado
 
@@ -441,16 +465,15 @@ Dependencia que provavelmente sera adicionada:
 
 npm install pg
 
-7.4 Variaveis de ambiente futuras do Hennder Sync
+7.4 Variaveis de ambiente do Hennder Sync
 
-Adicionar ao .env.local da VPS Linux/Hennder Sync:
+Adicionar ao .env.local da maquina local ou VPS Linux/Hennder Sync:
 
 UNIPLUS_DATABASE_URL=postgres://USUARIO:SENHA@HOST:PORTA/BANCO
 UNIPLUS_SSL=false
 UNIPLUS_SYNC_BATCH_SIZE=5000
 UNIPLUS_SYNC_MODE=incremental
-HENNDER_SYNC_LOG_DIR=/var/log/hennder-sync
-HENNDER_SYNC_DRY_RUN=false
+HENNDER_SYNC_LOG_DIR=.data/hennder-sync-logs
 
 Ja existentes:
 
@@ -1442,6 +1465,11 @@ Comando desejado:
 node scripts/hennder-sync.mjs --since auto
 node scripts/hennder-sync.mjs --since 2026-07-01T00:00:00-03:00
 node scripts/hennder-sync.mjs --dry-run
+
+Por seguranca operacional, o comando sem parametros sincroniza somente vendas
+de hoje pelo campo d.data. Para carga retroativa controlada, usar uma janela:
+
+node scripts/hennder-sync.mjs --from 2026-05-10 --to 2026-07-11 --dry-run
 
 Etapa 5 - Enviar para Supabase
 

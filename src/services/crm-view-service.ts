@@ -1,4 +1,3 @@
-import { MOCK_REFERENCE_DATE } from "@/data/mock-uniplus";
 import { crmUuid } from "@/domain/crm/rules";
 import type {
   CrmAgendaEvent,
@@ -6,7 +5,6 @@ import type {
   CrmRepurchaseAlert,
   CrmSnapshot,
 } from "@/domain/crm/types";
-import { crmDemoService } from "./crm-demo-service";
 
 export interface CustomerViewModel {
   id: string;
@@ -86,7 +84,7 @@ export interface CrmViewModel {
 }
 
 export class CrmViewService {
-  getViewModel(snapshot = crmDemoService.getSnapshot()): CrmViewModel {
+  getViewModel(snapshot: CrmSnapshot): CrmViewModel {
     const customers = snapshot.customers.map(mapCustomer);
     const groupedOpportunities = new Map<
       string,
@@ -188,8 +186,6 @@ export class CrmViewService {
 }
 
 export const crmViewService = new CrmViewService();
-export const crmViewModel = crmViewService.getViewModel();
-export const crmReferenceDate = MOCK_REFERENCE_DATE;
 
 export function formatCurrency(value: number) {
   return new Intl.NumberFormat("pt-BR", {

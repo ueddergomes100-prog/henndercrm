@@ -73,34 +73,36 @@ NODE_ENV=production
 NEXT_PUBLIC_SUPABASE_URL=https://SEU-PROJETO.supabase.co
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
 SUPABASE_SECRET_KEY=sb_secret_...
-CRM_DATA_PROVIDER=supabase
-CRM_OPERATIONAL_PROVIDER=supabase
 CRM_SESSION_SECRET=gere-um-segredo-forte
 CRM_COOKIE_SECURE=true
 ```
 
 Estas variaveis sao da aplicacao web. As variaveis `UNIPLUS_*` e
-`HENNDER_SYNC_*` pertencem ao Hennder Sync na VPS Linux e nao precisam ficar na
-Hostinger.
+`HENNDER_SYNC_*` pertencem ao Hennder Sync no ambiente que acessa o PostgreSQL
+do Uniplus, primeiro nesta maquina local e depois na VPS Linux. Elas nao
+precisam ficar na Hostinger.
 
-## 5.1 Hennder Sync em VPS Linux
+## 5.1 Hennder Sync local e VPS Linux
 
-O Hennder Sync deve rodar fora da Hostinger, em uma VPS Linux com acesso ao
-PostgreSQL do Uniplus via Docker, rede privada ou tunel/VPN.
+O Hennder Sync deve rodar fora da Hostinger. Na etapa atual, ele roda nesta
+maquina local com acesso ao PostgreSQL do Uniplus. Depois, a mesma rotina migra
+para uma VPS Linux com acesso ao PostgreSQL via Docker, rede privada ou
+tunel/VPN.
 
 Fluxo de producao:
 
 ```text
 PostgreSQL Uniplus (somente leitura)
-VPS Linux / Hennder Sync
+Hennder Sync local ou VPS Linux
 Supabase PostgreSQL
 Hennder CRM Web na Hostinger
 ```
 
-Na VPS, configure `UNIPLUS_DATABASE_URL`, `UNIPLUS_SSL`,
-`UNIPLUS_SYNC_BATCH_SIZE`, `UNIPLUS_SYNC_MODE`, `HENNDER_SYNC_LOG_DIR`,
-`HENNDER_SYNC_DRY_RUN` e as chaves Supabase server-side. O usuario PostgreSQL do
-Uniplus deve ser somente leitura.
+No ambiente do Sync, configure `UNIPLUS_DATABASE_URL`, `UNIPLUS_SSL`,
+`UNIPLUS_SYNC_BATCH_SIZE`, `UNIPLUS_SYNC_MODE`, `HENNDER_SYNC_LOG_DIR` e as
+chaves Supabase server-side. O usuario PostgreSQL do Uniplus deve ser somente
+leitura. A gravacao no Supabase exige o comando explicito `npm run
+sync:uniplus:apply`.
 
 ## 6. RLS e permissoes
 

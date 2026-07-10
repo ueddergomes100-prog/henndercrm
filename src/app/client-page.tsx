@@ -60,21 +60,27 @@ import { useEffect, useRef, useState } from "react";
 import { normalizeBrazilianWhatsAppNumber } from "@/domain/crm/rules";
 import type {
   CrmAgendaEvent,
+  CrmDashboard,
   ContactChannel,
   ContactOutcome,
   CrmContactRecord,
   CrmOpportunity,
+  CrmProduct,
+  CrmSale,
+  CrmSaleItem,
   CrmSessionUser,
+  CrmSeller,
+  CrmSnapshot,
   CrmUserRole,
   CrmWorkspace,
   RepurchaseAlertStatus,
 } from "@/domain/crm/types";
 import {
-  crmReferenceDate,
-  crmViewModel,
   type AlertViewModel,
+  type CrmViewModel,
   type CustomerViewModel,
   formatCurrency,
+  crmViewService,
 } from "@/services/crm-view-service";
 
 type View =
@@ -103,10 +109,10 @@ type ContactRecord = CrmContactRecord;
 type Theme = "light" | "dark";
 type CustomerRow = CustomerViewModel;
 type AlertRow = AlertViewModel;
-type SaleRow = (typeof crmViewModel.snapshot.sales)[number];
-type SaleItemRow = (typeof crmViewModel.snapshot.saleItems)[number];
-type ProductRow = (typeof crmViewModel.snapshot.products)[number];
-type SellerRow = (typeof crmViewModel.snapshot.sellers)[number];
+type SaleRow = CrmSale;
+type SaleItemRow = CrmSaleItem;
+type ProductRow = CrmProduct;
+type SellerRow = CrmSeller;
 type QuickAction = "manual-alert" | "manual-customer" | "opportunity" | "agenda" | "contact";
 type ChatMessage = {
   id: string;
@@ -121,6 +127,36 @@ type ManagedCrmUser = {
   sellerId?: string | null;
   active: boolean;
 };
+type SyncLogResponse = {
+  date: string;
+  latest: {
+    id: string;
+    status: "iniciada" | "concluida" | "erro";
+    inicio: string;
+    fim: string | null;
+    total_lidos: number;
+    total_importados: number;
+    total_ignorados: number;
+    erro: string | null;
+  } | null;
+  summary: {
+    status: "ok" | "atencao" | "erro" | "em_execucao" | "sem_execucao";
+    runs: number;
+    completedRuns: number;
+    errorRuns: number;
+    read: number;
+    imported: number;
+    ignored: number;
+  };
+  errors: Array<{
+    id: string;
+    type: "sync_error" | "ignored_sale";
+    at: string;
+    saleId: number | null;
+    reason: string;
+    message: string;
+  }>;
+};
 
 const contactOutcomeLabels: Record<ContactOutcome, string> = {
   not_interested: "Cliente não quis",
@@ -130,13 +166,39 @@ const contactOutcomeLabels: Record<ContactOutcome, string> = {
   invalid_number: "Número inválido",
 };
 
-const {
-  snapshot,
-  customers,
-  alerts,
-  repurchaseTrend,
-} = crmViewModel;
-const { sellers, sales, saleItems, dashboard } = snapshot;
+const emptyDashboard: CrmDashboard = {
+  activeCustomers: 0,
+  attentionCustomers: 0,
+  riskCustomers: 0,
+  lostCustomers: 0,
+  alertsToday: 0,
+  recoverableRevenue: 0,
+  potentialLost: 0,
+  averageRegistrationQuality: 0,
+};
+const emptySnapshot: CrmSnapshot = {
+  referenceDate: new Date().toISOString().slice(0, 10),
+  dashboard: emptyDashboard,
+  customers: [],
+  sellers: [],
+  products: [],
+  sales: [],
+  saleItems: [],
+  alerts: [],
+  opportunities: [],
+  agenda: [],
+};
+let crmViewModel = crmViewService.getViewModel(emptySnapshot);
+let { snapshot, customers, alerts, repurchaseTrend } = crmViewModel;
+let { sellers, sales, saleItems, dashboard } = snapshot;
+let crmReferenceDate = snapshot.referenceDate;
+
+function setRuntimeViewModel(next: CrmViewModel) {
+  crmViewModel = next;
+  ({ snapshot, customers, alerts, repurchaseTrend } = crmViewModel);
+  ({ sellers, sales, saleItems, dashboard } = snapshot);
+  crmReferenceDate = snapshot.referenceDate;
+}
 
 type NavItem = { id: View; label: string; description: string; icon: typeof Activity };
 type NavGroup = { title: string; items: NavItem[] };
@@ -181,7 +243,7 @@ const navGroups: NavGroup[] = [
     title: "Sistema",
     items: [
       { id: "motor-recompra", label: "Motor de Recompra", description: "Regras por produto, departamento e palavra-chave.", icon: SlidersHorizontal },
-      { id: "sincronizacao", label: "Sincronização", description: "Saúde da integração, logs e reprocessamentos.", icon: RefreshCcw },
+      { id: "sincronizacao", label: "Logs e Sincronização", description: "Resumo diário do Hennder Sync, erros e reprocessamentos.", icon: RefreshCcw },
       { id: "configuracoes", label: "Configurações", description: "Usuários, permissões, empresa e parâmetros.", icon: Settings },
     ],
   },
@@ -206,8 +268,10 @@ const supervisorBlockedViews: View[] = ["configuracoes"];
 export default function Home() {
   const [user, setUser] = useState<CrmSessionUser | null>(null);
   const [authChecking, setAuthChecking] = useState(true);
+  const [snapshotChecking, setSnapshotChecking] = useState(true);
+  const [, refreshRuntimeViewModel] = useState(0);
   const [activeView, setActiveView] = useState<View>("dashboard");
-  const [selectedCustomer, setSelectedCustomer] = useState(customers[0]);
+  const [selectedCustomer, setSelectedCustomer] = useState<CustomerRow | undefined>(undefined);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [contactRecords, setContactRecords] = useState<ContactRecord[]>([]);
   const [alertStatuses, setAlertStatuses] = useState<Record<string, RepurchaseAlertStatus>>({});
@@ -260,6 +324,34 @@ export default function Home() {
 
   useEffect(() => {
     if (!user) return;
+    let active = true;
+
+    async function loadSnapshot() {
+      setSnapshotChecking(true);
+      const response = await fetch("/api/crm/snapshot", { cache: "no-store" });
+      const result = (await response.json()) as CrmSnapshot & { error?: string };
+      if (!response.ok) throw new Error(result.error ?? "Não foi possível carregar o snapshot.");
+      if (!active) return;
+      const nextViewModel = crmViewService.getViewModel(result);
+      setRuntimeViewModel(nextViewModel);
+      setAgendaItems(nextViewModel.snapshot.agenda);
+      setOpportunityItems(nextViewModel.snapshot.opportunities);
+      setSelectedCustomer(nextViewModel.customers[0]);
+      refreshRuntimeViewModel((version) => version + 1);
+      setSnapshotChecking(false);
+    }
+
+    void loadSnapshot().catch(() => {
+      if (active) setSnapshotChecking(false);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [user]);
+
+  useEffect(() => {
+    if (!user || snapshotChecking) return;
     void fetch("/api/crm/workspace", { cache: "no-store" })
       .then(async (response) => {
         if (!response.ok) throw new Error("Não foi possível carregar o workspace.");
@@ -275,9 +367,9 @@ export default function Home() {
         setContactRecords([]);
         setAlertStatuses({});
       });
-  }, [user]);
+  }, [snapshotChecking, user]);
 
-  if (authChecking) {
+  if (authChecking || (user && snapshotChecking)) {
     return <SystemLoadingScreen label="Carregando sessao comercial" detail="Preparando dashboard, alertas e carteira de clientes." />;
   }
 
@@ -310,10 +402,19 @@ export default function Home() {
   const appAlerts = scopedData.alerts;
   const appContactRecords = filterContactRecordsForData(contactRecords, appCustomers);
   const safeSelectedCustomer =
-    appCustomers.find((customer) => customer.id === selectedCustomer.id) ??
+    appCustomers.find((customer) => customer.id === selectedCustomer?.id) ??
     appCustomers[0] ??
     selectedCustomer;
   const visibleView = canAccessView(user, activeView) ? activeView : "dashboard";
+
+  if (!safeSelectedCustomer) {
+    return (
+      <SystemLoadingScreen
+        label="CRM sem dados sincronizados"
+        detail="Rode o Hennder Sync para carregar as vendas reais do Uniplus no Supabase."
+      />
+    );
+  }
 
   const openProfile = (customer: CustomerRow) => {
     setSelectedCustomer(customer);
@@ -907,7 +1008,7 @@ function ManualCustomerModal({
             cityId: undefined,
             city: city.trim() || "Cidade nao informada",
             category: category.trim() || "Cliente manual",
-            status: "Atencao",
+            status: "Atenção",
             activityStatus: "atencao",
             lastBuy: formatContactDate(crmReferenceDate),
             lastBuyIso: crmReferenceDate,
@@ -918,7 +1019,7 @@ function ManualCustomerModal({
             potential: formatCurrency(0),
             potentialValue: 0,
             probability: 64,
-            preferredSeller: seller?.name ?? "Sem preferencia",
+            preferredSeller: seller?.name ?? "Sem preferência",
             preferredSellerId: seller?.id,
             sellerAffinity: seller ? 100 : 0,
             qualityScore,
@@ -1290,7 +1391,7 @@ function Topbar({
     { id: "manual-alert", label: "Cadastrar alerta manual", description: "Criar lembrete de recompra para um cliente.", icon: Bell },
     { id: "manual-customer", label: "Cadastrar cliente manual", description: "Adicionar cliente operacional durante a sessao.", icon: UsersRound },
     { id: "opportunity", label: "Nova oportunidade", description: "Registrar venda cruzada ou sugestao comercial.", icon: Target },
-    { id: "agenda", label: "Novo compromisso", description: "Agendar ligacao, visita, retorno ou recompra.", icon: CalendarDays },
+    { id: "agenda", label: "Novo compromisso", description: "Agendar ligação, visita, retorno ou recompra.", icon: CalendarDays },
     { id: "contact", label: "Registrar retorno", description: "Salvar resultado de contato com cliente.", icon: MessageCircle },
   ];
 
@@ -1516,6 +1617,12 @@ function SalesModule({
   saleItems: SaleItemRow[];
   alerts: AlertRow[];
 }) {
+  const [viewMode, setViewMode] = useState<"latest" | "all">("latest");
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("todos");
+  const [dateFilter, setDateFilter] = useState("");
+  const [visibleLimit, setVisibleLimit] = useState(25);
+  const [syncLogs, setSyncLogs] = useState<SyncLogResponse | null>(null);
   const [selectedSaleId, setSelectedSaleId] = useState(sales[0]?.id ?? "");
   const customerById = new Map(customers.map((customer) => [customer.id, customer]));
   const itemsBySale = new Map<string, SaleItemRow[]>();
@@ -1524,20 +1631,124 @@ function SalesModule({
     current.push(item);
     itemsBySale.set(item.saleId, current);
   }
-  const selectedSale = sales.find((sale) => sale.id === selectedSaleId) ?? sales[0];
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/crm/sync/logs", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Falha ao carregar logs.");
+        return (await response.json()) as SyncLogResponse;
+      })
+      .then((result) => {
+        if (active) setSyncLogs(result);
+      })
+      .catch(() => {
+        if (active) setSyncLogs(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    setVisibleLimit(25);
+  }, [viewMode, query, statusFilter, dateFilter]);
+
+  const latestStartedAt = syncLogs?.latest?.inicio ? Date.parse(syncLogs.latest.inicio) : null;
+  const latestFinishedAt = syncLogs?.latest?.fim ? Date.parse(syncLogs.latest.fim) : Date.now();
+  const latestSales = latestStartedAt
+    ? sales.filter((sale) => {
+        const updatedAt = sale.updatedAt ? Date.parse(sale.updatedAt) : Number.NaN;
+        return Number.isFinite(updatedAt) && updatedAt >= latestStartedAt - 1000 && updatedAt <= latestFinishedAt + 60_000;
+      })
+    : [];
+  const baseSales = viewMode === "latest" ? latestSales : sales;
+  const statusOptions = Array.from(new Set(sales.map((sale) => sale.approved ? "Aprovada" : sale.status).filter(Boolean))).sort();
+  const filteredSales = baseSales.filter((sale) => {
+    const saleCustomer = customerById.get(sale.customerId);
+    const statusLabel = sale.approved ? "Aprovada" : sale.status;
+    const normalizedQuery = query.trim().toLowerCase();
+    const matchesQuery =
+      !normalizedQuery ||
+      String(sale.uniplusId).includes(normalizedQuery) ||
+      saleCustomer?.name.toLowerCase().includes(normalizedQuery);
+    const matchesStatus = statusFilter === "todos" || statusLabel === statusFilter;
+    const matchesDate = !dateFilter || sale.soldAt === dateFilter;
+    return matchesQuery && matchesStatus && matchesDate;
+  });
+  const displayedSales = filteredSales.slice(0, visibleLimit);
+  const selectedSale =
+    displayedSales.find((sale) => sale.id === selectedSaleId) ??
+    filteredSales[0] ??
+    baseSales[0];
   const selectedItems = selectedSale ? itemsBySale.get(selectedSale.id) ?? [] : [];
+  const baseSaleIds = new Set(baseSales.map((sale) => sale.id));
+  const baseItemsCount = saleItems.filter((item) => baseSaleIds.has(item.saleId)).length;
+  const averageTicket = filteredSales.length
+    ? filteredSales.reduce((total, sale) => total + sale.totalValue, 0) / filteredSales.length
+    : 0;
+  const latestSyncLabel = syncLogs?.latest
+    ? formatDateTime(syncLogs.latest.inicio)
+    : "Sem registro";
 
   return (
     <div className="space-y-5">
       <PageTitle eyebrow="Comercial" title="Vendas" description="Conferência das vendas importadas do ERP, respeitando uma venda para vários itens." />
       <div className="grid gap-4 md:grid-cols-4">
-        <MetricCard label="Vendas importadas" value={`${sales.length}`} />
-        <MetricCard label="Itens importados" value={`${saleItems.length}`} />
-        <MetricCard label="Ticket médio" value={formatCurrency(sales.length ? sales.reduce((total, sale) => total + sale.totalValue, 0) / sales.length : 0)} />
-        <MetricCard label="Alertas da carteira" value={`${alerts.length}`} />
+        <MetricCard label="Vendas importadas" value={String(sales.length)} />
+        <MetricCard label="Última sincronização" value={String(latestSales.length)} />
+        <MetricCard label="Itens no recorte" value={String(baseItemsCount)} />
+        <MetricCard label="Ticket médio filtrado" value={formatCurrency(averageTicket)} />
       </div>
       <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
-        <Panel title="Listagem de vendas" icon={ShoppingBag} action={`${sales.length} registros únicos`}>
+        <Panel title="Listagem de vendas" icon={ShoppingBag} action={displayedSales.length + " de " + filteredSales.length + " registros"}>
+          <div className="mb-4 space-y-3">
+            <div className="inline-flex rounded-lg border border-blue-100 bg-[#f8fbff] p-1">
+              {[
+                ["latest", "Última sincronização"],
+                ["all", "Todas"],
+              ].map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setViewMode(mode as "latest" | "all")}
+                  className={
+                    "h-9 rounded-md px-3 text-xs font-bold transition " +
+                    (viewMode === mode ? "bg-[#0753a6] text-white shadow-sm" : "text-slate-500 hover:bg-white")
+                  }
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="grid gap-3 md:grid-cols-[1.2fr_0.8fr_0.7fr]">
+              <div className="flex h-11 items-center gap-2 rounded-lg border border-blue-100 bg-[#f8fbff] px-3 focus-within:border-cyan-400">
+                <Search size={17} className="text-slate-400" />
+                <input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Venda ou cliente"
+                  className="w-full bg-transparent text-sm outline-none"
+                />
+              </div>
+              <FilterSelect label="Status" value={statusFilter} onChange={setStatusFilter}>
+                <option value="todos">Todos os status</option>
+                {statusOptions.map((status) => <option key={status} value={status}>{status}</option>)}
+              </FilterSelect>
+              <label className="block">
+                <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Data</span>
+                <input
+                  type="date"
+                  value={dateFilter}
+                  onChange={(event) => setDateFilter(event.target.value)}
+                  className="mt-2 h-11 w-full rounded-lg border border-blue-100 bg-[#f8fbff] px-3 text-sm outline-none focus:border-cyan-400"
+                />
+              </label>
+            </div>
+            <div className="rounded-lg border border-cyan-100 bg-cyan-50 px-3 py-2 text-xs font-medium text-cyan-800">
+              Último lote: {latestSyncLabel}. A aba de última sincronização mostra somente vendas tocadas pelo Sync mais recente.
+            </div>
+          </div>
           <div className="overflow-x-auto">
             <table className="min-w-full text-left text-sm">
               <thead className="text-xs uppercase tracking-wide text-slate-400">
@@ -1551,7 +1762,7 @@ function SalesModule({
                 </tr>
               </thead>
               <tbody className="divide-y divide-blue-50">
-                {sales.map((sale) => {
+                {displayedSales.map((sale) => {
                   const saleCustomer = customerById.get(sale.customerId);
                   return (
                     <tr key={sale.id} className="cursor-pointer hover:bg-cyan-50/60" onClick={() => setSelectedSaleId(sale.id)}>
@@ -1566,8 +1777,19 @@ function SalesModule({
                 })}
               </tbody>
             </table>
-            {!sales.length && <EmptyState text="Nenhuma venda importada no momento." />}
+            {!filteredSales.length && <EmptyState text="Nenhuma venda encontrada para os filtros atuais." />}
           </div>
+          {filteredSales.length > displayedSales.length && (
+            <div className="mt-4 flex justify-center">
+              <button
+                type="button"
+                onClick={() => setVisibleLimit((current) => current + 25)}
+                className="h-10 rounded-lg border border-blue-100 px-4 text-sm font-semibold text-[#0753a6] transition hover:bg-blue-50"
+              >
+                Carregar mais 25
+              </button>
+            </div>
+          )}
         </Panel>
         <Panel title="Detalhe da venda" icon={FileText}>
           {selectedSale ? (
@@ -1578,7 +1800,7 @@ function SalesModule({
                 <p className="mt-1 text-sm text-slate-500">{customerById.get(selectedSale.customerId)?.name}</p>
               </div>
               <SimpleRows
-                rows={selectedItems.map((item) => [item.productName, `${item.quantity} un.`, formatCurrency(item.estimatedValue)])}
+                rows={selectedItems.map((item) => [item.productName, String(item.quantity) + " un.", formatCurrency(item.estimatedValue)])}
                 empty="Sem itens vinculados."
               />
               <p className="rounded-lg border border-cyan-100 bg-cyan-50 p-3 text-xs leading-5 text-cyan-800">
@@ -1865,47 +2087,116 @@ function RepurchaseEngineModule({ alerts }: { alerts: AlertRow[] }) {
 }
 
 function SyncModule() {
-  const ignoredSales = Math.max(0, snapshot.sales.length - sales.length);
-  const syncRows = [
-    ["Última sincronização", "Demonstração local"],
-    ["Status", "Pronta para importação manual"],
-    ["Total lidos", `${snapshot.sales.length + ignoredSales}`],
-    ["Total importados", `${sales.length}`],
-    ["Total atualizados", `${customers.length + snapshot.products.length + sellers.length}`],
-    ["Total ignorados", `${ignoredSales}`],
-  ];
+  const [logs, setLogs] = useState<SyncLogResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/crm/sync/logs", { cache: "no-store" })
+      .then(async (response) => {
+        const result = (await response.json()) as SyncLogResponse & { error?: string };
+        if (!response.ok) throw new Error(result.error ?? "Não foi possível carregar os logs.");
+        if (active) {
+          setLogs(result);
+          setError("");
+        }
+      })
+      .catch((caughtError: unknown) => {
+        if (active) {
+          setError(caughtError instanceof Error ? caughtError.message : "Falha ao carregar logs.");
+        }
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const statusLabel = {
+    ok: "OK",
+    atencao: "Atenção",
+    erro: "Erro",
+    em_execucao: "Em execução",
+    sem_execucao: "Sem execução",
+  }[logs?.summary.status ?? "sem_execucao"];
 
   return (
     <div className="space-y-5">
-      <PageTitle eyebrow="Sistema" title="Sincronização" description="Saúde da integração, histórico, idempotência e reprocessamento seguro." />
+      <PageTitle eyebrow="Sistema" title="Logs e Sincronização" description="Rotina automática do Hennder Sync, resumo do dia, erros e vendas ignoradas." />
       <div className="grid gap-4 md:grid-cols-4">
-        <MetricCard label="Status" value="OK" />
-        <MetricCard label="Vendas" value={`${sales.length}`} />
-        <MetricCard label="Itens" value={`${saleItems.length}`} />
-        <MetricCard label="Produtos" value={`${snapshot.products.length}`} />
+        <MetricCard label="Status do dia" value={loading ? "..." : statusLabel} />
+        <MetricCard label="Vendas importadas" value={`${logs?.summary.imported ?? sales.length}`} />
+        <MetricCard label="Itens no CRM" value={`${saleItems.length}`} />
+        <MetricCard label="Erros" value={`${logs?.errors.length ?? 0}`} />
       </div>
-      <div className="grid gap-5 xl:grid-cols-2">
-        <Panel title="Resumo da integração" icon={RefreshCcw}>
-          <SimpleRows rows={syncRows} empty="Sem sincronização registrada." />
+
+      {error && (
+        <Panel title="Falha ao carregar logs" icon={AlertTriangle}>
+          <p className="text-sm font-semibold text-red-700">{error}</p>
         </Panel>
-        <Panel title="Reprocessamento seguro" icon={Database}>
+      )}
+
+      <div className="grid gap-5 xl:grid-cols-2">
+        <Panel title="Sincronização automática" icon={RefreshCcw}>
+          <SimpleRows
+            rows={[
+              ["Frequência", "A cada 5 minutos", "07:00 às 19:00"],
+              ["Escopo", "Somente vendas do dia atual", "d.data"],
+              ["Comando", "npm run sync:uniplus:auto", "Windows Task Scheduler"],
+              ["Última execução", logs?.latest ? formatDateTime(logs.latest.inicio) : "Sem registro", logs?.latest?.status ?? "-"],
+              ["Lidos / importados", `${logs?.summary.read ?? 0} / ${logs?.summary.imported ?? 0}`, "Hoje"],
+              ["Ignorados", `${logs?.summary.ignored ?? 0}`, "Auditoria"],
+            ]}
+            empty="Sem sincronização registrada."
+          />
+        </Panel>
+
+        <Panel title="Como a rotina evita gargalos" icon={Database}>
           <div className="space-y-3 text-sm leading-6 text-slate-600">
             {[
-              "UPSERT por uniplus_id para prevenir duplicidade.",
-              "Uma venda por uniplus_venda_id e vários itens por uniplus_item_id.",
-              "Janela de segurança para reler períodos recentes.",
-              "Log de vendas ignoradas com motivo e payload de auditoria.",
-              "Reprocessar período ou venda sem apagar histórico comercial.",
+              "Consulta em janela curta do dia atual, sem varrer histórico completo.",
+              "Execução periódica em vez de uma consulta a cada venda.",
+              "UPSERT por uniplus_id para evitar duplicidade ao reprocessar.",
+              "Um único log diário é atualizado a cada execução.",
+              "Falhas ficam registradas com mensagem; vendas ignoradas ficam com venda e motivo.",
             ].map((item) => (
               <div key={item} className="rounded-lg border border-blue-50 bg-[#f8fbff] px-3 py-2">{item}</div>
             ))}
           </div>
         </Panel>
       </div>
+
+      <Panel title="Erros e vendas ignoradas do dia" icon={AlertTriangle}>
+        {loading ? (
+          <p className="text-sm text-slate-500">Carregando logs...</p>
+        ) : logs?.errors.length ? (
+          <div className="space-y-3">
+            {logs.errors.map((item) => (
+              <div key={item.id} className="rounded-xl border border-red-100 bg-red-50/70 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-black text-red-900">
+                    {item.saleId ? `Venda ${item.saleId}` : "Execução do Sync"}
+                  </p>
+                  <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-red-700">
+                    {formatDateTime(item.at)}
+                  </span>
+                </div>
+                <p className="mt-2 text-sm font-semibold text-red-700">{item.reason}</p>
+                <p className="mt-1 text-sm leading-6 text-slate-600">{item.message}</p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-slate-500">Nenhum erro ou venda ignorada registrada hoje.</p>
+        )}
+      </Panel>
     </div>
   );
 }
-
 function SettingsModule({
   user,
   sellers,
@@ -1955,6 +2246,7 @@ function UserManagementPanel({
   const [sellerId, setSellerId] = useState(sellers[0]?.id ?? "");
   const [loadingUsers, setLoadingUsers] = useState(user.role === "administrador");
   const [savingUser, setSavingUser] = useState(false);
+  const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
   const [userMessage, setUserMessage] = useState("");
   const [userError, setUserError] = useState("");
 
@@ -1968,11 +2260,11 @@ function UserManagementPanel({
           users?: ManagedCrmUser[];
           error?: string;
         };
-        if (!response.ok) throw new Error(result.error ?? "Falha ao carregar usuarios.");
+        if (!response.ok) throw new Error(result.error ?? "Falha ao carregar usuários.");
         if (active) setManagedUsers(result.users ?? []);
       })
       .catch((error) => {
-        if (active) setUserError(error instanceof Error ? error.message : "Falha ao carregar usuarios.");
+        if (active) setUserError(error instanceof Error ? error.message : "Falha ao carregar usuários.");
       })
       .finally(() => {
         if (active) setLoadingUsers(false);
@@ -2005,7 +2297,7 @@ function UserManagementPanel({
         user?: ManagedCrmUser;
         error?: string;
       };
-      if (!response.ok || !result.user) throw new Error(result.error ?? "Falha ao cadastrar usuario.");
+      if (!response.ok || !result.user) throw new Error(result.error ?? "Falha ao cadastrar usuário.");
 
       setManagedUsers((current) => [
         result.user as ManagedCrmUser,
@@ -2018,17 +2310,41 @@ function UserManagementPanel({
       setSellerId(sellers[0]?.id ?? "");
       setUserMessage("Usuario cadastrado e liberado para entrar no CRM.");
     } catch (error) {
-      setUserError(error instanceof Error ? error.message : "Falha ao cadastrar usuario.");
+      setUserError(error instanceof Error ? error.message : "Falha ao cadastrar usuário.");
     } finally {
       setSavingUser(false);
     }
   }
 
+  async function deleteUser(managedUser: ManagedCrmUser) {
+    if (managedUser.role === "administrador") return;
+    const confirmed = window.confirm(`Excluir o usuário ${managedUser.name}?`);
+    if (!confirmed) return;
+
+    setDeletingUserId(managedUser.id);
+    setUserError("");
+    setUserMessage("");
+
+    try {
+      const response = await fetch(`/api/crm/users?id=${encodeURIComponent(managedUser.id)}`, {
+        method: "DELETE",
+      });
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(result.error ?? "Falha ao excluir usuário.");
+      setManagedUsers((current) => current.filter((item) => item.id !== managedUser.id));
+      setUserMessage("Usuario excluido com sucesso.");
+    } catch (error) {
+      setUserError(error instanceof Error ? error.message : "Falha ao excluir usuário.");
+    } finally {
+      setDeletingUserId(null);
+    }
+  }
+
   return (
     <div className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
-      <Panel title="Cadastrar usuario" icon={UsersRound} action={user.role === "administrador" ? "Supabase Auth" : "Acesso restrito"}>
+      <Panel title="Cadastrar usuário" icon={UsersRound} action={user.role === "administrador" ? "Supabase Auth" : "Acesso restrito"}>
         {user.role !== "administrador" ? (
-          <EmptyState text="Somente administradores podem cadastrar usuarios." />
+          <EmptyState text="Somente administradores podem cadastrar usuários." />
         ) : (
           <form className="space-y-4" onSubmit={createUser}>
             <div className="grid gap-4 md:grid-cols-2">
@@ -2060,18 +2376,18 @@ function UserManagementPanel({
                 className="flex h-11 items-center gap-2 rounded-lg bg-[#0753a6] px-4 text-sm font-semibold text-white disabled:opacity-60"
               >
                 <Plus size={17} />
-                {savingUser ? "Cadastrando..." : "Cadastrar usuario"}
+                {savingUser ? "Cadastrando..." : "Cadastrar usuário"}
               </button>
             </div>
           </form>
         )}
       </Panel>
 
-      <Panel title="Usuarios ativos" icon={ShieldCheck} action={loadingUsers ? "Carregando" : `${managedUsers.length} usuarios`}>
+      <Panel title="Usuarios ativos" icon={ShieldCheck} action={loadingUsers ? "Carregando" : `${managedUsers.length} usuários`}>
         {user.role !== "administrador" ? (
           <EmptyState text="Lista disponivel apenas para administradores." />
         ) : managedUsers.length === 0 ? (
-          <EmptyState text={loadingUsers ? "Carregando usuarios..." : "Nenhum usuario cadastrado."} />
+          <EmptyState text={loadingUsers ? "Carregando usuários..." : "Nenhum usuário cadastrado."} />
         ) : (
           <div className="space-y-2">
             {managedUsers.map((managedUser) => {
@@ -2083,9 +2399,22 @@ function UserManagementPanel({
                       <p className="font-bold text-[#123252]">{managedUser.name}</p>
                       <p className="mt-1 text-sm text-slate-500">{managedUser.email}</p>
                     </div>
-                    <span className="rounded-full bg-white px-2 py-1 text-xs font-bold uppercase text-cyan-700">
-                      {managedUser.role}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="rounded-full bg-white px-2 py-1 text-xs font-bold uppercase text-cyan-700">
+                        {managedUser.role}
+                      </span>
+                      {managedUser.role !== "administrador" && (
+                        <button
+                          type="button"
+                          onClick={() => void deleteUser(managedUser)}
+                          disabled={deletingUserId === managedUser.id}
+                          className="grid size-8 place-items-center rounded-lg border border-red-100 bg-white text-red-600 hover:bg-red-50 disabled:opacity-50"
+                          title="Excluir usuário"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      )}
+                    </div>
                   </div>
                   {seller && <p className="mt-2 text-xs font-semibold text-slate-500">Vendedor: {seller.name}</p>}
                 </div>
@@ -3125,7 +3454,7 @@ function SellerPortfolio({
                 >
                   <div>
                     <p className="font-bold text-slate-900">{customer.name}</p>
-                    <p className="mt-1 text-xs text-slate-500">{customer.city} · {customer.sellerAffinity}% de afinidade</p>
+                    <p className="mt-1 text-xs text-slate-500">{customer.city} ? {customer.sellerAffinity}% de afinidade</p>
                     <div className="mt-3 flex flex-wrap gap-2">
                       <StatusBadge status={customer.activityStatus} label={customer.status} />
                       <QualityBadge status={customer.qualityStatus} score={customer.qualityScore} />
@@ -3806,13 +4135,13 @@ function Reports({
 
   return (
     <div className="space-y-5">
-      <PageTitle eyebrow="Analytics" title="Relatorios" description="Leitura analitica e PDFs comerciais para reuniao, rotina de ligacao e apresentacao ao cliente." />
+      <PageTitle eyebrow="Analytics" title="Relatórios" description="Leitura analítica e PDFs comerciais para reunião, rotina de ligação e apresentação ao cliente." />
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         {reportCards.map(([label, value]) => (
           <MetricCard key={label} label={label} value={value} />
         ))}
       </div>
-      <Panel title="Relatorios em PDF" icon={FileText} action="Exportacao comercial">
+      <Panel title="Relatórios em PDF" icon={FileText} action="Exportação comercial">
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {pdfReports.map((report) => {
             const Icon = report.icon;
@@ -3840,10 +4169,10 @@ function Reports({
           })}
         </div>
         <p className="mt-4 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
-          Ao clicar, o sistema abre um relatorio pronto para salvar como PDF pelo navegador. Quando a importacao mensal entrar, esses PDFs ja saem com a base nova.
+          Ao clicar, o sistema abre um relatório pronto para salvar como PDF pelo navegador. Quando a importação mensal entrar, esses PDFs já saem com a base nova.
         </p>
       </Panel>
-      <Panel title="Performance por relatorio" icon={BarChart3}>
+      <Panel title="Performance por relatório" icon={BarChart3}>
         <div className="h-96">
           <MeasuredChart>
             {({ width, height }) => (
@@ -3882,7 +4211,7 @@ function openPrintableReport(report: PrintableReport) {
           </tr>
         `)
         .join("")
-    : `<tr><td colspan="${report.columns.length}">Nenhum registro encontrado para este relatorio.</td></tr>`;
+    : `<tr><td colspan="${report.columns.length}">Nenhum registro encontrado para este relatório.</td></tr>`;
 
   const html = `<!doctype html>
     <html lang="pt-BR">
@@ -4030,7 +4359,7 @@ function DashboardPreview() {
     ["IA", "3 ofertas sugeridas"],
   ];
   const agendaPreview = [
-    ["09:30", "Ligacao pos-venda"],
+    ["09:30", "Ligação pos-venda"],
     ["14:00", "Recompra de racao"],
     ["16:20", "Visita comercial"],
   ];
@@ -4050,7 +4379,7 @@ function DashboardPreview() {
         <div className="mb-3 flex items-center justify-between">
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-200/80">Recuperacao</p>
-            <p className="mt-1 text-sm text-slate-300">Previsao de recompra por semana</p>
+            <p className="mt-1 text-sm text-slate-300">Previsão de recompra por semana</p>
           </div>
           <span className="rounded-full bg-emerald-300/10 px-2 py-1 text-xs font-bold text-emerald-200">+18%</span>
         </div>
@@ -4545,7 +4874,7 @@ function ContactOutcomeModal({
           <textarea
             value={note}
             onChange={(event) => setNote(event.target.value)}
-            placeholder="Ex.: cliente está com estoque, pediu nova condição ou prefere contato pela manhã."
+            placeholder="Ex.: cliente est? com estoque, pediu nova condição ou prefere contato pela manhã."
             className="mt-2 min-h-24 w-full resize-none rounded-lg border border-blue-100 bg-[#f8fbff] px-3 py-3 text-sm outline-none focus:border-cyan-400"
           />
         </label>
@@ -4616,6 +4945,13 @@ function ContactOutcomeModal({
 function formatContactDate(value: string) {
   const [year, month, day] = value.split("-");
   return year && month && day ? `${day}/${month}/${year}` : value;
+}
+
+function formatDateTime(value: string) {
+  return new Intl.DateTimeFormat("pt-BR", {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(new Date(value));
 }
 
 function addIsoDays(value: string, days: number) {
@@ -4695,7 +5031,7 @@ function buildCategoryDataForItems(items: SaleItemRow[], products: ProductRow[])
 function buildReportBars(customers: CustomerRow[], alerts: AlertRow[]) {
   return [
     { name: "Ativos", value: customers.filter((customer) => customer.activityStatus === "ativo").length },
-    { name: "Atencao", value: customers.filter((customer) => customer.activityStatus === "atencao").length },
+    { name: "Atenção", value: customers.filter((customer) => customer.activityStatus === "atencao").length },
     { name: "Risco", value: customers.filter((customer) => customer.activityStatus === "risco").length },
     { name: "Perdidos", value: customers.filter((customer) => customer.activityStatus === "perdido").length },
     { name: "Alertas", value: alerts.length },
@@ -4757,7 +5093,7 @@ const commercialAiKnowledgeBase: Array<{
   {
     intent: "repurchase",
     menuLabel: "Produtos e alertas de recompra",
-    keywords: ["produto", "produtos", "recompra", "comprar de novo", "recorrente", "recorrencia"],
+    keywords: ["produto", "produtos", "recompra", "comprar de novo", "recorrente", "recorrência"],
   },
   {
     intent: "seller",
@@ -4862,11 +5198,11 @@ function getCommercialAiAnswer(question: string, context: CommercialAiContext) {
       "Base comercial zerada no momento.",
       "",
       "Proximo movimento recomendado:",
-      "1. Emitir o relatorio mensal no PostgreSQL do ERP.",
+      "1. Emitir o relatório mensal no PostgreSQL do ERP.",
       "2. Importar o CSV pelo importador temporario.",
-      "3. Conferir clientes, vendas, itens, vendedores e alertas antes da apresentacao.",
+      "3. Conferir clientes, vendas, itens, vendedores e alertas antes da apresentação.",
       "",
-      "Depois da importacao eu consigo priorizar contatos, sugerir recompra e apontar cadastros fracos automaticamente.",
+      "Depois da importação eu consigo priorizar contatos, sugerir recompra e apontar cadastros fracos automaticamente.",
     ].join("\n");
   }
 
@@ -4880,7 +5216,7 @@ function getCommercialAiAnswer(question: string, context: CommercialAiContext) {
         ].filter(Boolean).join("; ");
         return `${customer.name}: ${reasons || "cadastro ok"}`;
       }),
-      "Acao sugerida: antes de campanha em massa, valide celular/WhatsApp desses clientes para nao perder retorno por dado ruim.",
+      "Ação sugerida: antes de campanha em massa, valide celular/WhatsApp desses clientes para nao perder retorno por dado ruim.",
     ].join("\n");
   }
 
@@ -4888,7 +5224,7 @@ function getCommercialAiAnswer(question: string, context: CommercialAiContext) {
     return [
       "Leitura por vendedor, considerando clientes em risco, alertas pendentes e potencial perdido:",
       formatGenericList(sellerRanking.slice(0, 5).map((seller) => `${seller.name}: ${seller.score} pts, ${seller.riskCustomers} cliente(s) em risco, ${seller.pendingAlerts} alerta(s), ${formatCurrency(seller.potentialValue)} de potencial.`)),
-      "Acao sugerida: comece pelo vendedor com maior pontuacao e distribua uma lista curta de contatos para hoje.",
+      "Ação sugerida: comece pelo vendedor com maior pontuacao e distribua uma lista curta de contatos para hoje.",
     ].join("\n");
   }
 
@@ -4896,7 +5232,7 @@ function getCommercialAiAnswer(question: string, context: CommercialAiContext) {
     return [
       "Produtos com maior sinal de recompra agora:",
       formatGenericList(productRanking.map((product) => `${product.name}: ${product.count} alerta(s), prioridade ${product.priority}, ciclo medio ${product.days} dias.`)),
-      "Acao sugerida: monte abordagem por produto, nao so por cliente. Isso ajuda o vendedor a falar direto do item que provavelmente acabou.",
+      "Ação sugerida: monte abordagem por produto, nao so por cliente. Isso ajuda o vendedor a falar direto do item que provavelmente acabou.",
     ].join("\n");
   }
 
@@ -4904,7 +5240,7 @@ function getCommercialAiAnswer(question: string, context: CommercialAiContext) {
     return [
       "Melhores oportunidades comerciais abertas:",
       formatGenericList(opportunityRanking.map((item) => `${item.customerName}: oferecer ${item.suggestedProductName} (${item.confidence}% de confianca). Motivo: ${item.reason}`)),
-      "Acao sugerida: use oportunidade quando o cliente ja estiver em contato por recompra. A conversa fica mais natural.",
+      "Ação sugerida: use oportunidade quando o cliente já estiver em contato por recompra. A conversa fica mais natural.",
     ].join("\n");
   }
 
@@ -4918,8 +5254,8 @@ function getCommercialAiAnswer(question: string, context: CommercialAiContext) {
     return [
       `Fila recomendada para hoje: ${contactQueue.length} contato(s) prioritario(s).`,
       formatGenericList(contactQueue),
-      todayAgenda.length ? `Agenda ja marcada: ${todayAgenda.map((event) => `${event.time} ${event.title}`).join("; ")}.` : "Agenda de hoje sem compromissos importados.",
-      "Script curto: confirme se o produto esta acabando, ofereca reposicao e ja atualize WhatsApp/celular se necessario.",
+      todayAgenda.length ? `Agenda já marcada: ${todayAgenda.map((event) => `${event.time} ${event.title}`).join("; ")}.` : "Agenda de hoje sem compromissos importados.",
+      "Script curto: confirme se o produto esta acabando, ofereca reposicao e já atualize WhatsApp/celular se necessario.",
     ].join("\n");
   }
 
@@ -4927,7 +5263,7 @@ function getCommercialAiAnswer(question: string, context: CommercialAiContext) {
     return [
       `Clientes com maior risco de abandono: ${riskCustomers.length}.`,
       formatCustomerList(riskCustomers, (customer) => `${customer.name}: ${customer.days} dias sem compra, potencial ${customer.potential}, vendedor ${customer.preferredSeller}.`),
-      "Acao sugerida: priorize quem tem maior potencial perdido e WhatsApp valido. Se nao houver WhatsApp, vira tarefa de saneamento cadastral.",
+      "Ação sugerida: priorize quem tem maior potencial perdido e WhatsApp valido. Se nao houver WhatsApp, vira tarefa de saneamento cadastral.",
     ].join("\n");
   }
 
@@ -4937,14 +5273,14 @@ function getCommercialAiAnswer(question: string, context: CommercialAiContext) {
       .slice(0, 5);
     const totalPotential = topPotential.reduce((total, customer) => total + customer.potentialValue, 0);
     return [
-      `Top potencial recuperavel neste recorte: ${formatCurrency(totalPotential)} nos principais clientes.`,
+      `Top potencial recuperável neste recorte: ${formatCurrency(totalPotential)} nos principais clientes.`,
       formatCustomerList(topPotential, (customer) => `${customer.name}: ${customer.potential}, ticket medio ${customer.ticket}, ${customer.days} dias sem compra.`),
-      "Acao sugerida: use mensagem personalizada por historico de compra, evitando campanha generica.",
+      "Ação sugerida: use mensagem personalizada por histórico de compra, evitando campanha genérica.",
     ].join("\n");
   }
 
   return [
-    "Nao entendi.",
+    "Não entendi.",
     "Consulte algumas opcoes no menu ao lado, onde esta escrito o que eu consigo trazer de informacao.",
     "",
     getCommercialAiMenuText(),
@@ -5137,3 +5473,4 @@ function LogoMark({ compact = false }: { compact?: boolean }) {
     </div>
   );
 }
+
