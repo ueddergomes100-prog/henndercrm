@@ -1789,11 +1789,8 @@ function SalesModule({
     filteredSales[0] ??
     baseSales[0];
   const selectedItems = selectedSale ? itemsBySale.get(selectedSale.id) ?? [] : [];
-  const baseSaleIds = new Set(baseSales.map((sale) => sale.id));
-  const baseItemsCount = saleItems.filter((item) => baseSaleIds.has(item.saleId)).length;
-  const averageTicket = filteredSales.length
-    ? filteredSales.reduce((total, sale) => total + sale.totalValue, 0) / filteredSales.length
-    : 0;
+  const filteredRevenue = filteredSales.reduce((total, sale) => total + sale.totalValue, 0);
+  const filteredAverageTicket = filteredSales.length ? filteredRevenue / filteredSales.length : 0;
   const latestSyncLabel = syncLogs?.latest
     ? formatDateTime(syncLogs.latest.inicio)
     : "Sem registro";
@@ -1803,9 +1800,9 @@ function SalesModule({
       <PageTitle eyebrow="Comercial" title="Vendas" description="Conferência das vendas importadas do ERP, respeitando uma venda para vários itens." />
       <div className="grid gap-4 md:grid-cols-4">
         <MetricCard label="Vendas importadas" value={String(sales.length)} />
-        <MetricCard label="Última sincronização" value={String(latestSales.length)} />
-        <MetricCard label="Itens no recorte" value={String(baseItemsCount)} />
-        <MetricCard label="Ticket médio filtrado" value={formatCurrency(averageTicket)} />
+        <MetricCard label="Vendas no filtro" value={String(filteredSales.length)} />
+        <MetricCard label="Faturamento filtrado" value={formatCurrency(filteredRevenue)} />
+        <MetricCard label="Ticket médio filtrado" value={formatCurrency(filteredAverageTicket)} />
       </div>
       <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
         <Panel title="Listagem de vendas" icon={ShoppingBag} action={displayedSales.length + " de " + filteredSales.length + " registros"}>
