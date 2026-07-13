@@ -20,22 +20,45 @@ type IgnoredSaleRow = {
   dados: unknown;
   created_at: string;
 };
+type SaleRow = {
+  id: string;
+  uniplus_id: number;
+  data_venda: string;
+  updated_at: string;
+};
 
 export async function GET() {
   const client = new SupabaseRestClient();
   const { from, to } = todayWindow();
+  const { today, tomorrow } = todayDateWindow();
 
   try {
-    const [syncRows, ignoredSales] = await Promise.all([
+    const [syncRows, recentSyncRows, ignoredSales, todaySales, latestSales] = await Promise.all([
       client.select<SyncRow>("crm_sincronizacoes", {
         select: "id,origem,status,inicio,fim,total_lidos,total_importados,total_ignorados,erro",
         inicio: `gte.${from}`,
         order: "inicio.desc",
       }),
+      client.select<SyncRow>("crm_sincronizacoes", {
+        select: "id,origem,status,inicio,fim,total_lidos,total_importados,total_ignorados,erro",
+        origem: "eq.uniplus",
+        order: "inicio.desc",
+        limit: 7,
+      }),
       client.select<IgnoredSaleRow>("crm_vendas_ignoradas", {
         select: "id,uniplus_venda_id,motivo,dados,created_at",
         created_at: `gte.${from}`,
         order: "created_at.desc",
+      }),
+      client.select<SaleRow>("crm_vendas", {
+        select: "id,uniplus_id,data_venda,updated_at",
+        and: `(data_venda.gte.${today},data_venda.lt.${tomorrow})`,
+        order: "updated_at.desc",
+      }),
+      client.select<SaleRow>("crm_vendas", {
+        select: "id,uniplus_id,data_venda,updated_at",
+        order: "data_venda.desc,uniplus_id.desc",
+        limit: 1,
       }),
     ]);
 
@@ -66,6 +89,15 @@ export async function GET() {
         imported: totals.imported,
         ignored: totals.ignored,
       },
+      sales: {
+        todayImported: todaySales.length,
+        todayLatest:
+          todaySales
+            .slice()
+            .sort((left, right) => right.uniplus_id - left.uniplus_id)[0] ?? null,
+        latest: latestSales[0] ?? null,
+      },
+      recentRuns: recentSyncRows,
       errors: [
         ...errored.map((row) => ({
           id: row.id,
@@ -106,6 +138,23 @@ function todayWindow() {
     from: from.toISOString(),
     to: to.toISOString(),
   };
+}
+
+function todayDateWindow() {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  return {
+    today: formatDateOnly(today),
+    tomorrow: formatDateOnly(tomorrow),
+  };
+}
+
+function formatDateOnly(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function resolveDailyStatus(

@@ -129,6 +129,10 @@ type ManagedCrmUser = {
 };
 type SyncLogResponse = {
   date: string;
+  window?: {
+    from: string;
+    to: string;
+  };
   latest: {
     id: string;
     status: "iniciada" | "concluida" | "erro";
@@ -148,6 +152,31 @@ type SyncLogResponse = {
     imported: number;
     ignored: number;
   };
+  sales?: {
+    todayImported: number;
+    todayLatest: {
+      id: string;
+      uniplus_id: number;
+      data_venda: string;
+      updated_at: string;
+    } | null;
+    latest: {
+      id: string;
+      uniplus_id: number;
+      data_venda: string;
+      updated_at: string;
+    } | null;
+  };
+  recentRuns?: Array<{
+    id: string;
+    status: "iniciada" | "concluida" | "erro";
+    inicio: string;
+    fim: string | null;
+    total_lidos: number;
+    total_importados: number;
+    total_ignorados: number;
+    erro: string | null;
+  }>;
   errors: Array<{
     id: string;
     type: "sync_error" | "ignored_sale";
@@ -2246,14 +2275,16 @@ function SyncModule() {
     em_execucao: "Em execução",
     sem_execucao: "Sem execução",
   }[logs?.summary.status ?? "sem_execucao"];
+  const latestSale = logs?.sales?.latest;
+  const todayLatestSale = logs?.sales?.todayLatest;
 
   return (
     <div className="space-y-5">
       <PageTitle eyebrow="Sistema" title="Logs e Sincronização" description="Rotina automática do Hennder Sync, resumo do dia, erros e vendas ignoradas." />
       <div className="grid gap-4 md:grid-cols-4">
         <MetricCard label="Status do dia" value={loading ? "..." : statusLabel} />
-        <MetricCard label="Vendas importadas" value={`${logs?.summary.imported ?? sales.length}`} />
-        <MetricCard label="Itens no CRM" value={`${saleItems.length}`} />
+        <MetricCard label="Vendas de hoje" value={`${logs?.sales?.todayImported ?? 0}`} />
+        <MetricCard label="Último lote" value={`${logs?.summary.imported ?? 0}`} />
         <MetricCard label="Erros" value={`${logs?.errors.length ?? 0}`} />
       </div>
 
@@ -2272,6 +2303,8 @@ function SyncModule() {
               ["Comando", "npm run sync:uniplus:auto", "Windows Task Scheduler"],
               ["Última execução", logs?.latest ? formatDateTime(logs.latest.inicio) : "Sem registro", logs?.latest?.status ?? "-"],
               ["Lidos / importados", `${logs?.summary.read ?? 0} / ${logs?.summary.imported ?? 0}`, "Hoje"],
+              ["Venda mais recente hoje", todayLatestSale ? `#${todayLatestSale.uniplus_id}` : "Sem venda hoje", todayLatestSale ? formatDateTime(todayLatestSale.updated_at) : "-"],
+              ["Venda mais recente no CRM", latestSale ? `#${latestSale.uniplus_id}` : "Sem vendas", latestSale ? formatContactDate(latestSale.data_venda) : "-"],
               ["Ignorados", `${logs?.summary.ignored ?? 0}`, "Auditoria"],
             ]}
             empty="Sem sincronização registrada."
@@ -2292,6 +2325,41 @@ function SyncModule() {
           </div>
         </Panel>
       </div>
+
+      <Panel title="Histórico recente do Sync" icon={Clock3}>
+        {loading ? (
+          <p className="text-sm text-slate-500">Carregando execuções...</p>
+        ) : logs?.recentRuns?.length ? (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-left text-sm">
+              <thead className="text-xs uppercase tracking-wide text-slate-400">
+                <tr>
+                  <th className="px-3 py-2">Início</th>
+                  <th className="px-3 py-2">Fim</th>
+                  <th className="px-3 py-2">Status</th>
+                  <th className="px-3 py-2">Lidos</th>
+                  <th className="px-3 py-2">Importados</th>
+                  <th className="px-3 py-2">Ignorados</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-blue-50">
+                {logs.recentRuns.map((run) => (
+                  <tr key={run.id}>
+                    <td className="px-3 py-3">{formatDateTime(run.inicio)}</td>
+                    <td className="px-3 py-3">{run.fim ? formatDateTime(run.fim) : "-"}</td>
+                    <td className="px-3 py-3 font-bold text-[#0753a6]">{run.status}</td>
+                    <td className="px-3 py-3">{run.total_lidos}</td>
+                    <td className="px-3 py-3">{run.total_importados}</td>
+                    <td className="px-3 py-3">{run.total_ignorados}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="text-sm text-slate-500">Nenhuma execução recente encontrada.</p>
+        )}
+      </Panel>
 
       <Panel title="Erros e vendas ignoradas do dia" icon={AlertTriangle}>
         {loading ? (
