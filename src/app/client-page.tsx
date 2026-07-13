@@ -1765,14 +1765,10 @@ function SalesModule({
     };
   }, []);
 
-  const latestStartedAt = syncLogs?.latest?.inicio ? Date.parse(syncLogs.latest.inicio) : null;
-  const latestFinishedAt = syncLogs?.latest?.fim ? Date.parse(syncLogs.latest.fim) : Number.POSITIVE_INFINITY;
-  const latestSales = latestStartedAt
-    ? sales.filter((sale) => {
-        const updatedAt = sale.updatedAt ? Date.parse(sale.updatedAt) : Number.NaN;
-        return Number.isFinite(updatedAt) && updatedAt >= latestStartedAt - 1000 && updatedAt <= latestFinishedAt + 60_000;
-      })
-    : [];
+  const latestSales = sales
+    .slice()
+    .sort(compareSalesByLastSync)
+    .slice(0, 5);
   const baseSales = viewMode === "latest" ? latestSales : sales;
   const statusOptions = Array.from(new Set(sales.map((sale) => sale.approved ? "Aprovada" : sale.status).filter(Boolean))).sort();
   const filteredSales = baseSales.filter((sale) => {
@@ -1857,7 +1853,7 @@ function SalesModule({
               </label>
             </div>
             <div className="rounded-lg border border-cyan-100 bg-cyan-50 px-3 py-2 text-xs font-medium text-cyan-800">
-              Último lote: {latestSyncLabel}. A aba de última sincronização mostra somente vendas tocadas pelo Sync mais recente.
+              Último lote: {latestSyncLabel}. A aba de última sincronização mostra as 5 vendas mais recentes tocadas pelo Sync.
             </div>
           </div>
           <div className="overflow-x-auto">
@@ -1923,6 +1919,20 @@ function SalesModule({
       </div>
     </div>
   );
+}
+
+function compareSalesByLastSync(left: SaleRow, right: SaleRow) {
+  const leftTime = saleSyncTimestamp(left);
+  const rightTime = saleSyncTimestamp(right);
+  if (rightTime !== leftTime) return rightTime - leftTime;
+  return right.uniplusId - left.uniplusId;
+}
+
+function saleSyncTimestamp(sale: SaleRow) {
+  const updatedAt = sale.updatedAt ? Date.parse(sale.updatedAt) : Number.NaN;
+  if (Number.isFinite(updatedAt)) return updatedAt;
+  const soldAt = Date.parse(`${sale.soldAt}T12:00:00Z`);
+  return Number.isFinite(soldAt) ? soldAt : 0;
 }
 
 function ProductsModule({
