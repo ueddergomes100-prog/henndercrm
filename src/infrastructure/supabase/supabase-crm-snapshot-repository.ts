@@ -1,6 +1,7 @@
 import "server-only";
 
 import {
+  addDays,
   calculatePotentialLost,
   calculatePreferredSeller,
   calculateRepurchaseScore,
@@ -186,24 +187,66 @@ export class SupabaseCrmSnapshotRepository implements ICrmSnapshotRepository {
     const customersById = new Map(customers.map((customer) => [customer.id, customer]));
     const sellersById = new Map(sellers.map((seller) => [seller.id, seller]));
     const productsById = new Map(products.map((product) => [product.id, product]));
-    const dashboard = buildDashboard(customers, alertRows, referenceDate);
+    const operationalAlertRows = await this.ensureDerivedRepurchaseAlerts(
+      saleRows,
+      itemRows,
+      productRows,
+      referenceDate,
+      alertRows,
+    );
+    const operationalOpportunityRows = opportunityRows.length
+      ? opportunityRows
+      : await this.ensureDerivedOpportunities(clientRows, saleRows, itemRows, productRows, referenceDate);
+    const mappedAlerts = operationalAlertRows.flatMap((row) =>
+      mapAlert(row, customersById, sellersById, productsById),
+    );
+    const mappedOpportunities = operationalOpportunityRows.flatMap((row) =>
+      mapOpportunity(row, customersById, sellersById, productsById),
+    );
+    const dashboard = buildDashboard(customers, mappedAlerts, referenceDate);
 
     return {
       referenceDate,
       dashboard,
       customers,
-      sellers: buildSellerMetrics(sellers, customers, alertRows),
+      sellers: buildSellerMetrics(sellers, customers, mappedAlerts),
       products,
       sales,
       saleItems,
-      alerts: alertRows.flatMap((row) =>
-        mapAlert(row, customersById, sellersById, productsById),
-      ),
-      opportunities: opportunityRows.flatMap((row) =>
-        mapOpportunity(row, customersById, sellersById, productsById),
-      ),
+      alerts: mappedAlerts,
+      opportunities: mappedOpportunities,
       agenda: agendaRows.map(mapAgenda),
     };
+  }
+
+  private async ensureDerivedRepurchaseAlerts(
+    sales: SaleRow[],
+    items: SaleItemRow[],
+    products: ProductRow[],
+    referenceDate: string,
+    existingAlerts: AlertRow[],
+  ) {
+    const rows = buildDerivedRepurchaseAlertRows(sales, items, products, referenceDate);
+    const existingKeys = new Set(existingAlerts.map(alertUniqueKey));
+    const missingRows = rows.filter((row) => !existingKeys.has(alertUniqueKey(row)));
+    if (!missingRows.length) return existingAlerts;
+    return this.client.upsert<AlertRow>(
+      "crm_alertas_recompra",
+      missingRows,
+      "cliente_id,produto_id,venda_id,item_venda_id",
+    ).then((insertedRows) => [...existingAlerts, ...insertedRows]);
+  }
+
+  private async ensureDerivedOpportunities(
+    clients: ClientRow[],
+    sales: SaleRow[],
+    items: SaleItemRow[],
+    products: ProductRow[],
+    referenceDate: string,
+  ) {
+    const rows = buildDerivedOpportunityRows(clients, sales, items, products, referenceDate);
+    if (!rows.length) return [];
+    return this.client.insert<OpportunityRow>("crm_oportunidades", rows);
   }
 }
 
@@ -350,7 +393,7 @@ function mapCustomers(
 function buildSellerMetrics(
   sellers: CrmSeller[],
   customers: CrmCustomer[],
-  alerts: AlertRow[],
+  alerts: CrmRepurchaseAlert[],
 ) {
   return sellers.map((seller) => {
     const assignedCustomers = customers.filter(
@@ -363,7 +406,7 @@ function buildSellerMetrics(
         (customer) => customer.activityStatus === "risco" || customer.activityStatus === "perdido",
       ).length,
       openAlertCount: alerts.filter(
-        (alert) => alert.vendedor_responsavel_id === seller.id && alert.status === "pendente",
+        (alert) => alert.sellerId === seller.id && alert.status === "pendente",
       ).length,
       potentialValue: roundCurrency(
         assignedCustomers.reduce((total, customer) => total + customer.potentialLost, 0),
@@ -428,6 +471,154 @@ function mapOpportunity(
   }];
 }
 
+function buildDerivedRepurchaseAlertRows(
+  sales: SaleRow[],
+  items: SaleItemRow[],
+  products: ProductRow[],
+  referenceDate: string,
+) {
+  const salesById = new Map(sales.map((sale) => [sale.id, sale]));
+  const productsById = new Map(products.map((product) => [product.id, product]));
+  const latestByCustomerProduct = new Map<string, { sale: SaleRow; item: SaleItemRow; product: ProductRow }>();
+  const horizonDate = addDays(referenceDate, 15);
+
+  for (const item of items) {
+    if (!item.produto_id) continue;
+    const sale = salesById.get(item.venda_id);
+    const product = productsById.get(item.produto_id);
+    if (!sale || !product || !sale.aprovado) continue;
+    if (!product.recompra_ativa && !product.utiliza_crm) continue;
+
+    const key = `${sale.cliente_id}:${item.produto_id}`;
+    const current = latestByCustomerProduct.get(key);
+    if (!current || sale.data_venda > current.sale.data_venda) {
+      latestByCustomerProduct.set(key, { sale, item, product });
+    }
+  }
+
+  return [...latestByCustomerProduct.values()]
+    .map(({ sale, item, product }) => {
+      const repurchaseDays = resolveRepurchaseDays(product);
+      const purchaseDate = dateOnly(sale.data_venda);
+      const expectedDate = addDays(purchaseDate, repurchaseDays);
+      if (expectedDate > horizonDate) return null;
+
+      return {
+        cliente_id: sale.cliente_id,
+        produto_id: product.id,
+        venda_id: sale.id,
+        item_venda_id: item.id,
+        vendedor_responsavel_id: sale.vendedor_id,
+        data_compra: sale.data_venda,
+        data_prevista_recompra: expectedDate,
+        dias_recompra: repurchaseDays,
+        status: "pendente",
+        prioridade: resolveAlertPriority(expectedDate, referenceDate),
+        origem: product.dias_recompra_padrao ? "regra_produto" : "historico_cliente",
+        observacao: "Gerado automaticamente pelo Hennder CRM a partir das vendas reais.",
+      };
+    })
+    .filter((row): row is NonNullable<typeof row> => Boolean(row))
+    .sort((left, right) => left.data_prevista_recompra.localeCompare(right.data_prevista_recompra))
+    .slice(0, 500);
+}
+
+function buildDerivedOpportunityRows(
+  clients: ClientRow[],
+  sales: SaleRow[],
+  items: SaleItemRow[],
+  products: ProductRow[],
+  referenceDate: string,
+) {
+  const salesById = new Map(sales.map((sale) => [sale.id, sale]));
+  const productsById = new Map(products.map((product) => [product.id, product]));
+  const productsByCustomer = new Map<string, Set<string>>();
+  const latestSaleByCustomer = new Map<string, SaleRow>();
+  const productStats = new Map<string, { product: ProductRow; sales: number; revenue: number }>();
+
+  for (const sale of sales) {
+    if (!sale.aprovado) continue;
+    const current = latestSaleByCustomer.get(sale.cliente_id);
+    if (!current || sale.data_venda > current.data_venda) latestSaleByCustomer.set(sale.cliente_id, sale);
+  }
+
+  for (const item of items) {
+    if (!item.produto_id) continue;
+    const sale = salesById.get(item.venda_id);
+    const product = productsById.get(item.produto_id);
+    if (!sale || !product || !sale.aprovado) continue;
+
+    const customerProducts = productsByCustomer.get(sale.cliente_id) ?? new Set<string>();
+    customerProducts.add(product.id);
+    productsByCustomer.set(sale.cliente_id, customerProducts);
+
+    const current = productStats.get(product.id) ?? { product, sales: 0, revenue: 0 };
+    current.sales += 1;
+    current.revenue += Number(item.valor_estimado ?? 0);
+    productStats.set(product.id, current);
+  }
+
+  const topProducts = [...productStats.values()]
+    .filter((item) => item.product.recompra_ativa || item.product.utiliza_crm)
+    .sort((left, right) => right.revenue - left.revenue || right.sales - left.sales)
+    .slice(0, 80);
+
+  return clients
+    .flatMap((client) => {
+      const latestSale = latestSaleByCustomer.get(client.id);
+      if (!latestSale) return [];
+      const lastPurchaseDate = dateOnly(latestSale.data_venda);
+      const daysWithoutPurchase = daysBetween(lastPurchaseDate, referenceDate);
+      if (daysWithoutPurchase < 30) return [];
+
+      const purchasedProductIds = productsByCustomer.get(client.id) ?? new Set<string>();
+      const suggested = topProducts.find((item) => !purchasedProductIds.has(item.product.id));
+      if (!suggested) return [];
+
+      const confidence = Math.min(95, 58 + Math.floor(daysWithoutPurchase / 3));
+      return [{
+        cliente_id: client.id,
+        produto_origem_id: suggested.product.id,
+        produto_sugerido_nome: suggested.product.nome,
+        motivo: `Cliente sem compra ha ${daysWithoutPurchase} dias; produto recorrente com bom desempenho na base.`,
+        confianca: confidence,
+        status: "aberta",
+        vendedor_responsavel_id: latestSale.vendedor_id,
+      }];
+    })
+    .sort((left, right) => (right.confianca ?? 0) - (left.confianca ?? 0))
+    .slice(0, 150);
+}
+
+function resolveRepurchaseDays(product: ProductRow) {
+  if (product.dias_recompra_padrao && product.dias_recompra_padrao > 0) return product.dias_recompra_padrao;
+  const text = `${product.nome} ${product.departamento ?? ""}`
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLocaleUpperCase("pt-BR");
+  if (/(SACHE|PETISCO)/u.test(text)) return 20;
+  if (/(RACAO|AREIA HIGI)/u.test(text)) return 30;
+  if (/(VERM|ANTIPULG|CARRAP|VACINA)/u.test(text)) return 90;
+  if (text.includes("VETERINARIA")) return 90;
+  if (text.includes("AGRO")) return 60;
+  return 45;
+}
+
+function resolveAlertPriority(expectedDate: string, referenceDate: string): CrmRepurchaseAlert["priority"] {
+  if (expectedDate <= referenceDate) return "alta";
+  if (expectedDate <= addDays(referenceDate, 7)) return "media";
+  return "baixa";
+}
+
+function alertUniqueKey(row: {
+  cliente_id: string;
+  produto_id: string | null;
+  venda_id: string;
+  item_venda_id: string;
+}) {
+  return `${row.cliente_id}:${row.produto_id ?? ""}:${row.venda_id}:${row.item_venda_id}`;
+}
+
 function mapAgenda(row: AgendaRow): CrmAgendaEvent {
   return {
     id: row.id,
@@ -442,7 +633,7 @@ function mapAgenda(row: AgendaRow): CrmAgendaEvent {
 
 function buildDashboard(
   customers: CrmCustomer[],
-  alerts: AlertRow[],
+  alerts: CrmRepurchaseAlert[],
   referenceDate: string,
 ): CrmDashboard {
   const qualityTotal = customers.reduce(
@@ -454,7 +645,7 @@ function buildDashboard(
     attentionCustomers: customers.filter((customer) => customer.activityStatus === "atencao").length,
     riskCustomers: customers.filter((customer) => customer.activityStatus === "risco").length,
     lostCustomers: customers.filter((customer) => customer.activityStatus === "perdido").length,
-    alertsToday: alerts.filter((alert) => alert.data_prevista_recompra === referenceDate).length,
+    alertsToday: alerts.filter((alert) => alert.expectedDate === referenceDate).length,
     recoverableRevenue: roundCurrency(
       customers
         .filter((customer) => customer.activityStatus !== "ativo")

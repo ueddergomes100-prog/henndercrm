@@ -245,6 +245,7 @@ const navGroups: NavGroup[] = [
     title: "Comercial",
     items: [
       { id: "clientes", label: "Clientes", description: "Consulte a carteira e o histórico dos clientes.", icon: UsersRound },
+      { id: "recuperacao", label: "Clientes sem compra", description: "Fila de clientes parados, potencial e ações de recuperação.", icon: AlertTriangle },
       { id: "vendas", label: "Vendas", description: "Vendas importadas, itens e rastreabilidade do ERP.", icon: ShoppingBag },
       { id: "produtos", label: "Produtos", description: "Produtos, recompra ativa e potencial recorrente.", icon: ClipboardList },
       { id: "recompra", label: "Alertas", description: "Acompanhe clientes no momento ideal de recompra.", icon: Bell },
