@@ -82,6 +82,7 @@ import {
   formatCurrency,
   crmViewService,
 } from "@/services/crm-view-service";
+import { buildCrmAttributionSummary, type CrmAttributedSale } from "@/services/crm-attribution-service";
 
 type View =
   | "dashboard"
@@ -218,13 +219,13 @@ const emptySnapshot: CrmSnapshot = {
   agenda: [],
 };
 let crmViewModel = crmViewService.getViewModel(emptySnapshot);
-let { snapshot, customers, alerts, repurchaseTrend } = crmViewModel;
+let { snapshot, customers, alerts } = crmViewModel;
 let { sellers, sales, saleItems, dashboard } = snapshot;
 let crmReferenceDate = snapshot.referenceDate;
 
 function setRuntimeViewModel(next: CrmViewModel) {
   crmViewModel = next;
-  ({ snapshot, customers, alerts, repurchaseTrend } = crmViewModel);
+  ({ snapshot, customers, alerts } = crmViewModel);
   ({ sellers, sales, saleItems, dashboard } = snapshot);
   crmReferenceDate = snapshot.referenceDate;
 }
@@ -566,6 +567,7 @@ export default function Home() {
                 alerts={appAlerts}
                 opportunities={scopedData.opportunities}
                 contactRecords={appContactRecords}
+                sales={scopedData.sales}
               />
             )}
             {visibleView === "clientes" && <Customers customers={appCustomers} openProfile={openProfile} />}
@@ -1567,56 +1569,82 @@ function CrmResults({
   alerts,
   opportunities,
   contactRecords,
+  sales,
 }: {
   customers: CustomerRow[];
   alerts: AlertRow[];
   opportunities: CrmOpportunity[];
   contactRecords: ContactRecord[];
+  sales: SaleRow[];
 }) {
-  const contactedCustomerIds = new Set(contactRecords.map((record) => record.customerId));
-  const recoveredCustomerIds = new Set(
-    contactRecords
-      .filter((record) => record.outcome === "interested" || record.outcome === "follow_up")
-      .map((record) => record.customerId),
-  );
-  const recoveredCustomers = customers.filter((customer) => recoveredCustomerIds.has(customer.id));
-  const influencedCustomers = customers.filter(
-    (customer) => contactedCustomerIds.has(customer.id) || alerts.some((alert) => alert.customerId === customer.id),
-  );
-  const recoveredRevenue = recoveredCustomers.reduce((total, customer) => total + customer.ticketValue, 0);
-  const influencedRevenue = influencedCustomers.reduce((total, customer) => total + customer.potentialValue, 0);
+  const attribution = buildCrmAttributionSummary({ customers, sales, contactRecords });
   const convertedAlerts = alerts.filter((alert) => alert.status === "convertido");
-  const conversionRate = contactRecords.length
-    ? Math.round((recoveredCustomerIds.size / contactRecords.length) * 100)
-    : 0;
-  const roi = recoveredRevenue ? Math.max(1, Math.round(recoveredRevenue / 350)) : 0;
+  const roi = attribution.totalAttributedRevenue ? Math.max(1, Math.round(attribution.totalAttributedRevenue / 350)) : 0;
   const sellerRanking = buildSellerAttentionRanking({ customers, alerts, opportunities, agenda: [], contactRecords })
     .slice(0, 5);
+  const latestAttributedSales = attribution.attributedSales
+    .slice()
+    .sort((left, right) => right.sale.soldAt.localeCompare(left.sale.soldAt) || right.sale.uniplusId - left.sale.uniplusId)
+    .slice(0, 8);
+  const attributionTrend = buildAttributionTrend(attribution.attributedSales);
 
   return (
     <div className="space-y-5">
-      <PageTitle eyebrow="Resultados" title="Resultados do CRM" description="Impacto financeiro, conversões e recuperação gerada pela operação comercial." />
+      <PageTitle eyebrow="Resultados" title="Resultados do CRM" description="Ganhos reais atribuídos a contatos e ações comerciais antes da compra." />
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Faturamento recuperado" value={formatCurrency(recoveredRevenue)} />
-        <MetricCard label="Faturamento influenciado" value={formatCurrency(influencedRevenue)} />
-        <MetricCard label="Clientes recuperados" value={`${recoveredCustomers.length}`} />
+        <MetricCard label="Faturamento recuperado" value={formatCurrency(attribution.recoveredRevenue)} />
+        <MetricCard label="Faturamento influenciado" value={formatCurrency(attribution.influencedRevenue)} />
+        <MetricCard label="Total atribuído" value={formatCurrency(attribution.totalAttributedRevenue)} />
+        <MetricCard label="Clientes convertidos" value={`${attribution.convertedCustomers}`} />
         <MetricCard label="ROI estimado" value={`${roi}x`} />
         <MetricCard label="Alertas convertidos" value={`${convertedAlerts.length}`} />
-        <MetricCard label="Taxa de conversão" value={`${conversionRate}%`} />
-        <MetricCard label="Ticket médio recuperado" value={formatCurrency(recoveredCustomers.length ? recoveredRevenue / recoveredCustomers.length : 0)} />
-        <MetricCard label="Oportunidades abertas" value={`${opportunities.filter((item) => item.status === "aberta").length}`} />
+        <MetricCard label="Taxa de conversão" value={`${attribution.conversionRate}%`} />
+        <MetricCard label="Ticket recuperado" value={formatCurrency(attribution.averageRecoveredTicket)} />
       </div>
+      <Panel title="Regra de atribuição do CRM" icon={ShieldCheck} action="Janela 10/20/30 dias">
+        <div className="grid gap-3 lg:grid-cols-3">
+          {attribution.windowRows.map((row) => (
+            <div key={row.id} className="rounded-lg border border-blue-100 bg-[#f8fbff] p-4">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-black text-[#123252]">{row.label}</p>
+                <span className={`rounded-full px-3 py-1 text-xs font-bold ${
+                  row.kind === "recovered" ? "bg-emerald-100 text-emerald-700" : "bg-cyan-100 text-cyan-700"
+                }`}>
+                  {Math.round(row.weight * 100)}%
+                </span>
+              </div>
+              <p className="mt-2 min-h-10 text-xs leading-5 text-slate-500">{row.description}</p>
+              <div className="mt-4 grid grid-cols-3 gap-2 text-center">
+                <div className="rounded-lg bg-white px-2 py-3">
+                  <p className="text-lg font-black text-[#0753a6]">{row.sales}</p>
+                  <p className="text-[10px] font-bold uppercase text-slate-400">Vendas</p>
+                </div>
+                <div className="rounded-lg bg-white px-2 py-3">
+                  <p className="text-lg font-black text-[#0753a6]">{row.customers}</p>
+                  <p className="text-[10px] font-bold uppercase text-slate-400">Clientes</p>
+                </div>
+                <div className="rounded-lg bg-white px-2 py-3">
+                  <p className="text-lg font-black text-[#0753a6]">{formatCurrency(row.weightedValue)}</p>
+                  <p className="text-[10px] font-bold uppercase text-slate-400">Valor</p>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Panel>
+
       <div className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
-        <Panel title="Evolução mensal recuperada" icon={LineChart}>
+        <Panel title="Evolução mensal atribuída" icon={LineChart}>
           <div className="h-80">
             <MeasuredChart>
               {({ width, height }) => (
-                <AreaChart width={width} height={height} data={repurchaseTrend}>
+                <AreaChart width={width} height={height} data={attributionTrend}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                   <XAxis dataKey="mes" tickLine={false} axisLine={false} />
                   <YAxis tickLine={false} axisLine={false} />
                   <Tooltip />
-                  <Area type="monotone" dataKey="recuperados" stroke="#0753a6" fill="#bfdbfe" strokeWidth={3} />
+                  <Area type="monotone" dataKey="recuperado" stroke="#059669" fill="#bbf7d0" strokeWidth={3} />
+                  <Area type="monotone" dataKey="influenciado" stroke="#0753a6" fill="#bfdbfe" strokeWidth={3} />
                 </AreaChart>
               )}
             </MeasuredChart>
@@ -1638,15 +1666,61 @@ function CrmResults({
         </Panel>
       </div>
       <div className="grid gap-5 xl:grid-cols-2">
-        <Panel title="Top clientes recuperados" icon={CheckCircle2}>
-          <SimpleRows rows={recoveredCustomers.slice(0, 6).map((customer) => [customer.name, customer.ticket, customer.preferredSeller])} empty="Nenhum cliente recuperado registrado ainda." />
+        <Panel title="Top clientes com venda atribuída" icon={CheckCircle2}>
+          <SimpleRows
+            rows={attribution.customerRows.slice(0, 6).map((customer) => [
+              customer.customerName,
+              formatCurrency(customer.weightedValue),
+              `${customer.sales} venda(s) · ${customer.bestWindow}`,
+            ])}
+            empty="Nenhuma venda atribuída ao CRM ainda."
+          />
         </Panel>
-        <Panel title="Top produtos de recompra" icon={ShoppingBag}>
-          <SimpleRows rows={buildProductRepurchaseRanking(alerts).map((item) => [item.name, `${item.count} alertas`, `${item.days} dias`])} empty="Nenhum produto com alerta pendente." />
+        <Panel title="Últimas vendas atribuídas" icon={ShoppingBag}>
+          <SimpleRows
+            rows={latestAttributedSales.map((item) => [
+              `#${item.sale.uniplusId} · ${item.customer?.name ?? item.contact.customerName}`,
+              formatCurrency(item.weightedValue),
+              `${item.daysAfterContact} dia(s) após contato`,
+            ])}
+            empty="Nenhuma venda atribuída dentro da janela de 30 dias."
+          />
         </Panel>
       </div>
     </div>
   );
+}
+
+function buildAttributionTrend(attributedSales: CrmAttributedSale[]) {
+  const labels = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+  const rows = new Map<string, { mes: string; recoveredMonth: string; recuperado: number; influenciado: number }>();
+
+  for (const item of attributedSales) {
+    const month = item.sale.soldAt.slice(0, 7);
+    const monthIndex = Number(item.sale.soldAt.slice(5, 7)) - 1;
+    const current = rows.get(month) ?? {
+      mes: labels[monthIndex] ?? month,
+      recoveredMonth: month,
+      recuperado: 0,
+      influenciado: 0,
+    };
+
+    if (item.window.kind === "recovered") {
+      current.recuperado += item.weightedValue;
+    } else {
+      current.influenciado += item.weightedValue;
+    }
+    rows.set(month, current);
+  }
+
+  return [...rows.values()]
+    .sort((left, right) => left.recoveredMonth.localeCompare(right.recoveredMonth))
+    .slice(-6)
+    .map((row) => ({
+      mes: row.mes,
+      recuperado: Math.round(row.recuperado),
+      influenciado: Math.round(row.influenciado),
+    }));
 }
 
 function SalesModule({
@@ -3450,7 +3524,24 @@ function RepurchaseAlerts({
                       />
                     )}
                     {customer && <AlertAction label="Registrar retorno" onClick={() => setContactAlert(alert)} />}
-                    <AlertAction label="Contatado" onClick={() => void onStatusChange(alert.id, "contatado")} />
+                    <AlertAction
+                      label="Contatado"
+                      onClick={() => {
+                        if (customer) {
+                          void onRegisterContact({
+                            customerId: customer.id,
+                            customerName: customer.name,
+                            outcome: "no_answer",
+                            note: `Registro automático: alerta de recompra marcado como contatado para ${alert.product}.`,
+                            nextContact: "",
+                            contactedAt: new Date().toISOString(),
+                            channel: customer.whatsapp ? "WhatsApp" : "Telefone",
+                            responsible: alert.seller,
+                          });
+                        }
+                        void onStatusChange(alert.id, "contatado");
+                      }}
+                    />
                     <AlertAction label="Ignorar" onClick={() => void onStatusChange(alert.id, "ignorado")} />
                   </div>
                 </div>
@@ -5019,7 +5110,7 @@ function ContactOutcomeModal({
               outcome,
               note,
               nextContact,
-              contactedAt: new Date().toLocaleDateString("pt-BR"),
+              contactedAt: new Date().toISOString(),
               channel,
               responsible,
             });
@@ -5619,6 +5710,7 @@ function WhatsAppButton({
       href={href}
       target="_blank"
       rel="noopener noreferrer"
+      onClick={() => recordAutomaticContactIntent(customer, message)}
       aria-label={`Chamar ${customer.name} no WhatsApp`}
       title={`Chamar ${customer.name} no WhatsApp`}
       className={`inline-flex items-center justify-center gap-2 rounded-lg bg-[#25d366] font-semibold text-white shadow-sm transition hover:bg-[#1ebe5d] focus-visible:outline-[#25d366] ${
@@ -5629,6 +5721,31 @@ function WhatsAppButton({
       {!compact && <span>Chamar no WhatsApp</span>}
     </a>
   );
+}
+
+function recordAutomaticContactIntent(customer: CustomerRow, message: string) {
+  const today = new Date().toISOString().slice(0, 10);
+  const storageKey = `hennder-crm-contact-intent:${customer.id}:${today}:whatsapp`;
+  try {
+    if (window.localStorage.getItem(storageKey)) return;
+    window.localStorage.setItem(storageKey, new Date().toISOString());
+  } catch {
+    // Silently continue; losing the local guard should not block the commercial action.
+  }
+
+  void mutateWorkspace<ContactRecord>({
+    action: "create_contact",
+    record: {
+      customerId: customer.id,
+      customerName: customer.name,
+      outcome: "no_answer",
+      note: `Registro automático: clique no WhatsApp. Mensagem sugerida: ${message}`,
+      nextContact: "",
+      contactedAt: new Date().toISOString(),
+      channel: "WhatsApp",
+      responsible: customer.preferredSeller || "Hennder CRM",
+    },
+  }).catch(() => undefined);
 }
 
 function Badge({ children }: { children: React.ReactNode }) {
