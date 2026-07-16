@@ -1251,17 +1251,18 @@ function ManualAlertModal({
   onClose: () => void;
   onSave: (alert: AlertRow) => Promise<void>;
 }) {
-  const defaultCustomer = customers[0];
-  const defaultProduct = products[0];
   const defaultSeller = resolveSellerForUser(user.sellerId) ?? sellers[0];
-  const [customerId, setCustomerId] = useState(defaultCustomer?.id ?? "");
-  const [productId, setProductId] = useState(defaultProduct?.id ?? "");
-  const [days, setDays] = useState("45");
-  const [recommendedIso, setRecommendedIso] = useState(addIsoDays(crmReferenceDate, 7));
-  const [priority, setPriority] = useState<AlertRow["priorityCode"]>("alta");
-  const [sellerId, setSellerId] = useState(defaultSeller?.id ?? "");
+  const [customerId, setCustomerId] = useState("");
+  const [productId, setProductId] = useState("");
+  const [days, setDays] = useState("");
+  const [recommendedIso, setRecommendedIso] = useState("");
+  const [priority, setPriority] = useState<AlertRow["priorityCode"] | "">("");
+  const [sellerId, setSellerId] = useState(user.role === "vendedor" ? defaultSeller?.id ?? "" : "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const selectedCustomer = customers.find((item) => item.id === customerId);
+  const selectedProduct = products.find((item) => item.id === productId);
+  const selectedSeller = sellers.find((item) => item.id === sellerId);
 
   return (
     <ModalFrame title="Cadastrar alerta manual" onClose={onClose}>
@@ -1269,20 +1270,37 @@ function ManualAlertModal({
         className="grid gap-4"
         onSubmit={async (event) => {
           event.preventDefault();
-          const customer = customers.find((item) => item.id === customerId);
-          const product = products.find((item) => item.id === productId);
-          const seller = sellers.find((item) => item.id === sellerId);
-          if (!customer || !product) return;
+          if (!selectedCustomer) {
+            setError("Escolha um cliente da base para criar o alerta.");
+            return;
+          }
+          if (!selectedProduct) {
+            setError("Escolha um produto da base para criar o alerta.");
+            return;
+          }
+          const recurrenceDays = Number(days);
+          if (!Number.isFinite(recurrenceDays) || recurrenceDays <= 0) {
+            setError("Informe uma recorrencia em dias maior que zero.");
+            return;
+          }
+          if (!recommendedIso) {
+            setError("Informe a data do alerta.");
+            return;
+          }
+          if (!priority) {
+            setError("Escolha uma prioridade para o alerta.");
+            return;
+          }
           setSaving(true);
           setError("");
           try {
             await onSave(buildManualAlertRow({
-              customer,
-              product,
-              recurrenceDays: Number(days) || product.defaultRepurchaseDays || customer.purchaseCycleDays || 45,
+              customer: selectedCustomer,
+              product: selectedProduct,
+              recurrenceDays,
               recommendedIso,
               priority,
-              seller,
+              seller: selectedSeller,
             }));
           } catch (saveError) {
             setError(saveError instanceof Error ? saveError.message : "Falha ao salvar alerta manual.");
@@ -1291,25 +1309,65 @@ function ManualAlertModal({
           }
         }}
       >
-        <FormSelect label="Cliente" value={customerId} onChange={setCustomerId}>
-          {customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}
-        </FormSelect>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <FormSelect label="Produto da base" value={productId} onChange={setProductId}>
-            {products.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
-          </FormSelect>
-          <FormInput label="Recorrencia em dias" value={days} onChange={setDays} type="number" />
+        <div className="rounded-xl border border-cyan-200 bg-cyan-50/70 p-4">
+          <p className="text-sm font-bold text-[#0753a6]">Criacao manual, sem preenchimento automatico</p>
+          <p className="mt-1 text-xs leading-5 text-slate-600">
+            Selecione cliente, produto, recorrencia, data e prioridade. O sistema nao escolhe nenhum registro por conta propria.
+          </p>
         </div>
-        <div className="grid gap-4 sm:grid-cols-3">
-          <FormInput label="Data do alerta" value={recommendedIso} onChange={setRecommendedIso} type="date" />
-          <FormSelect label="Prioridade" value={priority} onChange={(value) => setPriority(value as AlertRow["priorityCode"])}>
-            <option value="alta">Alta</option>
-            <option value="media">Media</option>
-            <option value="baixa">Baixa</option>
-          </FormSelect>
-          <FormSelect label="Responsavel" value={sellerId} onChange={setSellerId} disabled={user.role === "vendedor"}>
-            {sellers.map((seller) => <option key={seller.id} value={seller.id}>{seller.name}</option>)}
-          </FormSelect>
+        <ManualAlertPicker
+          label="Cliente da base"
+          placeholder="Buscar por nome, CPF/CNPJ ou cidade"
+          items={customers}
+          value={customerId}
+          onChange={setCustomerId}
+          getTitle={(customer) => customer.name}
+          getSubtitle={(customer) => [customer.document, customer.city, customer.preferredSeller].filter(Boolean).join(" · ")}
+          emptyText="Nenhum cliente encontrado."
+          icon={UserRound}
+        />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <ManualAlertPicker
+            label="Produto da base"
+            placeholder="Buscar produto importado"
+            items={products}
+            value={productId}
+            onChange={setProductId}
+            getTitle={(product) => product.name}
+            getSubtitle={(product) => [product.code, product.department, product.defaultRepurchaseDays ? `${product.defaultRepurchaseDays} dias no motor` : ""].filter(Boolean).join(" · ")}
+            emptyText="Nenhum produto encontrado."
+            icon={ShoppingBag}
+          />
+          <ManualAlertInput
+            label="Recorrencia em dias"
+            value={days}
+            onChange={setDays}
+            type="number"
+            placeholder="Ex: 30"
+            helper={selectedProduct?.defaultRepurchaseDays ? `Motor sugere ${selectedProduct.defaultRepurchaseDays} dias para este produto.` : "Defina manualmente o ciclo deste alerta."}
+          />
+        </div>
+        <div className="grid gap-4 lg:grid-cols-[0.8fr_1.2fr]">
+          <ManualAlertInput label="Data do alerta" value={recommendedIso} onChange={setRecommendedIso} type="date" />
+          <ManualAlertPriorityPicker value={priority} onChange={setPriority} />
+        </div>
+        <div className="grid gap-4">
+          {user.role === "vendedor" ? (
+            <ManualAlertLockedField label="Responsavel" value={selectedSeller?.name ?? "Vendedor logado"} />
+          ) : (
+            <ManualAlertPicker
+              label="Responsavel"
+              placeholder="Buscar vendedor responsavel"
+              items={sellers}
+              value={sellerId}
+              onChange={setSellerId}
+              getTitle={(seller) => seller.name}
+              getSubtitle={(seller) => seller.supervisor ? "Supervisor" : "Vendedor"}
+              emptyText="Nenhum vendedor encontrado."
+              icon={UserRound}
+              optional
+            />
+          )}
         </div>
         <ModalActions saving={saving} error={error} onClose={onClose} />
       </form>
@@ -3992,30 +4050,27 @@ function ManualAlertPanel({
   compact?: boolean;
 }) {
   const initialCustomer = customers.find((customer) => customer.id === initialCustomerId) ?? customers[0];
-  const initialProduct = products[0];
-  const [customerQuery, setCustomerQuery] = useState(initialCustomer?.name ?? "");
-  const [productQuery, setProductQuery] = useState(initialProduct?.name ?? "");
-  const [days, setDays] = useState(String(initialProduct?.defaultRepurchaseDays ?? initialCustomer?.purchaseCycleDays ?? 45));
-  const [recommendedIso, setRecommendedIso] = useState(addIsoDays(crmReferenceDate, 7));
-  const [priority, setPriority] = useState<AlertRow["priorityCode"]>("alta");
-  const [note, setNote] = useState("Cliente pediu lembrete quando estiver proximo da proxima compra.");
-  const [alsoWhatsapp, setAlsoWhatsapp] = useState(true);
+  const [customerId, setCustomerId] = useState(compact ? initialCustomer?.id ?? "" : "");
+  const [productId, setProductId] = useState("");
+  const [days, setDays] = useState("");
+  const [recommendedIso, setRecommendedIso] = useState("");
+  const [priority, setPriority] = useState<AlertRow["priorityCode"] | "">("");
+  const [note, setNote] = useState("");
+  const [alsoWhatsapp, setAlsoWhatsapp] = useState(false);
   const [error, setError] = useState("");
   const [savedMessage, setSavedMessage] = useState("");
   const [saving, setSaving] = useState(false);
-  const customerDatalistId = compact ? "manual-alert-customers-compact" : "manual-alert-customers";
-  const productDatalistId = compact ? "manual-alert-products-compact" : "manual-alert-products";
-  const selectedCustomer = findByName(customers, customerQuery, (customer) => customer.name);
-  const selectedProduct = findByName(products, productQuery, (product) => product.name);
+  const selectedCustomer = customers.find((customer) => customer.id === customerId);
+  const selectedProduct = products.find((product) => product.id === productId);
 
   return (
     <Panel
       title={compact ? "Alerta manual para este cliente" : "Cadastrar alerta manual"}
       icon={Plus}
-      action="Busca na base"
+      action={compact ? "Cliente selecionado" : "Busca na base"}
     >
       <form
-        className="grid gap-3"
+        className="grid gap-4"
         onSubmit={async (event) => {
           event.preventDefault();
           setError("");
@@ -4035,6 +4090,14 @@ function ManualAlertPanel({
             setError("Informe uma recorrencia maior que zero.");
             return;
           }
+          if (!recommendedIso) {
+            setError("Informe a data do alerta.");
+            return;
+          }
+          if (!priority) {
+            setError("Escolha uma prioridade para o alerta.");
+            return;
+          }
 
           const seller =
             sellers.find((item) => item.id === selectedCustomer.preferredSellerId) ??
@@ -4052,9 +4115,16 @@ function ManualAlertPanel({
                 priority,
                 seller,
               }),
-              `${note}${alsoWhatsapp ? " Avisar tambem por WhatsApp." : ""}`.trim(),
+              `${note.trim()}${alsoWhatsapp ? " Avisar tambem por WhatsApp." : ""}`.trim(),
             );
             setSavedMessage(`Alerta salvo para ${selectedCustomer.name}.`);
+            if (!compact) setCustomerId("");
+            setProductId("");
+            setDays("");
+            setRecommendedIso("");
+            setPriority("");
+            setNote("");
+            setAlsoWhatsapp(false);
           } catch (saveError) {
             setError(saveError instanceof Error ? saveError.message : "Falha ao salvar alerta manual.");
           } finally {
@@ -4062,73 +4132,78 @@ function ManualAlertPanel({
           }
         }}
       >
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[1.2fr_1.2fr_0.65fr_0.75fr_0.7fr_auto]">
-          <label className="block">
-            <span className="text-xs font-medium uppercase tracking-wide text-slate-400">Cliente</span>
-            <input
-              list={customerDatalistId}
-              value={customerQuery}
-              onChange={(event) => setCustomerQuery(event.target.value)}
-              className="mt-2 h-11 w-full rounded-lg border border-blue-100 bg-[#f8fbff] px-3 text-sm outline-none focus:border-cyan-400 focus:bg-white"
-              placeholder="Buscar cliente"
+        {!compact && (
+          <div className="rounded-xl border border-cyan-200 bg-cyan-50/70 p-4">
+            <p className="text-sm font-bold text-[#0753a6]">Preenchimento manual controlado</p>
+            <p className="mt-1 text-xs leading-5 text-slate-600">
+              O alerta so sera criado depois que cliente, produto, recorrencia, data e prioridade forem escolhidos.
+            </p>
+          </div>
+        )}
+        <div className="grid gap-4 xl:grid-cols-2">
+          {compact ? (
+            <ManualAlertLockedField label="Cliente" value={selectedCustomer?.name ?? "Cliente selecionado"} />
+          ) : (
+            <ManualAlertPicker
+              label="Cliente"
+              placeholder="Buscar cliente da base"
+              items={customers}
+              value={customerId}
+              onChange={setCustomerId}
+              getTitle={(customer) => customer.name}
+              getSubtitle={(customer) => [customer.document, customer.city, customer.preferredSeller].filter(Boolean).join(" · ")}
+              emptyText="Nenhum cliente encontrado."
+              icon={UserRound}
             />
-            <datalist id={customerDatalistId}>
-              {customers.map((customer) => <option key={customer.id} value={customer.name} />)}
-            </datalist>
-          </label>
-          <label className="block">
-            <span className="text-xs font-medium uppercase tracking-wide text-slate-400">Produto</span>
-            <input
-              list={productDatalistId}
-              value={productQuery}
-              onChange={(event) => setProductQuery(event.target.value)}
-              className="mt-2 h-11 w-full rounded-lg border border-blue-100 bg-[#f8fbff] px-3 text-sm outline-none focus:border-cyan-400 focus:bg-white"
-              placeholder="Buscar produto"
-            />
-            <datalist id={productDatalistId}>
-              {products.map((product) => <option key={product.id} value={product.name} />)}
-            </datalist>
-          </label>
-          <FormInput label="Recorrencia" value={days} onChange={setDays} type="number" />
-          <FormInput label="Data do alerta" value={recommendedIso} onChange={setRecommendedIso} type="date" />
-          <FormSelect label="Prioridade" value={priority} onChange={(value) => setPriority(value as AlertRow["priorityCode"])}>
-            <option value="alta">Alta</option>
-            <option value="media">Media</option>
-            <option value="baixa">Baixa</option>
-          </FormSelect>
-          <button
-            type="submit"
-            disabled={saving}
-            className="flex h-11 items-center justify-center gap-2 self-end rounded-lg bg-[#0753a6] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-[#063d7c]"
-          >
-            <Bell size={16} />
-            {saving ? "Salvando" : "Salvar"}
-          </button>
+          )}
+          <ManualAlertPicker
+            label="Produto"
+            placeholder="Buscar produto importado"
+            items={products}
+            value={productId}
+            onChange={setProductId}
+            getTitle={(product) => product.name}
+            getSubtitle={(product) => [product.code, product.department, product.defaultRepurchaseDays ? `${product.defaultRepurchaseDays} dias no motor` : ""].filter(Boolean).join(" · ")}
+            emptyText="Nenhum produto encontrado."
+            icon={ShoppingBag}
+          />
+        </div>
+        <div className="grid gap-4 xl:grid-cols-[0.8fr_0.8fr_1fr]">
+          <ManualAlertInput
+            label="Recorrencia"
+            value={days}
+            onChange={setDays}
+            type="number"
+            placeholder="Ex: 30"
+            helper={selectedProduct?.defaultRepurchaseDays ? `Motor sugere ${selectedProduct.defaultRepurchaseDays} dias para este produto.` : "Informe a quantidade de dias."}
+          />
+          <ManualAlertInput label="Data do alerta" value={recommendedIso} onChange={setRecommendedIso} type="date" />
+          <ManualAlertPriorityPicker value={priority} onChange={setPriority} />
         </div>
         <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
-          <label className="block">
-            <span className="text-xs font-medium uppercase tracking-wide text-slate-400">Observacao comercial</span>
-            <input
-              value={note}
-              onChange={(event) => setNote(event.target.value)}
-              className="mt-2 h-11 w-full rounded-lg border border-blue-100 bg-[#f8fbff] px-3 text-sm outline-none focus:border-cyan-400 focus:bg-white"
-            />
-          </label>
-          <label className="flex items-center gap-2 self-end rounded-lg border border-blue-100 bg-[#f8fbff] px-3 py-3 text-sm font-medium text-slate-700">
-            <input
-              type="checkbox"
-              checked={alsoWhatsapp}
-              onChange={(event) => setAlsoWhatsapp(event.target.checked)}
-              className="h-4 w-4 accent-emerald-600"
-            />
-            Avisar tambem por WhatsApp
-          </label>
+          <ManualAlertInput
+            label="Observacao comercial"
+            value={note}
+            onChange={setNote}
+            placeholder="Digite uma observacao opcional"
+          />
+          <ManualAlertToggle checked={alsoWhatsapp} onChange={setAlsoWhatsapp} />
         </div>
         {(error || savedMessage) && (
           <p className={`text-sm font-semibold ${error ? "text-red-700" : "text-emerald-700"}`}>
             {error || savedMessage}
           </p>
         )}
+        <div className="flex justify-end">
+          <button
+            type="submit"
+            disabled={saving}
+            className="flex h-11 min-w-36 items-center justify-center gap-2 rounded-lg bg-[#0753a6] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-[#063d7c] disabled:opacity-60"
+          >
+            <Bell size={16} />
+            {saving ? "Salvando" : "Salvar alerta"}
+          </button>
+        </div>
       </form>
     </Panel>
   );
@@ -4190,9 +4265,242 @@ function mapRepurchaseAlertToAlertRow(alert: CrmRepurchaseAlert): AlertRow {
   };
 }
 
-function findByName<T>(items: T[], value: string, getName: (item: T) => string) {
-  const normalizedValue = value.trim().toLowerCase();
-  return items.find((item) => getName(item).trim().toLowerCase() === normalizedValue);
+function ManualAlertPicker<T extends { id: string }>({
+  label,
+  placeholder,
+  items,
+  value,
+  onChange,
+  getTitle,
+  getSubtitle,
+  emptyText,
+  icon: Icon = Search,
+  optional = false,
+}: {
+  label: string;
+  placeholder: string;
+  items: T[];
+  value: string;
+  onChange: (value: string) => void;
+  getTitle: (item: T) => string;
+  getSubtitle: (item: T) => string;
+  emptyText: string;
+  icon?: typeof Search;
+  optional?: boolean;
+}) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const selectedItem = items.find((item) => item.id === value);
+  const normalizedQuery = normalizeManualAlertSearch(query);
+  const visibleItems = (normalizedQuery
+    ? items.filter((item) =>
+        normalizeManualAlertSearch(`${getTitle(item)} ${getSubtitle(item)}`).includes(normalizedQuery),
+      )
+    : items
+  ).slice(0, 8);
+  const inputValue = open ? query : selectedItem ? getTitle(selectedItem) : query;
+
+  return (
+    <div className="relative">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-xs font-bold uppercase tracking-wide text-slate-500">{label}</span>
+        {optional && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase text-slate-500">Opcional</span>}
+      </div>
+      <div className="group flex min-h-12 items-center gap-3 rounded-xl border border-blue-100 bg-white px-3 shadow-sm transition focus-within:border-cyan-400 focus-within:ring-4 focus-within:ring-cyan-100">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-cyan-50 text-[#0753a6]">
+          <Icon size={16} />
+        </span>
+        <input
+          value={inputValue}
+          onFocus={() => {
+            setOpen(true);
+            if (selectedItem) setQuery("");
+          }}
+          onBlur={() => {
+            window.setTimeout(() => setOpen(false), 120);
+          }}
+          onChange={(event) => {
+            if (selectedItem) onChange("");
+            setQuery(event.target.value);
+            setOpen(true);
+          }}
+          autoComplete="off"
+          placeholder={placeholder}
+          className="h-12 min-w-0 flex-1 bg-transparent text-sm font-semibold text-slate-800 outline-none placeholder:text-slate-400"
+        />
+        {selectedItem && (
+          <button
+            type="button"
+            aria-label={`Limpar ${label}`}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => {
+              onChange("");
+              setQuery("");
+              setOpen(true);
+            }}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-50 hover:text-slate-700"
+          >
+            <X size={15} />
+          </button>
+        )}
+      </div>
+      {selectedItem && (
+        <div className="mt-2 flex items-start gap-2 rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+          <CheckCircle2 size={14} className="mt-0.5 shrink-0" />
+          <span>
+            <span className="font-bold">{getTitle(selectedItem)}</span>
+            {getSubtitle(selectedItem) && <span className="block text-emerald-700">{getSubtitle(selectedItem)}</span>}
+          </span>
+        </div>
+      )}
+      {open && (
+        <div className="absolute left-0 right-0 top-[72px] z-30 overflow-hidden rounded-xl border border-blue-100 bg-white shadow-2xl">
+          <div className="max-h-72 overflow-y-auto p-2">
+            {visibleItems.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  onChange(item.id);
+                  setQuery("");
+                  setOpen(false);
+                }}
+                className="flex w-full items-start gap-3 rounded-lg px-3 py-3 text-left transition hover:bg-cyan-50"
+              >
+                <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#f1f8ff] text-[#0753a6]">
+                  <Icon size={15} />
+                </span>
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-bold text-slate-900">{getTitle(item)}</span>
+                  {getSubtitle(item) && <span className="mt-0.5 block truncate text-xs text-slate-500">{getSubtitle(item)}</span>}
+                </span>
+              </button>
+            ))}
+            {!visibleItems.length && (
+              <div className="rounded-lg border border-dashed border-blue-100 bg-[#f8fbff] px-3 py-4 text-center text-sm font-semibold text-slate-500">
+                {emptyText}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ManualAlertInput({
+  label,
+  value,
+  onChange,
+  type = "text",
+  placeholder = "",
+  helper,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: "text" | "number" | "date";
+  placeholder?: string;
+  helper?: string;
+}) {
+  return (
+    <label className="block">
+      <span className="text-xs font-bold uppercase tracking-wide text-slate-500">{label}</span>
+      <input
+        type={type}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        autoComplete="off"
+        inputMode={type === "number" ? "numeric" : undefined}
+        placeholder={placeholder}
+        className="mt-2 h-12 w-full rounded-xl border border-blue-100 bg-white px-3 text-sm font-semibold text-slate-800 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100"
+      />
+      {helper && <span className="mt-1 block text-xs leading-5 text-slate-500">{helper}</span>}
+    </label>
+  );
+}
+
+function ManualAlertPriorityPicker({
+  value,
+  onChange,
+}: {
+  value: AlertRow["priorityCode"] | "";
+  onChange: (value: AlertRow["priorityCode"] | "") => void;
+}) {
+  const options: Array<{ value: AlertRow["priorityCode"]; label: string; description: string; selectedClass: string }> = [
+    { value: "alta", label: "Alta", description: "Contato urgente", selectedClass: "border-red-300 bg-red-50 text-red-700" },
+    { value: "media", label: "Media", description: "Acompanhar em breve", selectedClass: "border-amber-300 bg-amber-50 text-amber-700" },
+    { value: "baixa", label: "Baixa", description: "Fila normal", selectedClass: "border-blue-300 bg-blue-50 text-blue-700" },
+  ];
+
+  return (
+    <div>
+      <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Prioridade</span>
+      <div className="mt-2 grid gap-2 sm:grid-cols-3">
+        {options.map((option) => {
+          const selected = value === option.value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              aria-pressed={selected}
+              onClick={() => onChange(option.value)}
+              className={`min-h-12 rounded-xl border px-3 py-2 text-left text-sm transition ${
+                selected
+                  ? option.selectedClass
+                  : "border-blue-100 bg-white text-slate-600 hover:border-cyan-300 hover:bg-cyan-50"
+              }`}
+            >
+              <span className="block font-bold">{option.label}</span>
+              <span className="mt-0.5 block text-xs opacity-75">{option.description}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ManualAlertLockedField({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <span className="text-xs font-bold uppercase tracking-wide text-slate-500">{label}</span>
+      <div className="mt-2 flex min-h-12 items-center gap-3 rounded-xl border border-blue-100 bg-[#f8fbff] px-3 text-sm font-bold text-slate-800">
+        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-cyan-50 text-[#0753a6]">
+          <CheckCircle2 size={16} />
+        </span>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function ManualAlertToggle({ checked, onChange }: { checked: boolean; onChange: (value: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={checked}
+      onClick={() => onChange(!checked)}
+      className={`flex min-h-12 items-center gap-3 self-end rounded-xl border px-3 py-2 text-left text-sm font-semibold transition ${
+        checked
+          ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+          : "border-blue-100 bg-white text-slate-600 hover:border-cyan-300 hover:bg-cyan-50"
+      }`}
+    >
+      <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${checked ? "bg-emerald-100" : "bg-[#f1f8ff]"}`}>
+        {checked ? <CheckCircle2 size={16} /> : <MessageCircle size={16} />}
+      </span>
+      Avisar tambem por WhatsApp
+    </button>
+  );
+}
+
+function normalizeManualAlertSearch(value: string) {
+  return value
+    .toLocaleLowerCase("pt-BR")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
 }
 
 function SellerPortfolio({
@@ -5788,7 +6096,7 @@ function ModalActions({
   onClose: () => void;
 }) {
   return (
-    <div>
+    <div className="sticky bottom-0 -mx-1 rounded-xl bg-white/95 px-1 pt-3 backdrop-blur">
       {error && <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
       <div className="flex justify-end gap-2">
         <button type="button" onClick={onClose} className="h-11 rounded-lg border border-blue-100 px-4 text-sm font-semibold text-slate-600">
