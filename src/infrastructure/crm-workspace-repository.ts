@@ -15,6 +15,8 @@ import type {
   CustomerContactUpdateInput,
   CustomerContactUpdateResult,
   ICrmWorkspaceRepository,
+  ManualCustomerInput,
+  ManualCustomerResult,
   ManualRepurchaseAlertInput,
 } from "./crm-workspace-contract";
 
@@ -52,6 +54,25 @@ export class CrmWorkspaceRepository implements ICrmWorkspaceRepository {
     workspace.contacts.unshift(record);
     await this.save(workspace);
     return record;
+  }
+
+  async createManualCustomer(input: ManualCustomerInput): Promise<ManualCustomerResult> {
+    const phone = input.phone?.trim() ?? "";
+    const whatsapp = input.whatsapp?.trim() || phone;
+    return {
+      id: randomUUID(),
+      uniplusId: null,
+      name: input.name.trim(),
+      phone,
+      whatsapp,
+      city: input.city?.trim() || "Cidade nao informada",
+      category: input.category?.trim() || "Cliente manual",
+      purchaseCycleDays: Math.max(1, Math.round(input.purchaseCycleDays || 45)),
+      qualityScore: whatsapp ? 70 : 45,
+      qualityStatus: whatsapp ? "bom" : "regular",
+      sellerId: input.sellerId,
+      sellerName: input.sellerId ? "Vendedor vinculado" : undefined,
+    };
   }
 
   async createManualAlert(input: ManualRepurchaseAlertInput): Promise<CrmRepurchaseAlert> {

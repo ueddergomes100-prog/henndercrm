@@ -33,6 +33,9 @@ type CreateUserBody = {
 type UpdateUserBody = {
   id?: string;
   name?: string;
+  role?: CrmUserRole;
+  sellerId?: string | null;
+  password?: string;
 };
 
 export async function GET() {
@@ -111,9 +114,25 @@ export async function PATCH(request: Request) {
   const body = (await request.json()) as UpdateUserBody;
   const id = body.id?.trim();
   const name = body.name?.trim();
+  const role = body.role;
+  const hasSellerId = Object.prototype.hasOwnProperty.call(body, "sellerId");
+  const sellerId = body.sellerId?.trim() || null;
+  const password = body.password?.trim();
 
-  if (!id || !name) {
-    return Response.json({ error: "Informe usuario e nome." }, { status: 400 });
+  if (!id) {
+    return Response.json({ error: "Informe o usuario." }, { status: 400 });
+  }
+  if (body.name !== undefined && !name) {
+    return Response.json({ error: "Informe o nome do usuario." }, { status: 400 });
+  }
+  if (role !== undefined && !isCrmUserRole(role)) {
+    return Response.json({ error: "Perfil invalido." }, { status: 400 });
+  }
+  if (role === "vendedor" && !sellerId) {
+    return Response.json({ error: "Vincule um vendedor para o perfil vendedor." }, { status: 400 });
+  }
+  if (password && password.length < 8) {
+    return Response.json({ error: "A senha deve ter pelo menos 8 caracteres." }, { status: 400 });
   }
 
   try {
@@ -122,20 +141,49 @@ export async function PATCH(request: Request) {
     );
     if (!target) return Response.json({ error: "Usuario nao encontrado." }, { status: 404 });
     if (!target.ativo) return Response.json({ error: "Usuario inativo nao pode ser editado." }, { status: 400 });
+    if (target.perfil === "administrador" && role && role !== "administrador") {
+      return Response.json({ error: "Administradores nao podem ser rebaixados." }, { status: 400 });
+    }
+    if (target.id === currentUser.id && role && role !== "administrador") {
+      return Response.json({ error: "Voce nao pode remover seu proprio perfil administrador." }, { status: 400 });
+    }
 
-    const [updated] = await supabaseRequest<CrmUserRow[]>(`/rest/v1/crm_usuarios?id=eq.${encodeURIComponent(id)}`, {
-      method: "PATCH",
-      body: { nome: name },
-      prefer: "return=representation",
+    const profilePatch = {
+      ...(name !== undefined ? { nome: name } : {}),
+      ...(role !== undefined
+        ? {
+            perfil: role,
+            vendedor_id: role === "vendedor" ? sellerId : null,
+          }
+        : hasSellerId
+          ? { vendedor_id: sellerId }
+          : {}),
+    };
+
+    if (Object.keys(profilePatch).length === 0 && !password) {
+      return Response.json({ error: "Informe pelo menos uma alteracao." }, { status: 400 });
+    }
+
+    const [updatedProfile] = Object.keys(profilePatch).length
+      ? await supabaseRequest<CrmUserRow[]>(`/rest/v1/crm_usuarios?id=eq.${encodeURIComponent(id)}`, {
+          method: "PATCH",
+          body: profilePatch,
+          prefer: "return=representation",
+        })
+      : [target];
+    if (!updatedProfile) throw new Error("Usuario nao retornado apos atualizacao.");
+    await updateAuthUser(target.auth_user_id, {
+      name: name ?? updatedProfile.nome,
+      password,
     });
-    if (!updated) throw new Error("Usuario nao retornado apos atualizacao.");
-    await updateAuthUserMetadata(target.auth_user_id, name);
 
-    const responseUser = toResponseUser(updated);
-    const sessionUser = updated.id === currentUser.id
+    const responseUser = toResponseUser(updatedProfile);
+    const sessionUser = updatedProfile.id === currentUser.id
       ? {
           ...currentUser,
-          name: updated.nome,
+          name: updatedProfile.nome,
+          role: updatedProfile.perfil,
+          sellerId: updatedProfile.vendedor_id ?? undefined,
         }
       : undefined;
 
@@ -206,13 +254,19 @@ async function deleteAuthUser(authUserId: string) {
   });
 }
 
-async function updateAuthUserMetadata(authUserId: string, name: string) {
+async function updateAuthUser(
+  authUserId: string,
+  values: { name?: string; password?: string },
+) {
   if (!authUserId) return;
+  const body = {
+    ...(values.name ? { user_metadata: { name: values.name } } : {}),
+    ...(values.password ? { password: values.password } : {}),
+  };
+  if (Object.keys(body).length === 0) return;
   await supabaseRequest(`/auth/v1/admin/users/${encodeURIComponent(authUserId)}`, {
     method: "PATCH",
-    body: {
-      user_metadata: { name },
-    },
+    body,
   });
 }
 

@@ -9,6 +9,7 @@ import type {
 } from "@/domain/crm/types";
 import type {
   CustomerContactUpdateInput,
+  ManualCustomerInput,
   ManualRepurchaseAlertInput,
 } from "@/infrastructure/crm-workspace-contract";
 import { getCrmWorkspaceRepository } from "@/infrastructure/crm-workspace-provider";
@@ -17,6 +18,7 @@ import { CRM_SESSION_COOKIE, readSessionToken } from "@/lib/crm-auth";
 
 type WorkspaceAction =
   | { action: "create_contact"; record: Omit<CrmContactRecord, "id"> }
+  | { action: "create_manual_customer"; customer: ManualCustomerInput }
   | { action: "create_manual_alert"; alert: ManualRepurchaseAlertInput }
   | { action: "update_customer_contact"; contact: CustomerContactUpdateInput }
   | { action: "update_alert"; id: string; status: RepurchaseAlertStatus }
@@ -103,6 +105,11 @@ export async function POST(request: Request) {
           await repository.createContact(command.record),
           { status: 201 },
         );
+      case "create_manual_customer":
+        return Response.json(
+          await repository.createManualCustomer(command.customer),
+          { status: 201 },
+        );
       case "create_manual_alert":
         return Response.json(
           await repository.createManualAlert(command.alert),
@@ -180,6 +187,9 @@ async function denyUnauthorizedChange(
       assignedSellerId = getSellerCustomerIds(allowedSellerId, snapshot).has(command.record.customerId)
         ? allowedSellerId
         : undefined;
+      break;
+    case "create_manual_customer":
+      assignedSellerId = command.customer.sellerId || allowedSellerId;
       break;
     case "create_manual_alert":
       assignedSellerId =

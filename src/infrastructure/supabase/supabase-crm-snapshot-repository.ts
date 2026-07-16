@@ -32,7 +32,7 @@ import { SupabaseRestClient } from "./supabase-rest-client";
 
 type ClientRow = {
   id: string;
-  uniplus_id: number;
+  uniplus_id: number | null;
   codigo: string | null;
   nome: string;
   razao_social: string | null;
@@ -324,7 +324,7 @@ function mapCustomers(
     soldAt: dateOnly(sale.data_venda),
     includedAt: dateOnly(sale.data_venda),
     changedAt: dateOnly(sale.data_venda),
-    clientId: clients.find((client) => client.id === sale.cliente_id)?.uniplus_id,
+    clientId: clients.find((client) => client.id === sale.cliente_id)?.uniplus_id ?? undefined,
     sellerId: sellers.find((seller) => seller.id === sale.vendedor_id)?.uniplus_id,
     totalValue: Number(sale.valor_total ?? 0),
     discountValue: Number(sale.valor_desconto ?? 0),
@@ -357,7 +357,7 @@ function mapCustomers(
 
     return {
       id: client.id,
-      uniplusId: client.uniplus_id,
+      uniplusId: client.uniplus_id ?? 0,
       code: client.codigo ?? "",
       name: client.nome,
       legalName: client.razao_social ?? "",
@@ -381,7 +381,9 @@ function mapCustomers(
       registrationQualityStatus: client.qualidade_cadastro_status ?? "ruim",
       activityStatus,
       daysWithoutPurchase,
-      preferredSeller: calculatePreferredSeller(client.uniplus_id, sourceSales, sourceSellers),
+      preferredSeller: client.uniplus_id
+        ? calculatePreferredSeller(client.uniplus_id, sourceSales, sourceSellers)
+        : undefined,
       totalPurchases: clientSales.length,
       totalPurchased,
       averageTicket,

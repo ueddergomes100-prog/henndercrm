@@ -130,6 +130,28 @@ type ManagedCrmUser = {
   sellerId?: string | null;
   active: boolean;
 };
+type ManualCustomerSaveResult = {
+  id: string;
+  uniplusId: number | null;
+  name: string;
+  phone: string;
+  whatsapp: string;
+  city: string;
+  category: string;
+  purchaseCycleDays: number;
+  qualityScore: number;
+  qualityStatus: CustomerRow["qualityStatus"];
+  sellerId?: string;
+  sellerName?: string;
+};
+type CrmNotification = {
+  id: string;
+  title: string;
+  description: string;
+  tone: "red" | "amber" | "cyan" | "emerald";
+  customerId?: string;
+  view?: View;
+};
 type SyncLogResponse = {
   date: string;
   window?: {
@@ -454,6 +476,7 @@ export default function Home() {
     appCustomers[0] ??
     selectedCustomer;
   const visibleView = canAccessView(user, activeView) ? activeView : "dashboard";
+  const notifications = buildTopbarNotifications(appCustomers, appAlerts, appContactRecords, scopedData.agenda);
 
   if (!safeSelectedCustomer) {
     return (
@@ -480,6 +503,28 @@ export default function Home() {
         ? current
         : [saved, ...current],
     );
+  };
+
+  const createManualCustomer = async (customer: CustomerRow) => {
+    const saved = await mutateWorkspace<ManualCustomerSaveResult>({
+      action: "create_manual_customer",
+      customer: {
+        name: customer.name,
+        phone: customer.phone,
+        whatsapp: customer.whatsapp,
+        city: customer.city,
+        category: customer.category,
+        purchaseCycleDays: customer.purchaseCycleDays,
+        sellerId: customer.preferredSellerId,
+      },
+    });
+    const persistedCustomer = materializeManualCustomer(customer, saved);
+    setManualCustomers((current) => [
+      persistedCustomer,
+      ...current.filter((item) => item.id !== customer.id && item.id !== persistedCustomer.id),
+    ]);
+    setSelectedCustomer(persistedCustomer);
+    setActiveView("perfil");
   };
 
   const updateAlertStatus = async (id: string, status: RepurchaseAlertStatus) => {
@@ -616,7 +661,9 @@ export default function Home() {
             onThemeChange={changeTheme}
             user={user}
             customers={appCustomers}
+            notifications={notifications}
             onOpenCustomer={openProfile}
+            onOpenView={(view) => setActiveView(view)}
             onQuickAction={setQuickAction}
             onLogout={async () => {
               setIsSigningOut(true);
@@ -737,7 +784,16 @@ export default function Home() {
             {visibleView === "vendedores" && <SellersModule customers={appCustomers} alerts={appAlerts} />}
             {visibleView === "saude" && <DataHealth customers={appCustomers} openProfile={openProfile} />}
             {visibleView === "atividades" && <ActivitiesModule contactRecords={appContactRecords} user={user} />}
-            {visibleView === "campanhas" && <CampaignsModule customers={appCustomers} alerts={appAlerts} />}
+            {visibleView === "campanhas" && (
+              <CampaignsModule
+                customers={appCustomers}
+                alerts={appAlerts}
+                user={user}
+                openProfile={openProfile}
+                onUpdateContact={updateCustomerContact}
+                onRegisterContact={registerContact}
+              />
+            )}
             {visibleView === "oportunidades" && (
             <Opportunities
               items={scopedData.opportunities}
@@ -798,11 +854,7 @@ export default function Home() {
         products={scopedData.products}
         onClose={() => setQuickAction(null)}
         onGoTo={(view) => setActiveView(view)}
-        onCreateCustomer={(customer) => {
-          setManualCustomers((current) => [customer, ...current]);
-          setSelectedCustomer(customer);
-          setActiveView("perfil");
-        }}
+        onCreateCustomer={createManualCustomer}
         onCreateAlert={async (alert) => {
           await createManualAlert(alert);
           setActiveView("recompra");
@@ -932,6 +984,92 @@ function patchCustomerContact(customer: CustomerRow, update?: CustomerContactUpd
     phone: update.phone || customer.phone,
     whatsapp: update.whatsapp || customer.whatsapp,
   };
+}
+
+function materializeManualCustomer(
+  draft: CustomerRow,
+  saved: ManualCustomerSaveResult,
+): CustomerRow {
+  return {
+    ...draft,
+    id: saved.id,
+    uniplusId: saved.uniplusId ?? 0,
+    name: saved.name,
+    phone: saved.phone || draft.phone,
+    whatsapp: saved.whatsapp || draft.whatsapp,
+    city: saved.city || draft.city,
+    category: saved.category || draft.category,
+    preferredSeller: saved.sellerName ?? draft.preferredSeller,
+    preferredSellerId: saved.sellerId ?? draft.preferredSellerId,
+    qualityScore: saved.qualityScore || draft.qualityScore,
+    qualityStatus: saved.qualityStatus || draft.qualityStatus,
+    purchaseCycleDays: saved.purchaseCycleDays || draft.purchaseCycleDays,
+  };
+}
+
+function buildTopbarNotifications(
+  scopedCustomers: CustomerRow[],
+  scopedAlerts: AlertRow[],
+  scopedContacts: ContactRecord[],
+  scopedAgenda: CrmAgendaEvent[],
+): CrmNotification[] {
+  const contactedCustomerIds = new Set(scopedContacts.map((record) => record.customerId));
+  const pendingAlerts = scopedAlerts.filter((alert) => alert.status === "pendente");
+  const overdueAlerts = pendingAlerts
+    .filter((alert) => alert.recommendedIso < crmReferenceDate)
+    .sort(compareAlertPriority)
+    .slice(0, 3)
+    .map((alert) => ({
+      id: `overdue-alert-${alert.id}`,
+      title: `Recompra atrasada: ${alert.client}`,
+      description: `${alert.product} estava previsto para ${alert.recommended}.`,
+      tone: "red" as const,
+      customerId: alert.customerId,
+    }));
+  const todayAlerts = pendingAlerts
+    .filter((alert) => alert.recommendedIso === crmReferenceDate)
+    .sort(compareAlertPriority)
+    .slice(0, 3)
+    .map((alert) => ({
+      id: `today-alert-${alert.id}`,
+      title: `Contato de hoje: ${alert.client}`,
+      description: `${alert.product} com prioridade ${alert.priority.toLowerCase()}.`,
+      tone: "amber" as const,
+      customerId: alert.customerId,
+    }));
+  const weakRegistration = scopedCustomers
+    .filter((customer) => (!customer.whatsapp || customer.qualityScore < 70) && !contactedCustomerIds.has(customer.id))
+    .sort((left, right) => left.qualityScore - right.qualityScore)
+    .slice(0, 2)
+    .map((customer) => ({
+      id: `weak-registration-${customer.id}`,
+      title: `Cadastro para revisar: ${customer.name}`,
+      description: customer.whatsapp ? `Qualidade ${customer.qualityScore}%.` : "Sem WhatsApp valido.",
+      tone: "cyan" as const,
+      customerId: customer.id,
+    }));
+  const todayAgenda = scopedAgenda
+    .filter((event) => event.date === crmReferenceDate)
+    .slice(0, 2)
+    .map((event) => ({
+      id: `agenda-${event.id}`,
+      title: `${event.time} - ${event.title}`,
+      description: `Compromisso de ${event.type.toLowerCase()} na agenda comercial.`,
+      tone: "emerald" as const,
+      customerId: event.customerId,
+      view: "agenda" as View,
+    }));
+
+  return [...overdueAlerts, ...todayAlerts, ...todayAgenda, ...weakRegistration];
+}
+
+function notificationToneClass(tone: CrmNotification["tone"]) {
+  return {
+    red: "bg-red-500",
+    amber: "bg-amber-400",
+    cyan: "bg-cyan-500",
+    emerald: "bg-emerald-500",
+  }[tone];
 }
 
 function filterContactRecordsForData(records: ContactRecord[], scopedCustomers: CustomerRow[]) {
@@ -1076,7 +1214,7 @@ function QuickActionModals({
   products: ProductRow[];
   onClose: () => void;
   onGoTo: (view: View) => void;
-  onCreateCustomer: (customer: CustomerRow) => void;
+  onCreateCustomer: (customer: CustomerRow) => Promise<void>;
   onCreateAlert: (alert: AlertRow, note?: string) => Promise<void>;
   onCreateAgenda: (event: Omit<CrmAgendaEvent, "id">) => Promise<void>;
   onCreateOpportunity: (opportunity: Omit<CrmOpportunity, "id">) => Promise<void>;
@@ -1091,8 +1229,8 @@ function QuickActionModals({
         user={user}
         sellers={availableSellers}
         onClose={onClose}
-        onSave={(customer) => {
-          onCreateCustomer(customer);
+        onSave={async (customer) => {
+          await onCreateCustomer(customer);
           onClose();
         }}
       />
@@ -1169,7 +1307,7 @@ function ManualCustomerModal({
   user: CrmSessionUser;
   sellers: SellerRow[];
   onClose: () => void;
-  onSave: (customer: CustomerRow) => void;
+  onSave: (customer: CustomerRow) => Promise<void>;
 }) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -1178,19 +1316,33 @@ function ManualCustomerModal({
   const defaultSeller = resolveSellerForUser(user.sellerId) ?? sellers[0];
   const [sellerId, setSellerId] = useState(defaultSeller?.id ?? "");
   const [cycleDays, setCycleDays] = useState("45");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
   return (
     <ModalFrame title="Cadastrar cliente manual" onClose={onClose}>
       <form
         className="grid gap-4"
-        onSubmit={(event) => {
+        onSubmit={async (event) => {
           event.preventDefault();
           const seller = sellers.find((item) => item.id === sellerId);
           const normalized = normalizeBrazilianWhatsAppNumber(phone);
+          const parsedCycleDays = Number(cycleDays);
+          if (!name.trim()) {
+            setError("Informe o nome do cliente.");
+            return;
+          }
+          if (!Number.isFinite(parsedCycleDays) || parsedCycleDays <= 0) {
+            setError("Informe um ciclo estimado maior que zero.");
+            return;
+          }
           const qualityScore = normalized ? 70 : 45;
-          onSave({
+          setSaving(true);
+          setError("");
+          try {
+            await onSave({
             id: `manual-customer-${Date.now()}`,
-            uniplusId: Date.now(),
+            uniplusId: 0,
             name: name.trim(),
             phone: phone.trim(),
             whatsapp: normalized ? phone.trim() : "",
@@ -1217,10 +1369,15 @@ function ManualCustomerModal({
             sellerAffinity: seller ? 100 : 0,
             qualityScore,
             qualityStatus: qualityScore >= 70 ? "bom" : "regular",
-            purchaseCycleDays: Number(cycleDays) || 45,
+            purchaseCycleDays: parsedCycleDays,
             totalPurchases: 0,
             totalPurchased: formatCurrency(0),
           });
+          } catch (saveError) {
+            setError(saveError instanceof Error ? saveError.message : "Falha ao salvar cliente.");
+          } finally {
+            setSaving(false);
+          }
         }}
       >
         <FormInput label="Nome do cliente" value={name} onChange={setName} />
@@ -1236,9 +1393,9 @@ function ManualCustomerModal({
           </FormSelect>
         </div>
         <p className="rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs leading-5 text-cyan-800">
-          Cadastro operacional de sessao. A fonte oficial do cliente continuara sendo o ERP quando o Sync Agent estiver ativo.
+          Cadastro operacional salvo no Supabase. Quando o ERP trouxer uma venda desse cliente, o Hennder Sync passa a enriquecer o historico automaticamente.
         </p>
-        <ModalActions saving={false} error="" onClose={onClose} />
+        <ModalActions saving={saving} error={error} onClose={onClose} />
       </form>
     </ModalFrame>
   );
@@ -1495,7 +1652,7 @@ function LoginScreen({
             </form>
             {!isProduction && (
             <div className="mt-5 rounded-lg border border-white/10 bg-white/5 p-3 text-xs leading-5 text-slate-300">
-              <p className="font-semibold text-white">Acessos de demonstração</p>
+              <p className="font-semibold text-white">Acessos locais de desenvolvimento</p>
               <p>Administrador: admin@henndercrm.local / Admin@123</p>
               <p>Supervisor: supervisor@henndercrm.local / Supervisor@123</p>
               <p>Vendedor: vendedor@henndercrm.local / Vendedor@123</p>
@@ -1627,7 +1784,9 @@ function Topbar({
   onThemeChange,
   user,
   customers,
+  notifications,
   onOpenCustomer,
+  onOpenView,
   onQuickAction,
   onLogout,
 }: {
@@ -1636,7 +1795,9 @@ function Topbar({
   onThemeChange: (theme: Theme) => void;
   user: CrmSessionUser;
   customers: CustomerRow[];
+  notifications: CrmNotification[];
   onOpenCustomer: (customer: CustomerRow) => void;
+  onOpenView: (view: View) => void;
   onQuickAction: (action: QuickAction) => void;
   onLogout: () => Promise<void>;
 }) {
@@ -1644,9 +1805,11 @@ function Topbar({
   const ThemeIcon = theme === "dark" ? Sun : Moon;
   const themeLabel = theme === "dark" ? "Ativar tema claro" : "Ativar tema escuro";
   const [actionOpen, setActionOpen] = useState(false);
+  const [notificationOpen, setNotificationOpen] = useState(false);
   const [customerSearch, setCustomerSearch] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const quickActionRef = useRef<HTMLDivElement>(null);
+  const notificationRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLDivElement>(null);
   const normalizedCustomerSearch = normalizeManualAlertSearch(customerSearch.trim());
   const customerSearchResults = normalizedCustomerSearch.length >= 2
@@ -1697,10 +1860,37 @@ function Topbar({
     return () => document.removeEventListener("pointerdown", handlePointerDown);
   }, [searchOpen]);
 
+  useEffect(() => {
+    if (!notificationOpen) {
+      return;
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      if (!notificationRef.current?.contains(event.target as Node)) {
+        setNotificationOpen(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [notificationOpen]);
+
   function openCustomerFromSearch(customer: CustomerRow) {
     onOpenCustomer(customer);
     setCustomerSearch("");
     setSearchOpen(false);
+  }
+
+  function openNotification(notification: CrmNotification) {
+    const customer = notification.customerId
+      ? customers.find((item) => item.id === notification.customerId)
+      : undefined;
+    if (customer) {
+      onOpenCustomer(customer);
+    } else if (notification.view) {
+      onOpenView(notification.view);
+    }
+    setNotificationOpen(false);
   }
 
   return (
@@ -1835,13 +2025,55 @@ function Topbar({
               </motion.div>
             )}
           </div>
-          <button
-            type="button"
-            aria-label="Abrir notificações"
-            className="flex h-10 w-10 items-center justify-center rounded-lg border border-white/15 bg-white/10 text-white"
-          >
-            <Bell size={18} />
-          </button>
+          <div ref={notificationRef} className="relative">
+            <button
+              type="button"
+              aria-label="Abrir notificacoes"
+              onClick={() => setNotificationOpen((current) => !current)}
+              className="relative flex h-10 w-10 items-center justify-center rounded-lg border border-white/15 bg-white/10 text-white transition hover:bg-white/15"
+            >
+              <Bell size={18} />
+              {notifications.length > 0 && (
+                <span className="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full bg-amber-300 px-1 text-[10px] font-black text-amber-950">
+                  {Math.min(9, notifications.length)}
+                </span>
+              )}
+            </button>
+            {notificationOpen && (
+              <motion.div
+                initial={{ opacity: 0, y: -6, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                className="absolute right-0 top-12 z-40 w-80 overflow-hidden rounded-xl border border-blue-100 bg-white p-2 text-slate-900 shadow-2xl"
+              >
+                <div className="px-3 py-2">
+                  <p className="text-sm font-black text-[#123252]">Notificacoes comerciais</p>
+                  <p className="mt-1 text-xs text-slate-500">Resumo rapido de hoje, atrasos e cadastros para revisar.</p>
+                </div>
+                {notifications.length ? (
+                  <div className="max-h-96 space-y-1 overflow-y-auto pr-1">
+                    {notifications.slice(0, 8).map((notification) => (
+                      <button
+                        key={notification.id}
+                        type="button"
+                        onClick={() => openNotification(notification)}
+                        className="grid w-full gap-1 rounded-lg px-3 py-3 text-left transition hover:bg-cyan-50"
+                      >
+                        <span className="flex items-center gap-2">
+                          <span className={`h-2.5 w-2.5 rounded-full ${notificationToneClass(notification.tone)}`} />
+                          <span className="min-w-0 truncate text-sm font-bold text-[#123252]">{notification.title}</span>
+                        </span>
+                        <span className="text-xs leading-5 text-slate-500">{notification.description}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-4 text-sm text-emerald-800">
+                    Nada urgente agora. A rotina comercial esta em dia.
+                  </p>
+                )}
+              </motion.div>
+            )}
+          </div>
           <div className="flex h-10 items-center gap-2 rounded-lg border border-white/15 bg-white/10 px-2">
             <div className="flex h-7 w-7 items-center justify-center rounded-md bg-cyan-400 text-xs font-bold text-[#06356c]">
               {user.name
@@ -2531,62 +2763,143 @@ function ActivitiesModule({
   );
 }
 
-function CampaignsModule({ customers, alerts }: { customers: CustomerRow[]; alerts: AlertRow[] }) {
-  const campaigns = [
-    {
-      name: "Clientes sem compra há 60 dias",
-      audience: customers.filter((customer) => customer.days >= 60).length,
-      period: "Mensal",
-      status: "Planejada",
-      result: "Aguardando disparo",
-    },
-    {
-      name: "Recompra de produtos recorrentes",
-      audience: new Set(alerts.map((alert) => alert.customerId)).size,
-      period: "Semanal",
-      status: "Ativa",
-      result: `${alerts.filter((alert) => alert.status === "convertido").length} conversões`,
-    },
-    {
-      name: "Atualização cadastral",
-      audience: customers.filter((customer) => !customer.whatsapp || customer.qualityScore < 70).length,
-      period: "Pontual",
-      status: "Sugestão",
-      result: "Qualificar WhatsApp e cidade",
-    },
-    {
-      name: "Grande chance de conversão",
-      audience: customers.filter((customer) => customer.score >= 75).length,
-      period: "Quinzenal",
-      status: "Planejada",
-      result: "Abordagem consultiva",
-    },
-  ];
+function CampaignsModule({
+  customers,
+  alerts,
+  user,
+  openProfile,
+  onUpdateContact,
+  onRegisterContact,
+}: {
+  customers: CustomerRow[];
+  alerts: AlertRow[];
+  user: CrmSessionUser;
+  openProfile: (customer: CustomerRow) => void;
+  onUpdateContact: (customer: CustomerRow, phone: string) => Promise<void>;
+  onRegisterContact: (record: Omit<ContactRecord, "id">) => Promise<void>;
+}) {
+  const campaignDefinitions = buildCampaignDefinitions(customers, alerts);
+  const [selectedCampaignId, setSelectedCampaignId] = useState(campaignDefinitions[0]?.id ?? "");
+  const selectedCampaign =
+    campaignDefinitions.find((campaign) => campaign.id === selectedCampaignId) ??
+    campaignDefinitions[0];
 
   return (
     <div className="space-y-5">
-      <PageTitle eyebrow="Inteligência" title="Campanhas" description="Estrutura inicial para ações comerciais em lote com público, período e resultado." />
-      <Panel title="Campanhas comerciais" icon={Sparkles} action={`${campaigns.length} modelos`}>
-        <div className="grid gap-4 xl:grid-cols-2">
-          {campaigns.map((campaign) => (
-            <div key={campaign.name} className="rounded-xl border border-blue-100 bg-white p-4 shadow-sm">
+      <PageTitle eyebrow="Inteligencia" title="Campanhas" description="Publicos comerciais prontos para acao manual, sem disparo automatico de mensagens." />
+      <Panel title="Campanhas comerciais" icon={Sparkles} action={`${campaignDefinitions.length} modelos`}>
+        <div className="grid gap-4 xl:grid-cols-4">
+          {campaignDefinitions.map((campaign) => (
+            <button
+              key={campaign.id}
+              type="button"
+              onClick={() => setSelectedCampaignId(campaign.id)}
+              className={`rounded-xl border p-4 text-left shadow-sm transition ${
+                selectedCampaign?.id === campaign.id
+                  ? "border-cyan-400 bg-cyan-50"
+                  : "border-blue-100 bg-white hover:border-cyan-300 hover:bg-[#f8fbff]"
+              }`}
+            >
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="font-black text-[#123252]">{campaign.name}</p>
-                  <p className="mt-1 text-sm text-slate-500">Público-alvo: {campaign.audience} cliente(s)</p>
+                  <p className="mt-1 text-sm text-slate-500">{campaign.description}</p>
                 </div>
-                <span className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-bold text-cyan-700">{campaign.status}</span>
+                <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-cyan-700">{campaign.status}</span>
               </div>
               <div className="mt-4 grid grid-cols-2 gap-3">
-                <MiniStat label="Período" value={campaign.period} />
-                <MiniStat label="Resultado" value={campaign.result} />
+                <MiniStat label="Publico" value={`${campaign.audience.length}`} />
+                <MiniStat label="Ritmo" value={campaign.period} />
               </div>
-            </div>
+            </button>
           ))}
         </div>
       </Panel>
+
+      <Panel title={selectedCampaign?.name ?? "Publico da campanha"} icon={UsersRound} action="20 primeiros">
+        {selectedCampaign ? (
+          <div className="space-y-3">
+            <div className="rounded-lg border border-blue-50 bg-[#f8fbff] px-3 py-2 text-sm leading-6 text-slate-600">
+              {selectedCampaign.playbook}
+            </div>
+            {selectedCampaign.audience.slice(0, 20).map((customer) => (
+              <div key={customer.id} className="grid gap-3 rounded-lg border border-blue-50 bg-white p-3 md:grid-cols-[1fr_auto] md:items-center">
+                <button type="button" onClick={() => openProfile(customer)} className="min-w-0 text-left">
+                  <p className="truncate font-bold text-[#123252]">{customer.name}</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {customer.days} dias sem compra - {customer.preferredSeller} - potencial {customer.potential}
+                  </p>
+                </button>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => openProfile(customer)}
+                    className="h-10 rounded-lg border border-blue-100 bg-white px-3 text-xs font-bold text-[#0753a6] hover:bg-cyan-50"
+                  >
+                    Perfil
+                  </button>
+                  <WhatsAppButton
+                    customer={customer}
+                    user={user}
+                    onUpdateContact={onUpdateContact}
+                    onRegisterContact={onRegisterContact}
+                    compact
+                  />
+                </div>
+              </div>
+            ))}
+            {!selectedCampaign.audience.length && <EmptyState text="Nenhum cliente entrou neste publico com os filtros atuais." />}
+          </div>
+        ) : (
+          <EmptyState text="Nenhuma campanha disponivel." />
+        )}
+      </Panel>
     </div>
   );
+}
+
+function buildCampaignDefinitions(customers: CustomerRow[], alerts: AlertRow[]) {
+  const customerById = new Map(customers.map((customer) => [customer.id, customer]));
+  const repurchaseCustomerIds = new Set(alerts.filter((alert) => alert.status === "pendente").map((alert) => alert.customerId));
+
+  return [
+    {
+      id: "inactive-60",
+      name: "Clientes sem compra ha 60 dias",
+      description: "Recuperacao de clientes parados.",
+      period: "Semanal",
+      status: "Prioridade",
+      playbook: "Comece pelos clientes com maior potencial e WhatsApp valido. A conversa deve lembrar o historico de compra e oferecer ajuda objetiva.",
+      audience: customers.filter((customer) => customer.days >= 60).sort((left, right) => right.potentialValue - left.potentialValue),
+    },
+    {
+      id: "repurchase",
+      name: "Recompra de produtos recorrentes",
+      description: "Clientes com alerta pendente.",
+      period: "Diario",
+      status: "Ativa",
+      playbook: "Use o produto do alerta como gancho. Confirme se o item esta acabando e ja sugira reposicao.",
+      audience: [...repurchaseCustomerIds].flatMap((customerId) => customerById.get(customerId) ?? []),
+    },
+    {
+      id: "registration",
+      name: "Atualizacao cadastral",
+      description: "WhatsApp ausente ou qualidade baixa.",
+      period: "Pontual",
+      status: "Saneamento",
+      playbook: "Antes de campanha grande, corrija WhatsApp/celular. Isso evita perder contato por dado ruim.",
+      audience: customers.filter((customer) => !customer.whatsapp || customer.qualityScore < 70),
+    },
+    {
+      id: "conversion",
+      name: "Grande chance de conversao",
+      description: "Score comercial alto.",
+      period: "Quinzenal",
+      status: "Consultiva",
+      playbook: "Abordagem consultiva: relembre compras anteriores e ofereca itens complementares sem parecer mensagem em massa.",
+      audience: customers.filter((customer) => customer.score >= 75).sort((left, right) => right.score - left.score),
+    },
+  ];
 }
 
 function RepurchaseEngineModule({ alerts, user }: { alerts: AlertRow[]; user: CrmSessionUser }) {
@@ -2905,13 +3218,15 @@ function SettingsModule({
   onUserChange: (user: CrmSessionUser) => void;
 }) {
   const settings = [
-    ["Usuários", "Perfis de administrador, supervisor e vendedor."],
-    ["Permissões", "Estrutura preparada para ocultar menus por perfil."],
-    ["Empresa", "Parâmetros comerciais e preferências do sistema."],
-    ["Atribuição", "Janela e regras para reconhecer conversões do CRM."],
-    ["Integração", "Configurações futuras do Sync Agent local."],
-    ["Preferências", "Tema, notificações e comportamento operacional."],
+    { id: "usuarios", title: "Usuarios", description: "Perfis de administrador, supervisor e vendedor." },
+    { id: "permissoes", title: "Permissoes", description: "Menus e operacoes liberadas por perfil." },
+    { id: "empresa", title: "Empresa", description: "Parametros comerciais e identidade operacional." },
+    { id: "atribuicao", title: "Atribuicao", description: "Janela e regras para reconhecer conversoes do CRM." },
+    { id: "integracao", title: "Integracao", description: "Hennder Sync, Supabase e ERP Uniplus." },
+    { id: "preferencias", title: "Preferencias", description: "Tema, notificacoes e comportamento da rotina." },
   ];
+  const [selectedSettingId, setSelectedSettingId] = useState(settings[0].id);
+  const selectedSetting = settings.find((item) => item.id === selectedSettingId) ?? settings[0];
 
   return (
     <div className="space-y-5">
@@ -2919,16 +3234,72 @@ function SettingsModule({
       <PageTitle eyebrow="Sistema" title="Configurações" description="Parâmetros operacionais, usuários, permissões e integração." />
       <Panel title="Central de configurações" icon={Settings}>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {settings.map(([title, description]) => (
-            <div key={title} className="rounded-xl border border-blue-100 bg-[#f8fbff] p-4">
-              <p className="font-black text-[#123252]">{title}</p>
-              <p className="mt-2 text-sm leading-6 text-slate-500">{description}</p>
-            </div>
+          {settings.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => setSelectedSettingId(item.id)}
+              className={`rounded-xl border p-4 text-left transition ${
+                selectedSetting.id === item.id
+                  ? "border-cyan-400 bg-cyan-50"
+                  : "border-blue-100 bg-[#f8fbff] hover:border-cyan-300 hover:bg-white"
+              }`}
+            >
+              <p className="font-black text-[#123252]">{item.title}</p>
+              <p className="mt-2 text-sm leading-6 text-slate-500">{item.description}</p>
+            </button>
           ))}
         </div>
       </Panel>
+      <Panel title={selectedSetting.title} icon={SlidersHorizontal} action="Configurado">
+        <SimpleRows
+          rows={getSettingsRows(selectedSetting.id, user, sellers)}
+          empty="Sem parametros para exibir."
+        />
+      </Panel>
     </div>
   );
+}
+
+function getSettingsRows(
+  settingId: string,
+  user: CrmSessionUser,
+  sellersList: SellerRow[],
+): Array<Array<string | number>> {
+  const rows: Record<string, Array<Array<string | number>>> = {
+    usuarios: [
+      ["Administrador", "Gerencia usuarios e configuracoes", user.role === "administrador" ? "Seu perfil" : "Ativo"],
+      ["Supervisor", "Acompanha resultados e equipe", "Sem configuracoes sensiveis"],
+      ["Vendedor", "Acessa somente sua carteira", `${sellersList.length} vendedor(es)`],
+    ],
+    permissoes: [
+      ["Administrador", "Acesso total", "Protegido"],
+      ["Supervisor", "Sem configuracoes", "Operacional"],
+      ["Vendedor", "Dashboard, clientes, vendas, recompra, agenda e IA", "Carteira filtrada"],
+    ],
+    empresa: [
+      ["Nome comercial", "Shopping Rural", "Usado nas mensagens manuais"],
+      ["Horario de operacao", "07:00 as 19:00", "Sync do dia"],
+      ["Moeda", "BRL", "Relatorios e resultados"],
+    ],
+    atribuicao: [
+      ["0 a 10 dias", "100% como faturamento recuperado", "Janela forte"],
+      ["11 a 20 dias", "75% como faturamento influenciado", "Janela media"],
+      ["21 a 30 dias", "50% como faturamento influenciado", "Janela leve"],
+    ],
+    integracao: [
+      ["Origem", "PostgreSQL local do Uniplus", "Hennder Sync"],
+      ["Destino", "Supabase em nuvem", "Frontend web"],
+      ["Frequencia", "A cada 5 minutos em horario comercial", "Sem sobrecarga"],
+    ],
+    preferencias: [
+      ["Tema", "Alternancia por icone no topo", "Salvo no navegador"],
+      ["Notificacoes", "Sino com alertas de hoje, atrasos e cadastros", "Ativo"],
+      ["Mensagens automaticas", "Reservado para etapa final com automacao", "Pendente"],
+    ],
+  };
+
+  return rows[settingId] ?? [];
 }
 
 function UserManagementPanel({
@@ -2951,6 +3322,9 @@ function UserManagementPanel({
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [editingUserName, setEditingUserName] = useState("");
+  const [editingUserRole, setEditingUserRole] = useState<CrmUserRole>("vendedor");
+  const [editingUserSellerId, setEditingUserSellerId] = useState("");
+  const [editingUserPassword, setEditingUserPassword] = useState("");
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
   const [userMessage, setUserMessage] = useState("");
   const [userError, setUserError] = useState("");
@@ -3048,19 +3422,26 @@ function UserManagementPanel({
   function startEditingUserName(managedUser: ManagedCrmUser) {
     setEditingUserId(managedUser.id);
     setEditingUserName(managedUser.name);
+    setEditingUserRole(managedUser.role);
+    setEditingUserSellerId(managedUser.sellerId ?? sellers[0]?.id ?? "");
+    setEditingUserPassword("");
     setUserError("");
     setUserMessage("");
   }
 
   async function updateUserName(managedUser: ManagedCrmUser) {
     const nextName = editingUserName.trim();
+    const nextPassword = editingUserPassword.trim();
     if (!nextName) {
       setUserError("Informe o nome do usuario.");
       return;
     }
-    if (nextName === managedUser.name) {
-      setEditingUserId(null);
-      setEditingUserName("");
+    if (editingUserRole === "vendedor" && !editingUserSellerId) {
+      setUserError("Vincule um vendedor para o perfil vendedor.");
+      return;
+    }
+    if (nextPassword && nextPassword.length < 8) {
+      setUserError("A senha deve ter pelo menos 8 caracteres.");
       return;
     }
 
@@ -3075,6 +3456,9 @@ function UserManagementPanel({
         body: JSON.stringify({
           id: managedUser.id,
           name: nextName,
+          role: editingUserRole,
+          sellerId: editingUserRole === "vendedor" ? editingUserSellerId : null,
+          ...(nextPassword ? { password: nextPassword } : {}),
         }),
       });
       const result = (await response.json()) as {
@@ -3092,7 +3476,8 @@ function UserManagementPanel({
       }
       setEditingUserId(null);
       setEditingUserName("");
-      setUserMessage("Nome do usuario atualizado com sucesso.");
+      setEditingUserPassword("");
+      setUserMessage("Usuario atualizado com sucesso.");
     } catch (error) {
       setUserError(error instanceof Error ? error.message : "Falha ao atualizar usuário.");
     } finally {
@@ -3158,43 +3543,73 @@ function UserManagementPanel({
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
                       {editingThisUser ? (
-                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                          <input
-                            value={editingUserName}
-                            onChange={(event) => setEditingUserName(event.target.value)}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter") {
-                                event.preventDefault();
-                                void updateUserName(managedUser);
-                              }
-                              if (event.key === "Escape") {
-                                setEditingUserId(null);
-                                setEditingUserName("");
-                              }
-                            }}
-                            className="h-10 min-w-0 flex-1 rounded-lg border border-cyan-200 bg-white px-3 text-sm font-bold text-[#123252] outline-none focus:border-cyan-500"
-                          />
-                          <div className="flex gap-2">
-                            <button
-                              type="button"
-                              onClick={() => void updateUserName(managedUser)}
-                              disabled={updatingUserId === managedUser.id}
-                              className="grid size-10 place-items-center rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
-                              title="Salvar nome"
-                            >
-                              <CheckCircle2 size={16} />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEditingUserId(null);
-                                setEditingUserName("");
+                        <div className="grid gap-2">
+                          <div className="grid gap-2 lg:grid-cols-2">
+                            <input
+                              value={editingUserName}
+                              onChange={(event) => setEditingUserName(event.target.value)}
+                              onKeyDown={(event) => {
+                                if (event.key === "Escape") {
+                                  setEditingUserId(null);
+                                  setEditingUserName("");
+                                  setEditingUserPassword("");
+                                }
                               }}
-                              className="grid size-10 place-items-center rounded-lg border border-blue-100 bg-white text-slate-500 hover:bg-slate-50"
-                              title="Cancelar edição"
+                              className="h-10 min-w-0 rounded-lg border border-cyan-200 bg-white px-3 text-sm font-bold text-[#123252] outline-none focus:border-cyan-500"
+                            />
+                            <select
+                              value={editingUserRole}
+                              onChange={(event) => setEditingUserRole(event.target.value as CrmUserRole)}
+                              disabled={managedUser.role === "administrador"}
+                              className="h-10 rounded-lg border border-cyan-200 bg-white px-3 text-sm font-bold text-[#123252] outline-none focus:border-cyan-500 disabled:opacity-60"
                             >
-                              <X size={16} />
-                            </button>
+                              <option value="administrador">Administrador</option>
+                              <option value="supervisor">Supervisor</option>
+                              <option value="vendedor">Vendedor</option>
+                            </select>
+                          </div>
+                          <div className="grid gap-2 lg:grid-cols-[1fr_1fr_auto]">
+                            <select
+                              value={editingUserSellerId}
+                              onChange={(event) => setEditingUserSellerId(event.target.value)}
+                              disabled={editingUserRole !== "vendedor"}
+                              className="h-10 rounded-lg border border-cyan-200 bg-white px-3 text-sm text-[#123252] outline-none focus:border-cyan-500 disabled:opacity-60"
+                            >
+                              <option value="">Sem vendedor vinculado</option>
+                              {sellers.map((sellerOption) => (
+                                <option key={sellerOption.id} value={sellerOption.id}>{sellerOption.name}</option>
+                              ))}
+                            </select>
+                            <input
+                              value={editingUserPassword}
+                              onChange={(event) => setEditingUserPassword(event.target.value)}
+                              type="password"
+                              placeholder="Nova senha opcional"
+                              className="h-10 rounded-lg border border-cyan-200 bg-white px-3 text-sm outline-none focus:border-cyan-500"
+                            />
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                onClick={() => void updateUserName(managedUser)}
+                                disabled={updatingUserId === managedUser.id}
+                                className="grid size-10 place-items-center rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+                                title="Salvar usuario"
+                              >
+                                <CheckCircle2 size={16} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingUserId(null);
+                                  setEditingUserName("");
+                                  setEditingUserPassword("");
+                                }}
+                                className="grid size-10 place-items-center rounded-lg border border-blue-100 bg-white text-slate-500 hover:bg-slate-50"
+                                title="Cancelar edicao"
+                              >
+                                <X size={16} />
+                              </button>
+                            </div>
                           </div>
                         </div>
                       ) : (
@@ -4336,7 +4751,7 @@ function ManualAlertPanel({
                 priority,
                 seller,
               }),
-              `${note.trim()}${alsoWhatsapp ? " Avisar tambem por WhatsApp." : ""}`.trim(),
+              `${note.trim()}${alsoWhatsapp ? " Criar lembrete para contato manual por WhatsApp." : ""}`.trim(),
             );
             setSavedMessage(`Alerta salvo para ${selectedCustomer.name}.`);
             if (!compact) setCustomerId("");
@@ -4712,7 +5127,7 @@ function ManualAlertToggle({ checked, onChange }: { checked: boolean; onChange: 
       <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${checked ? "bg-emerald-100" : "bg-[#f1f8ff]"}`}>
         {checked ? <CheckCircle2 size={16} /> : <MessageCircle size={16} />}
       </span>
-      Avisar tambem por WhatsApp
+      Lembrar contato por WhatsApp
     </button>
   );
 }
@@ -5339,13 +5754,7 @@ function Agenda({
   onDelete: (id: string) => Promise<void>;
 }) {
   const [editing, setEditing] = useState<CrmAgendaEvent | "new" | null>(null);
-  const days = [
-    ["Seg", "2026-06-08"],
-    ["Ter", "2026-06-09"],
-    ["Qua", "2026-06-10"],
-    ["Qui", "2026-06-11"],
-    ["Sex", "2026-06-12"],
-  ] as const;
+  const days = buildWorkWeek(crmReferenceDate);
   const canManage = (event?: CrmAgendaEvent) =>
     user.role !== "vendedor" || !event || event.sellerId === (resolveSellerForUser(user.sellerId)?.id ?? user.sellerId);
 
@@ -5407,6 +5816,21 @@ function Agenda({
       )}
     </div>
   );
+}
+
+function buildWorkWeek(referenceDate: string): Array<[string, string]> {
+  const labels = ["Seg", "Ter", "Qua", "Qui", "Sex"];
+  const reference = new Date(`${referenceDate.slice(0, 10)}T12:00:00Z`);
+  const weekDay = reference.getUTCDay();
+  const mondayOffset = weekDay === 0 ? -6 : 1 - weekDay;
+  const monday = new Date(reference);
+  monday.setUTCDate(reference.getUTCDate() + mondayOffset);
+
+  return labels.map((label, index) => {
+    const day = new Date(monday);
+    day.setUTCDate(monday.getUTCDate() + index);
+    return [label, day.toISOString().slice(0, 10)];
+  });
 }
 
 function OpportunityModal({
@@ -5619,7 +6043,7 @@ function CommercialAi({
           );
         })}
       </div>
-      <Panel title="Chat comercial" icon={Bot} action="IA local orientada por dados">
+      <Panel title="Chat comercial" icon={Bot} action="Dados locais + Obsidian">
         <div className="grid gap-5 lg:grid-cols-[0.75fr_1.25fr]">
           <div className="space-y-3">
             <div className="rounded-xl border border-cyan-100 bg-cyan-50/70 p-4 text-sm leading-6 text-cyan-900">
@@ -6150,7 +6574,7 @@ function PageTitle({ eyebrow, title, description }: { eyebrow: string; title: st
       </div>
       <div className="flex items-center gap-2 rounded-lg border border-blue-100 bg-[#f5faff] px-3 py-2 text-sm font-medium text-[#0753a6]">
         <Activity size={16} className="text-cyan-600" />
-        Dados demonstrativos
+        Dados sincronizados
       </div>
     </div>
   );
@@ -6777,7 +7201,8 @@ type CommercialAiIntent =
   | "seller"
   | "registration"
   | "opportunity"
-  | "potential";
+  | "potential"
+  | "knowledge";
 
 const commercialAiKnowledgeBase: Array<{
   intent: CommercialAiIntent;
@@ -6828,6 +7253,11 @@ const commercialAiKnowledgeBase: Array<{
     intent: "potential",
     menuLabel: "Potencial, receita e faturamento",
     keywords: ["potencial", "faturamento", "receita", "dinheiro", "valor"],
+  },
+  {
+    intent: "knowledge",
+    menuLabel: "Base Obsidian e treinamento do assistente",
+    keywords: ["obsidian", "repositorio", "treinar", "treinamento", "base de conhecimento", "manual"],
   },
 ];
 
@@ -6905,6 +7335,16 @@ function getCommercialAiAnswer(question: string, context: CommercialAiContext) {
 
   if (knowledge?.intent === "help") {
     return getCommercialAiMenuText();
+  }
+
+  if (knowledge?.intent === "knowledge") {
+    return [
+      "O repositório Obsidian do Hennder CRM fica em obsidian/Hennder-CRM-Knowledge.",
+      "",
+      "Ele organiza regras comerciais, Hennder Sync, playbooks, perguntas da IA e pendências de automação. A ideia é manter esse material como fonte viva para o assistente consultar antes de sugerir ações.",
+      "",
+      "Mensagem automática de WhatsApp continua reservada para a etapa final, porque depende de automação e integração externa.",
+    ].join("\n");
   }
 
   if (!context.customers.length && !context.alerts.length) {

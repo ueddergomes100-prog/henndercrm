@@ -8,23 +8,33 @@ import type {
   CrmOpportunity,
   CrmRepurchaseAlert,
   CrmWorkspace,
+  RegistrationQualityStatus,
   RepurchaseAlertStatus,
 } from "@/domain/crm/types";
 import type {
   CustomerContactUpdateInput,
   CustomerContactUpdateResult,
   ICrmWorkspaceRepository,
+  ManualCustomerInput,
+  ManualCustomerResult,
   ManualRepurchaseAlertInput,
 } from "@/infrastructure/crm-workspace-contract";
 import { SupabaseRestClient } from "./supabase-rest-client";
 
-type ClientRow = { id: string; uniplus_id: number; nome: string };
+type ClientRow = { id: string; uniplus_id: number | null; nome: string };
 type ClientContactRow = {
   id: string;
   nome: string;
   telefone: string | null;
   celular: string | null;
   whatsapp: string | null;
+};
+type ManualClientRow = ClientContactRow & {
+  uniplus_id: number | null;
+  data_cadastro: string | null;
+  ciclo_compras: number | null;
+  qualidade_cadastro_score: number | null;
+  qualidade_cadastro_status: RegistrationQualityStatus | null;
 };
 type SellerRow = { id: string; uniplus_id: number; nome: string };
 type ProductRow = { id: string; uniplus_id: number; nome: string; departamento?: string | null };
@@ -216,6 +226,43 @@ export class SupabaseCrmWorkspaceRepository implements ICrmWorkspaceRepository {
       }],
     );
     return { ...input, id: row.id };
+  }
+
+  async createManualCustomer(input: ManualCustomerInput): Promise<ManualCustomerResult> {
+    const name = input.name.trim();
+    if (!name) throw new Error("Informe o nome do cliente.");
+
+    const phone = input.phone?.trim() ?? "";
+    const whatsapp = input.whatsapp?.trim() || phone;
+    const purchaseCycleDays = Math.max(1, Math.round(input.purchaseCycleDays || 45));
+    const seller = input.sellerId ? await this.resolveSeller(input.sellerId) : undefined;
+
+    const [row] = await this.client.insert<ManualClientRow>("crm_clientes", [
+      {
+        nome: name,
+        telefone: phone || whatsapp || null,
+        celular: whatsapp || phone || null,
+        whatsapp: whatsapp || phone || null,
+        data_cadastro: new Date().toISOString(),
+        inativo: false,
+        ciclo_compras: purchaseCycleDays,
+      },
+    ]);
+
+    return {
+      id: row.id,
+      uniplusId: row.uniplus_id,
+      name: row.nome,
+      phone: row.telefone ?? phone,
+      whatsapp: row.whatsapp ?? row.celular ?? whatsapp,
+      city: input.city?.trim() || "Cidade nao informada",
+      category: input.category?.trim() || "Cliente manual",
+      purchaseCycleDays: row.ciclo_compras ?? purchaseCycleDays,
+      qualityScore: row.qualidade_cadastro_score ?? 0,
+      qualityStatus: row.qualidade_cadastro_status ?? "ruim",
+      sellerId: seller?.id,
+      sellerName: seller?.nome,
+    };
   }
 
   async createManualAlert(input: ManualRepurchaseAlertInput) {
