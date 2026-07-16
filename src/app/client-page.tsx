@@ -116,6 +116,7 @@ type SaleItemRow = CrmSaleItem;
 type ProductRow = CrmProduct;
 type SellerRow = CrmSeller;
 type QuickAction = "manual-alert" | "manual-customer" | "opportunity" | "agenda" | "contact";
+const OPPORTUNITY_PAGE_SIZE = 20;
 type ChatMessage = {
   id: string;
   role: "user" | "ai";
@@ -4429,13 +4430,15 @@ function Opportunities({
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<CrmOpportunity["status"] | "todos">("todos");
   const [productFilter, setProductFilter] = useState("todos");
+  const [visibleLimit, setVisibleLimit] = useState(OPPORTUNITY_PAGE_SIZE);
   const allowedSellerId = resolveSellerForUser(user.sellerId)?.id ?? user.sellerId;
   const canManage = (item?: CrmOpportunity) =>
     user.role !== "vendedor" || !item || item.sellerId === allowedSellerId;
-  const opportunityGroups = buildOpportunityGroups(items, customers);
+  const lonaItems = items.filter(isLonaOpportunity);
+  const opportunityGroups = buildOpportunityGroups(lonaItems, customers);
   const productOptions = opportunityGroups.map((group) => group.productName);
   const normalizedQuery = query.trim().toLowerCase();
-  const filteredItems = items.filter((item) => {
+  const filteredItems = lonaItems.filter((item) => {
     const matchesQuery =
       !normalizedQuery ||
       item.customerName.toLowerCase().includes(normalizedQuery) ||
@@ -4445,22 +4448,22 @@ function Opportunities({
     const matchesProduct = productFilter === "todos" || item.suggestedProductName === productFilter;
     return matchesQuery && matchesStatus && matchesProduct;
   });
-  const visibleItems = filteredItems.slice(0, 100);
+  const visibleItems = filteredItems.slice(0, visibleLimit);
 
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <PageTitle eyebrow="Venda cruzada" title="Central de oportunidades" description="Combinações comerciais sugeridas a partir do comportamento de compra." />
+        <PageTitle eyebrow="Venda cruzada" title="Central de oportunidades" description="Oportunidades de Lona sugeridas a partir do comportamento de compra." />
         <button type="button" onClick={() => setEditing("new")} className="flex h-11 shrink-0 items-center justify-center gap-2 rounded-lg bg-[#0753a6] px-4 text-sm font-semibold text-white hover:bg-[#063d7c]">
           <Plus size={17} />
           Nova oportunidade
         </button>
       </div>
       <div className="grid gap-4 md:grid-cols-4">
-        <MetricCard label="Oportunidades" value={`${items.length}`} />
+        <MetricCard label="Oportunidades Lona" value={`${lonaItems.length}`} />
         <MetricCard label="Campanhas sugeridas" value={`${opportunityGroups.length}`} />
-        <MetricCard label="Clientes alvo" value={`${new Set(items.map((item) => item.customerId)).size}`} />
-        <MetricCard label="Confiança média" value={`${average(items.map((item) => item.confidence))}%`} />
+        <MetricCard label="Clientes alvo" value={`${new Set(lonaItems.map((item) => item.customerId)).size}`} />
+        <MetricCard label="Confiança média" value={`${average(lonaItems.map((item) => item.confidence))}%`} />
       </div>
       <Panel title="Campanhas sugeridas" icon={Target} action="Agrupadas por produto">
         <div className="grid gap-3 xl:grid-cols-3">
@@ -4496,25 +4499,42 @@ function Opportunities({
           {!opportunityGroups.length && <EmptyState text="Nenhuma campanha de oportunidade gerada ainda." />}
         </div>
       </Panel>
-      <Panel title="Clientes alvo" icon={ShoppingBag} action={`${visibleItems.length} de ${filteredItems.length} oportunidades`}>
+      <Panel title="Clientes alvo" icon={ShoppingBag} action={`${visibleItems.length} de ${filteredItems.length} oportunidades Lona`}>
         <div className="mb-4 grid gap-3 md:grid-cols-[1.2fr_0.75fr_0.9fr]">
           <div className="flex h-11 items-center gap-2 rounded-lg border border-blue-100 bg-[#f8fbff] px-3 focus-within:border-cyan-400">
             <Search size={17} className="text-slate-400" />
             <input
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setVisibleLimit(OPPORTUNITY_PAGE_SIZE);
+              }}
               placeholder="Cliente, origem ou produto"
               className="w-full bg-transparent text-sm outline-none"
             />
           </div>
-          <FilterSelect label="Status" value={statusFilter} onChange={(value) => setStatusFilter(value as CrmOpportunity["status"] | "todos")}>
+          <FilterSelect
+            label="Status"
+            value={statusFilter}
+            onChange={(value) => {
+              setStatusFilter(value as CrmOpportunity["status"] | "todos");
+              setVisibleLimit(OPPORTUNITY_PAGE_SIZE);
+            }}
+          >
             <option value="todos">Todos</option>
             <option value="aberta">Aberta</option>
             <option value="em_contato">Em contato</option>
             <option value="convertida">Convertida</option>
             <option value="descartada">Descartada</option>
           </FilterSelect>
-          <FilterSelect label="Produto sugerido" value={productFilter} onChange={setProductFilter}>
+          <FilterSelect
+            label="Produto sugerido"
+            value={productFilter}
+            onChange={(value) => {
+              setProductFilter(value);
+              setVisibleLimit(OPPORTUNITY_PAGE_SIZE);
+            }}
+          >
             <option value="todos">Todos os produtos</option>
             {productOptions.map((product) => <option key={product} value={product}>{product}</option>)}
           </FilterSelect>
@@ -4580,6 +4600,18 @@ function Opportunities({
           </table>
           {!filteredItems.length && <EmptyState text="Nenhuma oportunidade encontrada para os filtros atuais." />}
         </div>
+        {filteredItems.length > visibleItems.length && (
+          <div className="mt-4 flex justify-center">
+            <button
+              type="button"
+              onClick={() => setVisibleLimit((current) => current + OPPORTUNITY_PAGE_SIZE)}
+              className="flex h-11 items-center justify-center gap-2 rounded-lg border border-blue-100 bg-white px-4 text-sm font-bold text-[#0753a6] hover:border-cyan-400 hover:bg-cyan-50"
+            >
+              <MoreHorizontal size={17} />
+              Ver mais 20
+            </button>
+          </div>
+        )}
       </Panel>
       {editing && (
         <OpportunityModal
@@ -4596,6 +4628,17 @@ function Opportunities({
       )}
     </div>
   );
+}
+
+function isLonaOpportunity(item: CrmOpportunity) {
+  return normalizeOpportunityProductText(item.suggestedProductName).includes("lona");
+}
+
+function normalizeOpportunityProductText(value: string) {
+  return value
+    .toLocaleLowerCase("pt-BR")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
 }
 
 function buildOpportunityGroups(items: CrmOpportunity[], customers: CustomerRow[]) {

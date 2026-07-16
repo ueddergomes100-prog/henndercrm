@@ -197,10 +197,11 @@ export class SupabaseCrmSnapshotRepository implements ICrmSnapshotRepository {
     const operationalOpportunityRows = opportunityRows.length
       ? opportunityRows
       : await this.ensureDerivedOpportunities(clientRows, saleRows, itemRows, productRows, referenceDate);
+    const lonaOpportunityRows = operationalOpportunityRows.filter(isLonaOpportunityRow);
     const mappedAlerts = operationalAlertRows.flatMap((row) =>
       mapAlert(row, customersById, sellersById, productsById),
     );
-    const mappedOpportunities = operationalOpportunityRows.flatMap((row) =>
+    const mappedOpportunities = lonaOpportunityRows.flatMap((row) =>
       mapOpportunity(row, customersById, sellersById, productsById),
     );
     const dashboard = buildDashboard(customers, mappedAlerts, referenceDate);
@@ -471,6 +472,10 @@ function mapOpportunity(
   }];
 }
 
+function isLonaOpportunityRow(row: OpportunityRow) {
+  return normalizeOpportunityProductName(row.produto_sugerido_nome).includes("lona");
+}
+
 function buildDerivedRepurchaseAlertRows(
   sales: SaleRow[],
   items: SaleItemRow[],
@@ -559,7 +564,7 @@ function buildDerivedOpportunityRows(
   }
 
   const topProducts = [...productStats.values()]
-    .filter((item) => item.product.recompra_ativa || item.product.utiliza_crm)
+    .filter((item) => (item.product.recompra_ativa || item.product.utiliza_crm) && isLonaProduct(item.product))
     .sort((left, right) => right.revenue - left.revenue || right.sales - left.sales)
     .slice(0, 80);
 
@@ -588,6 +593,17 @@ function buildDerivedOpportunityRows(
     })
     .sort((left, right) => (right.confianca ?? 0) - (left.confianca ?? 0))
     .slice(0, 150);
+}
+
+function isLonaProduct(product: ProductRow) {
+  return normalizeOpportunityProductName(product.nome).includes("lona");
+}
+
+function normalizeOpportunityProductName(value: string) {
+  return value
+    .toLocaleLowerCase("pt-BR")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
 }
 
 function resolveRepurchaseDays(product: ProductRow) {
