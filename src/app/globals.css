@@ -6,7 +6,7 @@
 }
 
 [data-theme="dark"] {
-  --background: #02040a;
+  --background: #030303;
   --foreground: #f8fafc;
   color-scheme: dark;
 }
@@ -95,66 +95,36 @@ textarea:focus-visible {
 }
 
 [data-theme="dark"] .crm-app {
-  background: #02040a !important;
+  background: #030303 !important;
   color: #f8fafc;
 }
 
 [data-theme="dark"] .crm-content {
-  background:
-    radial-gradient(circle at 82% 4%, rgba(8, 145, 178, 0.09), transparent 25%),
-    linear-gradient(145deg, #050914 0%, #03060c 52%, #070b13 100%) !important;
+  background: linear-gradient(145deg, #040404 0%, #080808 54%, #0b0b0d 100%) !important;
 }
 
 [data-theme="dark"] .crm-topbar {
-  border-color: rgba(51, 65, 85, 0.72) !important;
-  background: rgba(5, 9, 20, 0.96) !important;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.36);
+  border-color: rgba(64, 64, 64, 0.78) !important;
+  background: rgba(7, 7, 8, 0.97) !important;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.48);
   backdrop-filter: blur(18px);
 }
 
 [data-theme="dark"] .crm-sidebar::before {
   background:
-    radial-gradient(circle at 12% 8%, rgba(34, 211, 238, 0.13), transparent 23%),
-    linear-gradient(180deg, #07111f 0%, #050a14 52%, #02050a 100%);
-}
-
-.crm-theme-picker select {
-  color-scheme: dark;
-}
-
-.crm-theme-picker option {
-  background: #0b1220;
-  color: #f8fafc;
-}
-
-.crm-theme-picker option:checked,
-.crm-theme-picker option:hover,
-.crm-theme-picker option:focus {
-  background: #155e75;
-  color: #ffffff;
-}
-
-[data-theme="dark"] .crm-theme-picker option {
-  background: #0b1220;
-  color: #f8fafc;
-}
-
-[data-theme="dark"] .crm-theme-picker option:checked,
-[data-theme="dark"] .crm-theme-picker option:hover,
-[data-theme="dark"] .crm-theme-picker option:focus {
-  background: #155e75;
-  color: #ffffff;
+    radial-gradient(circle at 12% 8%, rgba(255, 255, 255, 0.06), transparent 24%),
+    linear-gradient(180deg, #0d0d0f 0%, #070707 52%, #030303 100%);
 }
 
 [data-theme="dark"] .crm-quick-actions-menu {
-  border-color: #203047 !important;
-  background: #0a101c !important;
+  border-color: #292929 !important;
+  background: #101012 !important;
   color: #f8fafc !important;
 }
 
 [data-theme="dark"] .crm-quick-action-item:hover,
 [data-theme="dark"] .crm-quick-action-item:focus-visible {
-  background: rgba(8, 145, 178, 0.22) !important;
+  background: rgba(255, 255, 255, 0.08) !important;
   color: #f8fafc !important;
 }
 
@@ -164,7 +134,7 @@ textarea:focus-visible {
 
 [data-theme="dark"] .crm-app .bg-white,
 [data-theme="dark"] .crm-app .bg-white\/72 {
-  background-color: #0a101c !important;
+  background-color: #101012 !important;
 }
 
 [data-theme="dark"] .crm-app .bg-\[\#f1f8ff\],
@@ -175,14 +145,14 @@ textarea:focus-visible {
 [data-theme="dark"] .crm-app .bg-slate-50,
 [data-theme="dark"] .crm-app .bg-slate-100,
 [data-theme="dark"] .crm-app .bg-slate-200 {
-  background-color: #0e1726 !important;
+  background-color: #161618 !important;
 }
 
 [data-theme="dark"] .crm-app .bg-\[\#e7f4ff\],
 [data-theme="dark"] .crm-app .bg-blue-50,
 [data-theme="dark"] .crm-app .bg-cyan-50,
 [data-theme="dark"] .crm-app .bg-cyan-50\/70 {
-  background-color: rgba(8, 145, 178, 0.14) !important;
+  background-color: rgba(34, 211, 238, 0.1) !important;
 }
 
 [data-theme="dark"] .crm-app .bg-orange-50,
@@ -191,12 +161,21 @@ textarea:focus-visible {
   background-color: rgba(245, 158, 11, 0.11) !important;
 }
 
+[data-theme="dark"] .crm-app .bg-amber-100,
+[data-theme="dark"] .crm-app .bg-amber-200 {
+  background-color: rgba(245, 158, 11, 0.18) !important;
+}
+
 [data-theme="dark"] .crm-app .bg-red-50 {
   background-color: rgba(239, 68, 68, 0.12) !important;
 }
 
 [data-theme="dark"] .crm-app .bg-emerald-50 {
   background-color: rgba(16, 185, 129, 0.12) !important;
+}
+
+[data-theme="dark"] .crm-app .bg-emerald-100 {
+  background-color: rgba(16, 185, 129, 0.18) !important;
 }
 
 [data-theme="dark"] .crm-app .text-slate-950,
@@ -213,11 +192,11 @@ textarea:focus-visible {
 }
 
 [data-theme="dark"] .crm-app .text-slate-500 {
-  color: #94a3b8 !important;
+  color: #a3a3a3 !important;
 }
 
 [data-theme="dark"] .crm-app .text-slate-400 {
-  color: #7f8da3 !important;
+  color: #8b8b8f !important;
 }
 
 [data-theme="dark"] .crm-app .text-\[\#0753a6\] {
@@ -233,15 +212,19 @@ textarea:focus-visible {
 }
 
 [data-theme="dark"] .crm-app .text-orange-700,
-[data-theme="dark"] .crm-app .text-amber-700 {
+[data-theme="dark"] .crm-app .text-orange-800,
+[data-theme="dark"] .crm-app .text-amber-700,
+[data-theme="dark"] .crm-app .text-amber-800 {
   color: #fbbf24 !important;
 }
 
+[data-theme="dark"] .crm-app .text-red-600,
 [data-theme="dark"] .crm-app .text-red-700 {
   color: #fca5a5 !important;
 }
 
-[data-theme="dark"] .crm-app .text-emerald-700 {
+[data-theme="dark"] .crm-app .text-emerald-700,
+[data-theme="dark"] .crm-app .text-emerald-800 {
   color: #6ee7b7 !important;
 }
 
@@ -249,7 +232,7 @@ textarea:focus-visible {
 [data-theme="dark"] .crm-app .border-blue-100,
 [data-theme="dark"] .crm-app .border-blue-200,
 [data-theme="dark"] .crm-app .border-slate-200 {
-  border-color: #203047 !important;
+  border-color: #292929 !important;
 }
 
 [data-theme="dark"] .crm-app .border-orange-100,
@@ -261,6 +244,31 @@ textarea:focus-visible {
 
 [data-theme="dark"] .crm-app .border-cyan-200 {
   border-color: rgba(34, 211, 238, 0.3) !important;
+}
+
+[data-theme="dark"] .crm-app .hover\:bg-white:hover,
+[data-theme="dark"] .crm-app .hover\:bg-slate-50:hover {
+  background-color: #1b1b1e !important;
+}
+
+[data-theme="dark"] .crm-app .hover\:bg-blue-50:hover,
+[data-theme="dark"] .crm-app .hover\:bg-cyan-50:hover,
+[data-theme="dark"] .crm-app .hover\:bg-cyan-50\/60:hover,
+[data-theme="dark"] .crm-app .hover\:bg-cyan-50\/70:hover {
+  background-color: rgba(34, 211, 238, 0.16) !important;
+}
+
+[data-theme="dark"] .crm-app .hover\:bg-orange-50:hover,
+[data-theme="dark"] .crm-app .hover\:bg-amber-200:hover {
+  background-color: rgba(245, 158, 11, 0.2) !important;
+}
+
+[data-theme="dark"] .crm-app .hover\:bg-red-50:hover {
+  background-color: rgba(239, 68, 68, 0.18) !important;
+}
+
+[data-theme="dark"] .crm-app .hover\:bg-emerald-100:hover {
+  background-color: rgba(16, 185, 129, 0.22) !important;
 }
 
 [data-theme="dark"] .crm-app input,
@@ -284,7 +292,7 @@ textarea:focus-visible {
 }
 
 [data-theme="dark"] ::-webkit-scrollbar-thumb {
-  background: #334155;
+  background: #3f3f46;
 }
 
 ::selection {

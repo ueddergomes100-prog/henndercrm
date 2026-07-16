@@ -1570,7 +1570,9 @@ function Topbar({
   onQuickAction: (action: QuickAction) => void;
   onLogout: () => Promise<void>;
 }) {
-  const ThemeIcon = theme === "dark" ? Moon : Sun;
+  const nextTheme = theme === "dark" ? "light" : "dark";
+  const ThemeIcon = theme === "dark" ? Sun : Moon;
+  const themeLabel = theme === "dark" ? "Ativar tema claro" : "Ativar tema escuro";
   const [actionOpen, setActionOpen] = useState(false);
   const quickActionRef = useRef<HTMLDivElement>(null);
   const quickActions: Array<{
@@ -1619,24 +1621,20 @@ function Topbar({
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <label className="crm-theme-picker flex h-10 items-center gap-2 rounded-lg border border-white/15 bg-white/10 px-2 text-white transition hover:bg-white/15">
+          <button
+            type="button"
+            aria-label={themeLabel}
+            title={themeLabel}
+            onClick={() => onThemeChange(nextTheme)}
+            className="flex h-10 w-10 items-center justify-center rounded-lg border border-white/15 bg-white/10 text-white transition hover:bg-white/15 focus-visible:outline-white/40"
+          >
             <ThemeIcon size={17} className="shrink-0" />
-            <span className="sr-only">Selecionar tema</span>
-            <select
-              aria-label="Selecionar tema"
-              value={theme}
-              onChange={(event) => onThemeChange(event.target.value as Theme)}
-              className="max-w-24 bg-transparent text-xs font-semibold text-white outline-none sm:max-w-none sm:text-sm"
-            >
-              <option value="light">Claro</option>
-              <option value="dark">Dark profundo</option>
-            </select>
-          </label>
+          </button>
           <div ref={quickActionRef} className="relative hidden sm:block">
             <button
               type="button"
               onClick={() => setActionOpen((current) => !current)}
-              className="flex h-10 items-center gap-2 rounded-lg border border-white/20 bg-white px-3 text-sm font-semibold text-[#0753a6] shadow-sm transition hover:bg-cyan-50"
+              className="flex h-10 shrink-0 items-center gap-2 whitespace-nowrap rounded-lg border border-white/20 bg-white px-3 text-sm font-semibold text-[#0753a6] shadow-sm transition hover:bg-cyan-50"
             >
               <Plus size={17} />
               Nova ação
@@ -5495,11 +5493,11 @@ function getChartColors(theme: Theme) {
   const dark = theme === "dark";
 
   return {
-    grid: dark ? "#253247" : "#e2e8f0",
-    text: dark ? "#94a3b8" : "#64748b",
+    grid: dark ? "#2d2d31" : "#e2e8f0",
+    text: dark ? "#a3a3a3" : "#64748b",
     tooltip: {
-      backgroundColor: dark ? "#0b1220" : "#ffffff",
-      borderColor: dark ? "#26364d" : "#dbeafe",
+      backgroundColor: dark ? "#101012" : "#ffffff",
+      borderColor: dark ? "#2f2f33" : "#dbeafe",
       borderRadius: 10,
       color: dark ? "#f8fafc" : "#0f172a",
     },
