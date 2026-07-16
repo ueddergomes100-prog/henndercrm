@@ -722,7 +722,7 @@ export default function Home() {
               />
             )}
             {visibleView === "carteira" && (
-              <SellerPortfolio
+              <SellerPortfolioBySeller
                 customers={appCustomers}
                 alerts={appAlerts}
                 openProfile={openProfile}
@@ -4503,7 +4503,7 @@ function normalizeManualAlertSearch(value: string) {
     .replace(/[\u0300-\u036f]/g, "");
 }
 
-function SellerPortfolio({
+function SellerPortfolioBySeller({
   customers,
   alerts,
   openProfile,
@@ -4520,23 +4520,65 @@ function SellerPortfolio({
   sellers: SellerRow[];
   onUpdateContact: (customer: CustomerRow, phone: string) => Promise<void>;
 }) {
-  const [selectedSellerId, setSelectedSellerId] = useState(sellers[0]?.id ?? "");
+  const initialSellerId = user.role === "vendedor"
+    ? resolveSellerForUser(user.sellerId)?.id ?? sellers[0]?.id ?? "todos"
+    : "todos";
+  const [selectedSellerId, setSelectedSellerId] = useState(initialSellerId);
+  const [sellerQuery, setSellerQuery] = useState("");
+  const [visibleLimit, setVisibleLimit] = useState(30);
   const [contactCustomer, setContactCustomer] = useState<CustomerRow | null>(null);
   const sellerId = user.role === "vendedor"
     ? resolveSellerForUser(user.sellerId)?.id ?? ""
     : sellers.some((item) => item.id === selectedSellerId)
       ? selectedSellerId
-      : sellers[0]?.id ?? "";
-  const seller = sellers.find((item) => item.id === sellerId) ?? sellers[0];
+      : "todos";
+  const selectedSeller = sellers.find((item) => item.id === sellerId);
+  const seller = user.role === "vendedor" ? selectedSeller ?? sellers[0] : selectedSeller;
+  const sellerSummaries = sellers
+    .map((item) => {
+      const portfolioCustomers = customers.filter((customer) => sellerPortfolioCustomerMatches(customer, item));
+      const portfolioAlerts = alerts.filter((alert) => sellerPortfolioAlertMatches(alert, item));
+      const riskCustomers = portfolioCustomers.filter(
+        (customer) => customer.activityStatus === "risco" || customer.activityStatus === "perdido",
+      ).length;
+      const potentialValue = portfolioCustomers.reduce((total, customer) => total + customer.potentialValue, 0);
+
+      return {
+        seller: item,
+        customerCount: portfolioCustomers.length,
+        alertCount: portfolioAlerts.length,
+        riskCustomers,
+        potentialValue,
+      };
+    })
+    .sort((left, right) => right.customerCount - left.customerCount || left.seller.name.localeCompare(right.seller.name));
+  const normalizedSellerQuery = normalizeManualAlertSearch(sellerQuery);
+  const filteredSellerSummaries = normalizedSellerQuery
+    ? sellerSummaries.filter((item) => normalizeManualAlertSearch(item.seller.name).includes(normalizedSellerQuery))
+    : sellerSummaries;
   const sellerCustomers = user.role === "vendedor"
     ? customers
-    : customers.filter((customer) => customer.preferredSellerId === seller?.id);
-  const sellerAlerts = alerts.filter((alert) => alert.sellerId === seller?.id || alert.seller === seller?.name);
+    : seller
+      ? customers.filter((customer) => sellerPortfolioCustomerMatches(customer, seller))
+      : customers;
+  const sellerAlerts = user.role === "vendedor"
+    ? alerts
+    : seller
+      ? alerts.filter((alert) => sellerPortfolioAlertMatches(alert, seller))
+      : alerts;
   const canSwitchSeller = user.role !== "vendedor";
   const sellerRiskCustomers = sellerCustomers.filter(
     (customer) => customer.activityStatus === "risco" || customer.activityStatus === "perdido",
   ).length;
   const sellerPotentialValue = sellerCustomers.reduce((total, customer) => total + customer.potentialValue, 0);
+  const visibleCustomers = sellerCustomers.slice(0, visibleLimit);
+  const portfolioTitle = seller ? `Carteira de ${seller.name}` : "Carteira de todos os vendedores";
+  const portfolioDescription = seller
+    ? `Clientes atribuídos a ${seller.name} por histórico/preferência comercial.`
+    : "Visão geral da base. Clique em um vendedor para ver somente a carteira dele.";
+  const conversionMetric = seller
+    ? `${seller.conversionRate}%`
+    : `${average(sellerSummaries.map((item) => item.seller.conversionRate))}%`;
 
   return (
     <div className="space-y-5">
@@ -4546,13 +4588,43 @@ function SellerPortfolio({
         description="Clientes, alertas e potencial comercial atribuídos pelo histórico real de compras."
       />
       <Panel title={canSwitchSeller ? "Selecionar vendedor" : "Minha carteira"} icon={UserRound} action={`${sellers.length} vendedores ativos`}>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {sellers.map((item) => (
+        {canSwitchSeller && (
+          <div className="mb-4 grid gap-3 lg:grid-cols-[1fr_auto]">
+            <div className="flex h-11 items-center gap-2 rounded-lg border border-blue-100 bg-[#f8fbff] px-3 focus-within:border-cyan-400">
+              <Search size={17} className="text-slate-400" />
+              <input
+                value={sellerQuery}
+                onChange={(event) => setSellerQuery(event.target.value)}
+                placeholder="Buscar vendedor"
+                className="w-full bg-transparent text-sm outline-none"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedSellerId("todos");
+                setVisibleLimit(30);
+              }}
+              className={`h-11 rounded-lg px-4 text-sm font-bold transition ${
+                sellerId === "todos"
+                  ? "bg-[#0753a6] text-white"
+                  : "border border-blue-100 bg-white text-[#0753a6] hover:border-cyan-400 hover:bg-cyan-50"
+              }`}
+            >
+              Todos os vendedores
+            </button>
+          </div>
+        )}
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {filteredSellerSummaries.map(({ seller: item, customerCount, alertCount, riskCustomers, potentialValue }) => (
             <button
               key={item.id}
               type="button"
               onClick={() => {
-                if (canSwitchSeller) setSelectedSellerId(item.id);
+                if (canSwitchSeller) {
+                  setSelectedSellerId(item.id);
+                  setVisibleLimit(30);
+                }
               }}
               disabled={!canSwitchSeller}
               className={`rounded-xl border p-4 text-left transition ${
@@ -4561,69 +4633,96 @@ function SellerPortfolio({
                   : "border-blue-100 bg-[#f8fbff] hover:border-cyan-300"
               } ${canSwitchSeller ? "" : "cursor-default"}`}
             >
-              <p className="font-bold text-slate-900">{item.name}</p>
-              <p className="mt-1 text-xs text-slate-500">{item.customerCount} clientes preferenciais</p>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="font-bold text-slate-900">{item.name}</p>
+                  <p className="mt-1 text-xs text-slate-500">{customerCount} clientes na carteira</p>
+                </div>
+                {item.id === seller?.id && (
+                  <span className="rounded-full bg-white px-2 py-1 text-[10px] font-bold uppercase text-cyan-700">
+                    Selecionado
+                  </span>
+                )}
+              </div>
+              <div className="mt-4 grid grid-cols-3 gap-2 text-center">
+                <MiniStat label="Risco" value={`${riskCustomers}`} />
+                <MiniStat label="Alertas" value={`${alertCount}`} />
+                <MiniStat label="Potencial" value={formatCurrency(potentialValue)} />
+              </div>
             </button>
           ))}
+          {!filteredSellerSummaries.length && <EmptyState text="Nenhum vendedor encontrado para a busca." />}
         </div>
       </Panel>
-      {seller && (
-        <>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-            <MetricCard label="Clientes da carteira" value={`${sellerCustomers.length}`} />
-            <MetricCard label="Clientes em risco" value={`${sellerRiskCustomers}`} />
-            <MetricCard label="Alertas abertos" value={`${sellerAlerts.length}`} />
-            <MetricCard label="Potencial perdido" value={formatCurrency(sellerPotentialValue)} />
-            <MetricCard label="Taxa de conversão" value={`${seller.conversionRate}%`} />
-          </div>
-          <Panel title={`Carteira de ${seller.name}`} icon={UsersRound} action={`${sellerCustomers.length} clientes`}>
-            <div className="grid gap-3 lg:grid-cols-2">
-              {sellerCustomers.map((customer) => (
-                <div
-                  key={customer.id}
-                  className="grid gap-3 rounded-lg border border-blue-100 bg-[#f8fbff] p-4 transition hover:border-cyan-400 hover:bg-white md:grid-cols-[1fr_auto]"
-                >
-                  <div>
-                    <p className="font-bold text-slate-900">{customer.name}</p>
-                    <p className="mt-1 text-xs text-slate-500">{customer.city} ? {customer.sellerAffinity}% de afinidade</p>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <StatusBadge status={customer.activityStatus} label={customer.status} />
-                      <QualityBadge status={customer.qualityStatus} score={customer.qualityScore} />
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-xs uppercase tracking-wide text-slate-400">Potencial</p>
-                    <p className="mt-1 font-bold text-orange-700">{customer.potential}</p>
-                    <div className="mt-3 flex flex-wrap justify-end gap-2">
-                      <WhatsAppButton
-                        customer={customer}
-                        user={user}
-                        onUpdateContact={onUpdateContact}
-                        onRegisterContact={onRegisterContact}
-                        compact
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setContactCustomer(customer)}
-                        className="rounded-lg border border-cyan-200 bg-white px-3 py-2 text-xs font-semibold text-[#0753a6] transition hover:bg-cyan-50"
-                      >
-                        Registrar retorno
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => openProfile(customer)}
-                        className="rounded-lg bg-[#0753a6] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#063d7c]"
-                      >
-                        Abrir perfil
-                      </button>
-                    </div>
-                  </div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <MetricCard label="Clientes da carteira" value={`${sellerCustomers.length}`} />
+        <MetricCard label="Clientes em risco" value={`${sellerRiskCustomers}`} />
+        <MetricCard label="Alertas abertos" value={`${sellerAlerts.length}`} />
+        <MetricCard label="Potencial perdido" value={formatCurrency(sellerPotentialValue)} />
+        <MetricCard label={seller ? "Taxa de conversão" : "Conversão média"} value={conversionMetric} />
+      </div>
+      <Panel title={portfolioTitle} icon={UsersRound} action={`${visibleCustomers.length} de ${sellerCustomers.length} clientes`}>
+        <p className="mb-4 text-sm text-slate-500">{portfolioDescription}</p>
+        <div className="grid gap-3 lg:grid-cols-2">
+          {visibleCustomers.map((customer) => (
+            <div
+              key={customer.id}
+              className="grid gap-3 rounded-lg border border-blue-100 bg-[#f8fbff] p-4 transition hover:border-cyan-400 hover:bg-white md:grid-cols-[1fr_auto]"
+            >
+              <div>
+                <p className="font-bold text-slate-900">{customer.name}</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  {customer.city || "Cidade nao informada"} · {customer.sellerAffinity}% de afinidade · {customer.preferredSeller}
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <StatusBadge status={customer.activityStatus} label={customer.status} />
+                  <QualityBadge status={customer.qualityStatus} score={customer.qualityScore} />
                 </div>
-              ))}
+              </div>
+              <div className="text-right">
+                <p className="text-xs uppercase tracking-wide text-slate-400">Potencial</p>
+                <p className="mt-1 font-bold text-orange-700">{customer.potential}</p>
+                <div className="mt-3 flex flex-wrap justify-end gap-2">
+                  <WhatsAppButton
+                    customer={customer}
+                    user={user}
+                    onUpdateContact={onUpdateContact}
+                    onRegisterContact={onRegisterContact}
+                    compact
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setContactCustomer(customer)}
+                    className="rounded-lg border border-cyan-200 bg-white px-3 py-2 text-xs font-semibold text-[#0753a6] transition hover:bg-cyan-50"
+                  >
+                    Registrar retorno
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openProfile(customer)}
+                    className="rounded-lg bg-[#0753a6] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#063d7c]"
+                  >
+                    Abrir perfil
+                  </button>
+                </div>
+              </div>
             </div>
-          </Panel>
-        </>
-      )}
+          ))}
+          {!visibleCustomers.length && <EmptyState text="Nenhum cliente encontrado para esta carteira." />}
+        </div>
+        {sellerCustomers.length > visibleCustomers.length && (
+          <div className="mt-4 flex justify-center">
+            <button
+              type="button"
+              onClick={() => setVisibleLimit((current) => current + 30)}
+              className="flex h-11 items-center justify-center gap-2 rounded-lg border border-blue-100 bg-white px-4 text-sm font-bold text-[#0753a6] hover:border-cyan-400 hover:bg-cyan-50"
+            >
+              <MoreHorizontal size={17} />
+              Ver mais 30
+            </button>
+          </div>
+        )}
+      </Panel>
       {contactCustomer && (
         <ContactOutcomeModal
           customer={contactCustomer}
@@ -4637,6 +4736,14 @@ function SellerPortfolio({
       )}
     </div>
   );
+}
+
+function sellerPortfolioCustomerMatches(customer: CustomerRow, seller: SellerRow) {
+  return customer.preferredSellerId === seller.id || customer.preferredSeller === seller.name;
+}
+
+function sellerPortfolioAlertMatches(alert: AlertRow, seller: SellerRow) {
+  return alert.sellerId === seller.id || alert.seller === seller.name;
 }
 
 function DataHealth({
