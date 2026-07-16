@@ -644,6 +644,7 @@ export default function Home() {
                 sellers={scopedData.sellers}
                 user={user}
                 onUpdateContact={updateCustomerContact}
+                onRegisterContact={registerContact}
               />
             )}
             {visibleView === "resultados" && (
@@ -661,6 +662,7 @@ export default function Home() {
                 openProfile={openProfile}
                 user={user}
                 onUpdateContact={updateCustomerContact}
+                onRegisterContact={registerContact}
               />
             )}
             {visibleView === "vendas" && (
@@ -701,6 +703,7 @@ export default function Home() {
                 user={user}
                 onCreateAlert={createManualAlert}
                 onUpdateContact={updateCustomerContact}
+                onRegisterContact={registerContact}
               />
             )}
             {visibleView === "recompra" && (
@@ -741,6 +744,7 @@ export default function Home() {
               onSave={saveOpportunity}
               onDelete={deleteOpportunity}
               onUpdateContact={updateCustomerContact}
+              onRegisterContact={registerContact}
             />
             )}
             {visibleView === "agenda" && (
@@ -1907,9 +1911,9 @@ function buildSellerResultRows(attributedSales: CrmAttributedSale[]) {
 
   for (const item of attributedSales) {
     const seller =
-      sellers.find((entry) => entry.id === item.sale.sellerId) ??
-      sellers.find((entry) => entry.name === item.contact.responsible);
-    const name = seller?.name ?? item.customer?.preferredSeller ?? item.contact.responsible ?? "Sem vendedor";
+      sellers.find((entry) => entry.name === item.contact.responsible) ??
+      sellers.find((entry) => entry.id === item.sale.sellerId);
+    const name = seller?.name ?? item.contact.responsible ?? item.customer?.preferredSeller ?? "Sem vendedor";
     const current = rows.get(name) ?? {
       name,
       recoveredRevenue: 0,
@@ -3011,6 +3015,7 @@ function Dashboard({
   sellers,
   user,
   onUpdateContact,
+  onRegisterContact,
 }: {
   customers: CustomerRow[];
   openProfile: (customer: CustomerRow) => void;
@@ -3023,6 +3028,7 @@ function Dashboard({
   sellers: SellerRow[];
   user: CrmSessionUser;
   onUpdateContact: (customer: CustomerRow, phone: string) => Promise<void>;
+  onRegisterContact: (record: Omit<ContactRecord, "id">) => Promise<void>;
 }) {
   const chartColors = getChartColors(theme);
   const inactiveCustomers = [...customers]
@@ -3196,6 +3202,7 @@ function Dashboard({
                   user={user}
                   message={`Olá! Aqui é da Hennder CRM. Identificamos uma oportunidade de recompra e gostaríamos de conversar com você.`}
                   onUpdateContact={onUpdateContact}
+                  onRegisterContact={onRegisterContact}
                   compact
                 />
                 <button
@@ -3373,6 +3380,7 @@ function RecoveryCustomers({
                     user={user}
                     message="Olá! Aqui é da Hennder CRM. Sentimos sua falta e gostaríamos de ajudar com sua próxima compra. Podemos conversar?"
                     onUpdateContact={onUpdateContact}
+                    onRegisterContact={onRegisterContact}
                   />
                 </div>
                 <div className="mt-2 grid grid-cols-2 gap-2">
@@ -3386,7 +3394,11 @@ function RecoveryCustomers({
                   <button
                     type="button"
                     onClick={() => setContactCustomer(customer)}
-                    className="h-11 rounded-lg bg-[#0753a6] px-3 text-sm font-semibold text-white hover:bg-[#063d7c]"
+                    className={`h-11 rounded-lg px-3 text-sm font-semibold transition ${
+                      latestContact
+                        ? "border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
+                        : "bg-[#0753a6] text-white hover:bg-[#063d7c]"
+                    }`}
                   >
                     {latestContact ? "Atualizar retorno" : "Registrar retorno"}
                   </button>
@@ -3443,11 +3455,13 @@ function Customers({
   openProfile,
   user,
   onUpdateContact,
+  onRegisterContact,
 }: {
   customers: CustomerRow[];
   openProfile: (customer: CustomerRow) => void;
   user: CrmSessionUser;
   onUpdateContact: (customer: CustomerRow, phone: string) => Promise<void>;
+  onRegisterContact: (record: Omit<ContactRecord, "id">) => Promise<void>;
 }) {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("todos");
@@ -3537,6 +3551,7 @@ function Customers({
                         customer={customer}
                         user={user}
                         onUpdateContact={onUpdateContact}
+                        onRegisterContact={onRegisterContact}
                         compact
                       />
                       <button onClick={() => openProfile(customer)} className="rounded-lg bg-[#0753a6] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#063d7c]">
@@ -3565,6 +3580,7 @@ function CustomerProfile({
   user,
   onCreateAlert,
   onUpdateContact,
+  onRegisterContact,
 }: {
   alerts: AlertRow[];
   customer: CustomerRow;
@@ -3576,6 +3592,7 @@ function CustomerProfile({
   user: CrmSessionUser;
   onCreateAlert: (alert: AlertRow, note?: string) => Promise<void>;
   onUpdateContact: (customer: CustomerRow, phone: string) => Promise<void>;
+  onRegisterContact: (record: Omit<ContactRecord, "id">) => Promise<void>;
 }) {
   const customerSales = sales
     .filter((sale) => sale.customerId === customer.id)
@@ -3607,6 +3624,7 @@ function CustomerProfile({
                   user={user}
                   message={`Olá, ${customer.name}! Aqui é da Hennder CRM. Gostaria de conversar sobre suas próximas compras e oportunidades comerciais.`}
                   onUpdateContact={onUpdateContact}
+                  onRegisterContact={onRegisterContact}
                 />
               </div>
             </div>
@@ -3873,6 +3891,7 @@ function RepurchaseAlerts({
                         user={user}
                         message={`Olá! Aqui é da Hennder CRM. Notamos que pode estar próximo o momento de recomprar ${alert.product}. Podemos ajudar?`}
                         onUpdateContact={onUpdateContact}
+                        onRegisterContact={onRegisterContact}
                         compact
                       />
                     )}
@@ -4273,6 +4292,7 @@ function SellerPortfolio({
                         customer={customer}
                         user={user}
                         onUpdateContact={onUpdateContact}
+                        onRegisterContact={onRegisterContact}
                         compact
                       />
                       <button
@@ -4394,6 +4414,7 @@ function Opportunities({
   onSave,
   onDelete,
   onUpdateContact,
+  onRegisterContact,
 }: {
   items: CrmOpportunity[];
   user: CrmSessionUser;
@@ -4402,6 +4423,7 @@ function Opportunities({
   onSave: (opportunity: Omit<CrmOpportunity, "id">, id?: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onUpdateContact: (customer: CustomerRow, phone: string) => Promise<void>;
+  onRegisterContact: (record: Omit<ContactRecord, "id">) => Promise<void>;
 }) {
   const [editing, setEditing] = useState<CrmOpportunity | "new" | null>(null);
   const [query, setQuery] = useState("");
@@ -4535,6 +4557,7 @@ function Opportunities({
                             user={user}
                             message={`Olá! Aqui é da Hennder CRM. Temos uma sugestão que combina com sua compra de ${item.sourceProductName}: ${item.suggestedProductName}. Gostaria de saber mais?`}
                             onUpdateContact={onUpdateContact}
+                            onRegisterContact={onRegisterContact}
                             compact
                           />
                         )}
@@ -6415,6 +6438,7 @@ function WhatsAppButton({
   message,
   sellerName,
   onUpdateContact,
+  onRegisterContact,
   compact = false,
 }: {
   customer: CustomerRow;
@@ -6422,11 +6446,13 @@ function WhatsAppButton({
   user?: CrmSessionUser;
   sellerName?: string;
   onUpdateContact?: (customer: CustomerRow, phone: string) => Promise<void>;
+  onRegisterContact?: (record: Omit<ContactRecord, "id">) => Promise<void>;
   compact?: boolean;
 }) {
   const [editingContact, setEditingContact] = useState(false);
-  const responsibleName = resolveWhatsAppSellerName(user, customer, sellerName);
-  const resolvedMessage = buildShoppingRuralWhatsAppMessage(customer, responsibleName, message);
+  const responsibleName = resolveWhatsAppResponsibleName(user, customer, sellerName);
+  const sellerFirstName = firstName(responsibleName);
+  const resolvedMessage = buildShoppingRuralWhatsAppMessage(customer, sellerFirstName, message);
   const phone = normalizeBrazilianWhatsAppNumber(customer.whatsapp);
 
   if (!phone) {
@@ -6466,7 +6492,7 @@ function WhatsAppButton({
         href={href}
         target="_blank"
         rel="noopener noreferrer"
-        onClick={() => recordAutomaticContactIntent(customer, resolvedMessage, responsibleName)}
+        onClick={() => recordAutomaticContactIntent(customer, resolvedMessage, responsibleName, onRegisterContact)}
         aria-label={`Chamar ${customer.name} no WhatsApp`}
         title={`Chamar ${customer.name} no WhatsApp`}
         className={`inline-flex items-center justify-center gap-2 rounded-lg bg-[#25d366] font-semibold text-white shadow-sm transition hover:bg-[#1ebe5d] focus-visible:outline-[#25d366] ${
@@ -6501,7 +6527,12 @@ function WhatsAppButton({
   );
 }
 
-function recordAutomaticContactIntent(customer: CustomerRow, message: string, responsibleName: string) {
+function recordAutomaticContactIntent(
+  customer: CustomerRow,
+  message: string,
+  responsibleName: string,
+  onRegisterContact?: (record: Omit<ContactRecord, "id">) => Promise<void>,
+) {
   const today = new Date().toISOString().slice(0, 10);
   const storageKey = `hennder-crm-contact-intent:${customer.id}:${today}:whatsapp`;
   try {
@@ -6511,33 +6542,44 @@ function recordAutomaticContactIntent(customer: CustomerRow, message: string, re
     // Silently continue; losing the local guard should not block the commercial action.
   }
 
+  const record = {
+    customerId: customer.id,
+    customerName: customer.name,
+    outcome: "no_answer",
+    note: `Registro automático: clique no WhatsApp. Mensagem sugerida: ${message}`,
+    nextContact: "",
+    contactedAt: new Date().toISOString(),
+    channel: "WhatsApp",
+    responsible: responsibleName || customer.preferredSeller || "Hennder CRM",
+  } satisfies Omit<ContactRecord, "id">;
+
+  if (onRegisterContact) {
+    void onRegisterContact(record).catch(() => undefined);
+    return;
+  }
+
   void mutateWorkspace<ContactRecord>({
     action: "create_contact",
-    record: {
-      customerId: customer.id,
-      customerName: customer.name,
-      outcome: "no_answer",
-      note: `Registro automático: clique no WhatsApp. Mensagem sugerida: ${message}`,
-      nextContact: "",
-      contactedAt: new Date().toISOString(),
-      channel: "WhatsApp",
-      responsible: responsibleName || customer.preferredSeller || "Hennder CRM",
-    },
+    record,
   }).catch(() => undefined);
 }
 
-function resolveWhatsAppSellerName(
+function resolveWhatsAppResponsibleName(
   user: CrmSessionUser | undefined,
   customer: CustomerRow,
   sellerName?: string,
 ) {
-  const rawName =
+  return (
     sellerName ||
     (user?.role === "vendedor" ? resolveSellerForUser(user.sellerId)?.name : undefined) ||
     user?.name ||
     customer.preferredSeller ||
-    "vendedor";
-  return rawName.trim().split(/\s+/u)[0] || "vendedor";
+    "Hennder CRM"
+  ).trim();
+}
+
+function firstName(value: string) {
+  return value.trim().split(/\s+/u)[0] || "vendedor";
 }
 
 function buildShoppingRuralWhatsAppMessage(
