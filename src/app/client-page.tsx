@@ -459,12 +459,29 @@ export default function Home() {
       action: "create_contact",
       record,
     });
-    setContactRecords((current) => [saved, ...current]);
+    setContactRecords((current) =>
+      current.some((item) => String(item.id) === String(saved.id))
+        ? current
+        : [saved, ...current],
+    );
   };
 
   const updateAlertStatus = async (id: string, status: RepurchaseAlertStatus) => {
+    if (id.startsWith("manual-alert-")) {
+      setManualAlerts((current) =>
+        current.map((item) => (item.id === id ? { ...item, status } : item)),
+      );
+      setAlertStatuses((current) => ({ ...current, [id]: status }));
+      return;
+    }
+
     await mutateWorkspace({ action: "update_alert", id, status });
     setAlertStatuses((current) => ({ ...current, [id]: status }));
+  };
+
+  const createManualAlert = (alert: AlertRow) => {
+    setManualAlerts((current) => [alert, ...current]);
+    setAlertStatuses((current) => ({ ...current, [alert.id]: alert.status }));
   };
 
   const saveAgendaEvent = async (
@@ -604,15 +621,22 @@ export default function Home() {
                 sales={scopedData.sales}
                 saleItems={scopedData.saleItems}
                 sellers={scopedData.sellers}
+                products={scopedData.products}
+                user={user}
+                onCreateAlert={createManualAlert}
               />
             )}
             {visibleView === "recompra" && (
               <RepurchaseAlerts
                 alerts={appAlerts}
                 customers={appCustomers}
+                products={scopedData.products}
+                sellers={scopedData.sellers}
+                user={user}
                 alertStatuses={alertStatuses}
                 onStatusChange={updateAlertStatus}
                 onRegisterContact={registerContact}
+                onCreateAlert={createManualAlert}
               />
             )}
             {visibleView === "carteira" && (
@@ -627,7 +651,7 @@ export default function Home() {
             )}
             {visibleView === "vendedores" && <SellersModule customers={appCustomers} alerts={appAlerts} />}
             {visibleView === "saude" && <DataHealth customers={appCustomers} openProfile={openProfile} />}
-            {visibleView === "atividades" && <ActivitiesModule contactRecords={appContactRecords} />}
+            {visibleView === "atividades" && <ActivitiesModule contactRecords={appContactRecords} user={user} />}
             {visibleView === "campanhas" && <CampaignsModule customers={appCustomers} alerts={appAlerts} />}
             {visibleView === "oportunidades" && (
             <Opportunities
@@ -678,6 +702,7 @@ export default function Home() {
         action={quickAction}
         user={user}
         customers={appCustomers}
+        products={scopedData.products}
         onClose={() => setQuickAction(null)}
         onGoTo={(view) => setActiveView(view)}
         onCreateCustomer={(customer) => {
@@ -686,7 +711,7 @@ export default function Home() {
           setActiveView("perfil");
         }}
         onCreateAlert={(alert) => {
-          setManualAlerts((current) => [alert, ...current]);
+          createManualAlert(alert);
           setActiveView("recompra");
         }}
         onCreateAgenda={saveAgendaEvent}
@@ -917,6 +942,7 @@ function QuickActionModals({
   action,
   user,
   customers,
+  products,
   onClose,
   onGoTo,
   onCreateCustomer,
@@ -928,6 +954,7 @@ function QuickActionModals({
   action: QuickAction | null;
   user: CrmSessionUser;
   customers: CustomerRow[];
+  products: ProductRow[];
   onClose: () => void;
   onGoTo: (view: View) => void;
   onCreateCustomer: (customer: CustomerRow) => void;
@@ -957,6 +984,7 @@ function QuickActionModals({
     return (
       <ManualAlertModal
         customers={customers}
+        products={products}
         sellers={availableSellers}
         user={user}
         onClose={onClose}
@@ -1099,21 +1127,24 @@ function ManualCustomerModal({
 
 function ManualAlertModal({
   customers,
+  products,
   sellers,
   user,
   onClose,
   onSave,
 }: {
   customers: CustomerRow[];
+  products: ProductRow[];
   sellers: SellerRow[];
   user: CrmSessionUser;
   onClose: () => void;
   onSave: (alert: AlertRow) => void;
 }) {
   const defaultCustomer = customers[0];
+  const defaultProduct = products[0];
   const defaultSeller = resolveSellerForUser(user.sellerId) ?? sellers[0];
   const [customerId, setCustomerId] = useState(defaultCustomer?.id ?? "");
-  const [product, setProduct] = useState("Racao premium 15kg");
+  const [productId, setProductId] = useState(defaultProduct?.id ?? "");
   const [days, setDays] = useState("45");
   const [recommendedIso, setRecommendedIso] = useState(addIsoDays(crmReferenceDate, 7));
   const [priority, setPriority] = useState<AlertRow["priorityCode"]>("alta");
@@ -1126,33 +1157,26 @@ function ManualAlertModal({
         onSubmit={(event) => {
           event.preventDefault();
           const customer = customers.find((item) => item.id === customerId);
+          const product = products.find((item) => item.id === productId);
           const seller = sellers.find((item) => item.id === sellerId);
-          if (!customer) return;
-          onSave({
-            id: `manual-alert-${Date.now()}`,
-            customerId: customer.id,
+          if (!customer || !product) return;
+          onSave(buildManualAlertRow({
+            customer,
             product,
-            client: customer.name,
-            buyDate: customer.lastBuy,
-            buyDateIso: customer.lastBuyIso,
-            days: `${Number(days) || 45} dias`,
-            recommended: formatContactDate(recommendedIso),
+            recurrenceDays: Number(days) || product.defaultRepurchaseDays || customer.purchaseCycleDays || 45,
             recommendedIso,
-            priority: capitalizePriority(priority),
-            priorityCode: priority,
-            seller: seller?.name ?? customer.preferredSeller,
-            sellerId: seller?.id ?? customer.preferredSellerId,
-            department: "Manual",
-            status: "pendente",
-            origin: "manual",
-          });
+            priority,
+            seller,
+          }));
         }}
       >
         <FormSelect label="Cliente" value={customerId} onChange={setCustomerId}>
           {customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}
         </FormSelect>
         <div className="grid gap-4 sm:grid-cols-2">
-          <FormInput label="Produto / motivo" value={product} onChange={setProduct} />
+          <FormSelect label="Produto da base" value={productId} onChange={setProductId}>
+            {products.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
+          </FormSelect>
           <FormInput label="Recorrencia em dias" value={days} onChange={setDays} type="number" />
         </div>
         <div className="grid gap-4 sm:grid-cols-3">
@@ -1588,6 +1612,7 @@ function CrmResults({
     .sort((left, right) => right.sale.soldAt.localeCompare(left.sale.soldAt) || right.sale.uniplusId - left.sale.uniplusId)
     .slice(0, 8);
   const attributionTrend = buildAttributionTrend(attribution.attributedSales);
+  const sellerResultRows = buildSellerResultRows(attribution.attributedSales);
 
   return (
     <div className="space-y-5">
@@ -1631,6 +1656,36 @@ function CrmResults({
               </div>
             </div>
           ))}
+        </div>
+      </Panel>
+
+      <Panel title="Resultado por vendedor" icon={UsersRound} action={`${sellerResultRows.length} vendedor(es)`}>
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-left text-sm">
+            <thead className="text-xs uppercase tracking-wide text-slate-400">
+              <tr>
+                <th className="px-3 py-2">Vendedor</th>
+                <th className="px-3 py-2">Recuperado</th>
+                <th className="px-3 py-2">Influenciado</th>
+                <th className="px-3 py-2">Total atribuído</th>
+                <th className="px-3 py-2">Clientes</th>
+                <th className="px-3 py-2">Vendas</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-blue-50">
+              {sellerResultRows.map((row) => (
+                <tr key={row.name} className="hover:bg-cyan-50/60">
+                  <td className="px-3 py-3 font-semibold text-[#123252]">{row.name}</td>
+                  <td className="px-3 py-3 font-bold text-emerald-700">{formatCurrency(row.recoveredRevenue)}</td>
+                  <td className="px-3 py-3 font-bold text-[#0753a6]">{formatCurrency(row.influencedRevenue)}</td>
+                  <td className="px-3 py-3 font-black text-[#123252]">{formatCurrency(row.totalRevenue)}</td>
+                  <td className="px-3 py-3">{row.customers}</td>
+                  <td className="px-3 py-3">{row.sales}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!sellerResultRows.length && <EmptyState text="Nenhuma venda atribuída por vendedor ainda." />}
         </div>
       </Panel>
 
@@ -1722,6 +1777,53 @@ function buildAttributionTrend(attributedSales: CrmAttributedSale[]) {
       recuperado: Math.round(row.recuperado),
       influenciado: Math.round(row.influenciado),
     }));
+}
+
+function buildSellerResultRows(attributedSales: CrmAttributedSale[]) {
+  const rows = new Map<string, {
+    name: string;
+    recoveredRevenue: number;
+    influencedRevenue: number;
+    totalRevenue: number;
+    sales: number;
+    customerIds: Set<string>;
+  }>();
+
+  for (const item of attributedSales) {
+    const seller =
+      sellers.find((entry) => entry.id === item.sale.sellerId) ??
+      sellers.find((entry) => entry.name === item.contact.responsible);
+    const name = seller?.name ?? item.customer?.preferredSeller ?? item.contact.responsible ?? "Sem vendedor";
+    const current = rows.get(name) ?? {
+      name,
+      recoveredRevenue: 0,
+      influencedRevenue: 0,
+      totalRevenue: 0,
+      sales: 0,
+      customerIds: new Set<string>(),
+    };
+
+    if (item.window.kind === "recovered") {
+      current.recoveredRevenue += item.weightedValue;
+    } else {
+      current.influencedRevenue += item.weightedValue;
+    }
+    current.totalRevenue += item.weightedValue;
+    current.sales += 1;
+    current.customerIds.add(item.sale.customerId);
+    rows.set(name, current);
+  }
+
+  return [...rows.values()]
+    .map((row) => ({
+      name: row.name,
+      recoveredRevenue: Math.round(row.recoveredRevenue),
+      influencedRevenue: Math.round(row.influencedRevenue),
+      totalRevenue: Math.round(row.totalRevenue),
+      sales: row.sales,
+      customers: row.customerIds.size,
+    }))
+    .sort((left, right) => right.totalRevenue - left.totalRevenue);
 }
 
 function SalesModule({
@@ -2058,11 +2160,18 @@ function SellersModule({ customers, alerts }: { customers: CustomerRow[]; alerts
   );
 }
 
-function ActivitiesModule({ contactRecords }: { contactRecords: ContactRecord[] }) {
+function ActivitiesModule({
+  contactRecords,
+  user,
+}: {
+  contactRecords: ContactRecord[];
+  user: CrmSessionUser;
+}) {
   const outcomes = contactRecords.reduce<Record<string, number>>((acc, record) => {
     acc[record.outcome] = (acc[record.outcome] ?? 0) + 1;
     return acc;
   }, {});
+  const contactMetrics = buildSellerContactMetrics(contactRecords, new Date().toISOString().slice(0, 10));
 
   return (
     <div className="space-y-5">
@@ -2073,6 +2182,39 @@ function ActivitiesModule({ contactRecords }: { contactRecords: ContactRecord[] 
         <MetricCard label="Retornos" value={`${outcomes.follow_up ?? 0}`} />
         <MetricCard label="Sem resposta" value={`${outcomes.no_answer ?? 0}`} />
       </div>
+      {user.role !== "vendedor" && (
+        <Panel title="Métricas por vendedor" icon={UsersRound} action="Hoje, semana e mês">
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-left text-sm">
+              <thead className="text-xs uppercase tracking-wide text-slate-400">
+                <tr>
+                  <th className="px-3 py-2">Vendedor</th>
+                  <th className="px-3 py-2">Hoje</th>
+                  <th className="px-3 py-2">Semana</th>
+                  <th className="px-3 py-2">Mês</th>
+                  <th className="px-3 py-2">Interessados</th>
+                  <th className="px-3 py-2">Retornos</th>
+                  <th className="px-3 py-2">Sem resposta</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-blue-50">
+                {contactMetrics.map((row) => (
+                  <tr key={row.responsible} className="hover:bg-cyan-50/60">
+                    <td className="px-3 py-3 font-semibold text-[#123252]">{row.responsible}</td>
+                    <td className="px-3 py-3 font-black text-[#0753a6]">{row.today}</td>
+                    <td className="px-3 py-3">{row.week}</td>
+                    <td className="px-3 py-3">{row.month}</td>
+                    <td className="px-3 py-3">{row.interested}</td>
+                    <td className="px-3 py-3">{row.followUps}</td>
+                    <td className="px-3 py-3">{row.noAnswer}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {!contactMetrics.length && <EmptyState text="Nenhum contato registrado pela equipe ainda." />}
+          </div>
+        </Panel>
+      )}
       <Panel title="Histórico de contatos" icon={Phone}>
         <div className="overflow-x-auto">
           <table className="min-w-full text-left text-sm">
@@ -2968,6 +3110,30 @@ function Dashboard({
   );
 }
 
+type RecoveryFilter = "todos" | "30-60" | "60-90" | "90-plus" | "sem-retorno";
+
+const recoveryFilters: Array<{ id: RecoveryFilter; label: string }> = [
+  { id: "todos", label: "Todos" },
+  { id: "30-60", label: "30 a 60 dias" },
+  { id: "60-90", label: "60 a 90 dias" },
+  { id: "90-plus", label: "+90 dias" },
+  { id: "sem-retorno", label: "Sem retorno" },
+];
+
+function matchesRecoveryFilter(
+  customer: CustomerRow,
+  filter: RecoveryFilter,
+  contactRecords: ContactRecord[],
+) {
+  if (filter === "30-60") return customer.days >= 30 && customer.days <= 60;
+  if (filter === "60-90") return customer.days > 60 && customer.days <= 90;
+  if (filter === "90-plus") return customer.days > 90;
+  if (filter === "sem-retorno") {
+    return !contactRecords.some((record) => record.customerId === customer.id);
+  }
+  return true;
+}
+
 function RecoveryCustomers({
   customers,
   openProfile,
@@ -2980,9 +3146,13 @@ function RecoveryCustomers({
   onRegisterContact: (record: Omit<ContactRecord, "id">) => Promise<void>;
 }) {
   const [contactCustomer, setContactCustomer] = useState<CustomerRow | null>(null);
+  const [activeFilter, setActiveFilter] = useState<RecoveryFilter>("todos");
   const inactiveCustomers = [...customers]
     .filter((customer) => customer.activityStatus !== "ativo")
     .sort((a, b) => b.days - a.days);
+  const filteredInactiveCustomers = inactiveCustomers.filter((customer) =>
+    matchesRecoveryFilter(customer, activeFilter, contactRecords),
+  );
 
   return (
     <div className="space-y-5">
@@ -3009,23 +3179,24 @@ function RecoveryCustomers({
 
       <Panel title="Fila de recuperação" icon={AlertTriangle} action="Ordenada por dias sem compra">
         <div className="mb-4 flex flex-wrap gap-2">
-          {["Todos", "30 a 60 dias", "60 a 90 dias", "+90 dias", "Sem retorno"].map((filter, index) => (
+          {recoveryFilters.map((filter) => (
             <button
-              key={filter}
+              key={filter.id}
               type="button"
+              onClick={() => setActiveFilter(filter.id)}
               className={`rounded-lg px-3 py-2 text-sm font-medium ${
-                index === 0
+                activeFilter === filter.id
                   ? "bg-orange-600 text-white"
                   : "border border-orange-100 bg-white text-slate-600 hover:border-orange-300"
               }`}
             >
-              {filter}
+              {filter.label}
             </button>
           ))}
         </div>
 
         <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
-          {inactiveCustomers.map((customer) => {
+          {filteredInactiveCustomers.map((customer) => {
             const latestContact = contactRecords.find((record) => record.customerId === customer.id);
 
             return (
@@ -3096,6 +3267,7 @@ function RecoveryCustomers({
             );
           })}
         </div>
+        {!filteredInactiveCustomers.length && <EmptyState text="Nenhum cliente encontrado para este filtro." />}
       </Panel>
 
       <Panel title="Histórico de contatos" icon={MessageCircle} action={`${contactRecords.length} registros`}>
@@ -3252,6 +3424,9 @@ function CustomerProfile({
   sales,
   saleItems,
   sellers,
+  products,
+  user,
+  onCreateAlert,
 }: {
   alerts: AlertRow[];
   customer: CustomerRow;
@@ -3259,6 +3434,9 @@ function CustomerProfile({
   sales: SaleRow[];
   saleItems: SaleItemRow[];
   sellers: SellerRow[];
+  products: ProductRow[];
+  user: CrmSessionUser;
+  onCreateAlert: (alert: AlertRow) => void;
 }) {
   const customerSales = sales
     .filter((sale) => sale.customerId === customer.id)
@@ -3319,7 +3497,15 @@ function CustomerProfile({
         <MetricCard label="Qualidade do cadastro" value={`${customer.qualityScore}% · ${customer.qualityStatus}`} />
         <MetricCard label="Alertas ativos" value={`${customerAlerts.length}`} />
       </div>
-      <ManualAlertPanel customerName={customer.name} compact />
+      <ManualAlertPanel
+        customers={[customer]}
+        products={products}
+        sellers={sellers}
+        user={user}
+        onCreateAlert={onCreateAlert}
+        initialCustomerId={customer.id}
+        compact
+      />
       <Panel title="Histórico de tentativas de contato" icon={MessageCircle} action={`${contactRecords.length} registros`}>
         {contactRecords.length === 0 ? (
           <div className="rounded-lg border border-dashed border-blue-200 bg-[#f8fbff] px-4 py-6 text-center">
@@ -3445,15 +3631,23 @@ function CustomerProfile({
 function RepurchaseAlerts({
   alerts,
   customers,
+  products,
+  sellers,
+  user,
   alertStatuses,
   onStatusChange,
   onRegisterContact,
+  onCreateAlert,
 }: {
   alerts: AlertRow[];
   customers: CustomerRow[];
+  products: ProductRow[];
+  sellers: SellerRow[];
+  user: CrmSessionUser;
   alertStatuses: Record<string, RepurchaseAlertStatus>;
   onStatusChange: (id: string, status: RepurchaseAlertStatus) => Promise<void>;
   onRegisterContact: (record: Omit<ContactRecord, "id">) => Promise<void>;
+  onCreateAlert: (alert: AlertRow) => void;
 }) {
   const [filter, setFilter] = useState("todos");
   const [page, setPage] = useState(1);
@@ -3475,7 +3669,13 @@ function RepurchaseAlerts({
   return (
     <div className="space-y-5">
       <PageTitle eyebrow="Operação do dia" title="Alertas de recompra" description="Fila calculada por produto, departamento, palavra-chave e histórico individual." />
-      <ManualAlertPanel />
+      <ManualAlertPanel
+        customers={customers}
+        products={products}
+        sellers={sellers}
+        user={user}
+        onCreateAlert={onCreateAlert}
+      />
       <Panel title="Alertas priorizados" icon={Bell} action={`${filteredAlerts.length} alertas`}>
         <div className="mb-4 flex flex-wrap gap-2">
           {[
@@ -3612,56 +3812,191 @@ function RepurchaseAlerts({
 }
 
 function ManualAlertPanel({
-  customerName = "Selecionar cliente",
+  customers,
+  products,
+  sellers,
+  user,
+  onCreateAlert,
+  initialCustomerId,
   compact = false,
 }: {
-  customerName?: string;
+  customers: CustomerRow[];
+  products: ProductRow[];
+  sellers: SellerRow[];
+  user: CrmSessionUser;
+  onCreateAlert: (alert: AlertRow) => void;
+  initialCustomerId?: string;
   compact?: boolean;
 }) {
+  const initialCustomer = customers.find((customer) => customer.id === initialCustomerId) ?? customers[0];
+  const initialProduct = products[0];
+  const [customerQuery, setCustomerQuery] = useState(initialCustomer?.name ?? "");
+  const [productQuery, setProductQuery] = useState(initialProduct?.name ?? "");
+  const [days, setDays] = useState(String(initialProduct?.defaultRepurchaseDays ?? initialCustomer?.purchaseCycleDays ?? 45));
+  const [recommendedIso, setRecommendedIso] = useState(addIsoDays(crmReferenceDate, 7));
+  const [priority, setPriority] = useState<AlertRow["priorityCode"]>("alta");
+  const [note, setNote] = useState("Cliente pediu lembrete quando estiver proximo da proxima compra.");
+  const [alsoWhatsapp, setAlsoWhatsapp] = useState(true);
+  const [error, setError] = useState("");
+  const [savedMessage, setSavedMessage] = useState("");
+  const customerDatalistId = compact ? "manual-alert-customers-compact" : "manual-alert-customers";
+  const productDatalistId = compact ? "manual-alert-products-compact" : "manual-alert-products";
+  const selectedCustomer = findByName(customers, customerQuery, (customer) => customer.name);
+  const selectedProduct = findByName(products, productQuery, (product) => product.name);
+
   return (
     <Panel
       title={compact ? "Alerta manual para este cliente" : "Cadastrar alerta manual"}
       icon={Plus}
-      action="Controle do usuário"
+      action="Busca na base"
     >
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
-        <Field label="Cliente" value={customerName} />
-        <Field label="Produto" value="Ração premium 15kg" />
-        <Field label="Recorrência" value="45 dias" />
-        <Field label="Data do alerta" value="20/06/2026" />
-        <Field label="Prioridade" value="Alta" />
-        <button className="flex h-11 items-center justify-center gap-2 self-end rounded-lg bg-[#0753a6] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-[#063d7c]">
-          <Bell size={16} />
-          Salvar alerta
-        </button>
-      </div>
-      <div className="mt-3 grid gap-3 lg:grid-cols-[1fr_auto]">
-        <label className="block">
-          <span className="text-xs font-medium uppercase tracking-wide text-slate-400">Observação comercial</span>
-          <input
-            defaultValue="Cliente pediu lembrete quando estiver próximo da próxima compra."
-            className="mt-2 h-11 w-full rounded-lg border border-blue-100 bg-[#f8fbff] px-3 text-sm outline-none focus:border-cyan-400 focus:bg-white"
-          />
-        </label>
-        <label className="flex items-center gap-2 self-end rounded-lg border border-blue-100 bg-[#f8fbff] px-3 py-3 text-sm font-medium text-slate-700">
-          <input type="checkbox" defaultChecked className="h-4 w-4 accent-emerald-600" />
-          Avisar também por WhatsApp
-        </label>
-      </div>
+      <form
+        className="grid gap-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          setError("");
+          setSavedMessage("");
+
+          if (!selectedCustomer) {
+            setError("Selecione um cliente que exista na base.");
+            return;
+          }
+          if (!selectedProduct) {
+            setError("Selecione um produto que exista na base.");
+            return;
+          }
+
+          const recurrenceDays = Number(days);
+          if (!Number.isFinite(recurrenceDays) || recurrenceDays <= 0) {
+            setError("Informe uma recorrencia maior que zero.");
+            return;
+          }
+
+          const seller =
+            sellers.find((item) => item.id === selectedCustomer.preferredSellerId) ??
+            resolveSellerForUser(user.sellerId) ??
+            sellers[0];
+
+          onCreateAlert(buildManualAlertRow({
+            customer: selectedCustomer,
+            product: selectedProduct,
+            recurrenceDays,
+            recommendedIso,
+            priority,
+            seller,
+          }));
+          setSavedMessage(`Alerta salvo para ${selectedCustomer.name}.`);
+        }}
+      >
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[1.2fr_1.2fr_0.65fr_0.75fr_0.7fr_auto]">
+          <label className="block">
+            <span className="text-xs font-medium uppercase tracking-wide text-slate-400">Cliente</span>
+            <input
+              list={customerDatalistId}
+              value={customerQuery}
+              onChange={(event) => setCustomerQuery(event.target.value)}
+              className="mt-2 h-11 w-full rounded-lg border border-blue-100 bg-[#f8fbff] px-3 text-sm outline-none focus:border-cyan-400 focus:bg-white"
+              placeholder="Buscar cliente"
+            />
+            <datalist id={customerDatalistId}>
+              {customers.map((customer) => <option key={customer.id} value={customer.name} />)}
+            </datalist>
+          </label>
+          <label className="block">
+            <span className="text-xs font-medium uppercase tracking-wide text-slate-400">Produto</span>
+            <input
+              list={productDatalistId}
+              value={productQuery}
+              onChange={(event) => setProductQuery(event.target.value)}
+              className="mt-2 h-11 w-full rounded-lg border border-blue-100 bg-[#f8fbff] px-3 text-sm outline-none focus:border-cyan-400 focus:bg-white"
+              placeholder="Buscar produto"
+            />
+            <datalist id={productDatalistId}>
+              {products.map((product) => <option key={product.id} value={product.name} />)}
+            </datalist>
+          </label>
+          <FormInput label="Recorrencia" value={days} onChange={setDays} type="number" />
+          <FormInput label="Data do alerta" value={recommendedIso} onChange={setRecommendedIso} type="date" />
+          <FormSelect label="Prioridade" value={priority} onChange={(value) => setPriority(value as AlertRow["priorityCode"])}>
+            <option value="alta">Alta</option>
+            <option value="media">Media</option>
+            <option value="baixa">Baixa</option>
+          </FormSelect>
+          <button
+            type="submit"
+            className="flex h-11 items-center justify-center gap-2 self-end rounded-lg bg-[#0753a6] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-[#063d7c]"
+          >
+            <Bell size={16} />
+            Salvar
+          </button>
+        </div>
+        <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
+          <label className="block">
+            <span className="text-xs font-medium uppercase tracking-wide text-slate-400">Observacao comercial</span>
+            <input
+              value={note}
+              onChange={(event) => setNote(event.target.value)}
+              className="mt-2 h-11 w-full rounded-lg border border-blue-100 bg-[#f8fbff] px-3 text-sm outline-none focus:border-cyan-400 focus:bg-white"
+            />
+          </label>
+          <label className="flex items-center gap-2 self-end rounded-lg border border-blue-100 bg-[#f8fbff] px-3 py-3 text-sm font-medium text-slate-700">
+            <input
+              type="checkbox"
+              checked={alsoWhatsapp}
+              onChange={(event) => setAlsoWhatsapp(event.target.checked)}
+              className="h-4 w-4 accent-emerald-600"
+            />
+            Avisar tambem por WhatsApp
+          </label>
+        </div>
+        {(error || savedMessage) && (
+          <p className={`text-sm font-semibold ${error ? "text-red-700" : "text-emerald-700"}`}>
+            {error || savedMessage}
+          </p>
+        )}
+      </form>
     </Panel>
   );
 }
 
-function Field({ label, value }: { label: string; value: string }) {
-  return (
-    <label className="block">
-      <span className="text-xs font-medium uppercase tracking-wide text-slate-400">{label}</span>
-      <input
-        defaultValue={value}
-        className="mt-2 h-11 w-full rounded-lg border border-blue-100 bg-[#f8fbff] px-3 text-sm outline-none focus:border-cyan-400 focus:bg-white"
-      />
-    </label>
-  );
+function buildManualAlertRow({
+  customer,
+  product,
+  recurrenceDays,
+  recommendedIso,
+  priority,
+  seller,
+}: {
+  customer: CustomerRow;
+  product: ProductRow;
+  recurrenceDays: number;
+  recommendedIso: string;
+  priority: AlertRow["priorityCode"];
+  seller?: SellerRow;
+}): AlertRow {
+  return {
+    id: `manual-alert-${customer.id}-${product.id}-${Date.now()}`,
+    customerId: customer.id,
+    product: product.name,
+    client: customer.name,
+    buyDate: customer.lastBuy,
+    buyDateIso: customer.lastBuyIso,
+    days: `${Math.round(recurrenceDays)} dias`,
+    recommended: formatContactDate(recommendedIso),
+    recommendedIso,
+    priority: capitalizePriority(priority),
+    priorityCode: priority,
+    seller: seller?.name ?? customer.preferredSeller,
+    sellerId: seller?.id ?? customer.preferredSellerId,
+    department: product.department || "Manual",
+    status: "pendente",
+    origin: "manual",
+  };
+}
+
+function findByName<T>(items: T[], value: string, getName: (item: T) => string) {
+  const normalizedValue = value.trim().toLowerCase();
+  return items.find((item) => getName(item).trim().toLowerCase() === normalizedValue);
 }
 
 function SellerPortfolio({
@@ -3881,9 +4216,26 @@ function Opportunities({
   onDelete: (id: string) => Promise<void>;
 }) {
   const [editing, setEditing] = useState<CrmOpportunity | "new" | null>(null);
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<CrmOpportunity["status"] | "todos">("todos");
+  const [productFilter, setProductFilter] = useState("todos");
   const allowedSellerId = resolveSellerForUser(user.sellerId)?.id ?? user.sellerId;
   const canManage = (item?: CrmOpportunity) =>
     user.role !== "vendedor" || !item || item.sellerId === allowedSellerId;
+  const opportunityGroups = buildOpportunityGroups(items, customers);
+  const productOptions = opportunityGroups.map((group) => group.productName);
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredItems = items.filter((item) => {
+    const matchesQuery =
+      !normalizedQuery ||
+      item.customerName.toLowerCase().includes(normalizedQuery) ||
+      item.sourceProductName.toLowerCase().includes(normalizedQuery) ||
+      item.suggestedProductName.toLowerCase().includes(normalizedQuery);
+    const matchesStatus = statusFilter === "todos" || item.status === statusFilter;
+    const matchesProduct = productFilter === "todos" || item.suggestedProductName === productFilter;
+    return matchesQuery && matchesStatus && matchesProduct;
+  });
+  const visibleItems = filteredItems.slice(0, 100);
 
   return (
     <div className="space-y-5">
@@ -3894,47 +4246,128 @@ function Opportunities({
           Nova oportunidade
         </button>
       </div>
-      <div className="grid gap-4 lg:grid-cols-3">
-        {items.map((item) => {
-          const customer = customers.find((entry) => entry.id === item.customerId);
-
-          return (
-            <Panel key={item.id} title={item.customerName} icon={ShoppingBag} action={`${item.confidence}% confiança`}>
-              <p className="text-sm text-slate-500">Produto comprado</p>
-              <p className="mt-1 text-lg font-semibold">{item.sourceProductName}</p>
-              <p className="mt-2 text-xs font-medium text-[#0753a6]">Responsável: {item.sellerName}</p>
-              <div className="mt-5 flex items-center justify-between rounded-lg border border-blue-100 bg-[#f8fbff] px-3 py-3 text-sm">
-                <span>{item.suggestedProductName}</span>
-                <ChevronRight size={16} className="text-slate-400" />
-              </div>
-              <p className="mt-3 text-xs leading-5 text-slate-500">{item.reason}</p>
-              <div className="mt-5 h-2 rounded-full bg-slate-100">
-                <div className="h-2 rounded-full bg-gradient-to-r from-[#0753a6] to-cyan-400" style={{ width: `${item.confidence}%` }} />
-              </div>
-              <div className="mt-4 flex items-center justify-between gap-2">
-                <span className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-semibold capitalize text-cyan-700">
-                  {item.status.replace("_", " ")}
-                </span>
-                {canManage(item) && (
-                  <div className="flex gap-2">
-                    <button type="button" aria-label={`Editar oportunidade de ${item.customerName}`} onClick={() => setEditing(item)} className="flex h-9 w-9 items-center justify-center rounded-lg border border-blue-100 bg-white text-[#0753a6]">
-                      <Pencil size={15} />
-                    </button>
-                    <button type="button" aria-label={`Excluir oportunidade de ${item.customerName}`} onClick={() => { if (window.confirm("Excluir esta oportunidade?")) void onDelete(item.id); }} className="flex h-9 w-9 items-center justify-center rounded-lg border border-red-200 bg-white text-red-700">
-                      <Trash2 size={15} />
-                    </button>
-                  </div>
-                )}
-              </div>
-              {customer && (
-                <div className="mt-5">
-                  <WhatsAppButton customer={customer} message={`Olá! Aqui é da Hennder CRM. Temos uma sugestão que combina com sua compra de ${item.sourceProductName}: ${item.suggestedProductName}. Gostaria de saber mais?`} />
-                </div>
-              )}
-            </Panel>
-          );
-        })}
+      <div className="grid gap-4 md:grid-cols-4">
+        <MetricCard label="Oportunidades" value={`${items.length}`} />
+        <MetricCard label="Campanhas sugeridas" value={`${opportunityGroups.length}`} />
+        <MetricCard label="Clientes alvo" value={`${new Set(items.map((item) => item.customerId)).size}`} />
+        <MetricCard label="Confiança média" value={`${average(items.map((item) => item.confidence))}%`} />
       </div>
+      <Panel title="Campanhas sugeridas" icon={Target} action="Agrupadas por produto">
+        <div className="grid gap-3 xl:grid-cols-3">
+          {opportunityGroups.map((group) => (
+            <article key={group.productName} className="rounded-lg border border-blue-100 bg-[#f8fbff] p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Produto sugerido</p>
+                  <h2 className="mt-1 text-lg font-black text-[#123252]">{group.productName}</h2>
+                </div>
+                <span className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-bold text-cyan-700">
+                  {group.averageConfidence}% confiança
+                </span>
+              </div>
+              <p className="mt-3 text-sm leading-5 text-slate-600">
+                Use como campanha de venda cruzada: a equipe aborda clientes que compraram itens relacionados e registra o retorno para medir resultado.
+              </p>
+              <div className="mt-4 grid grid-cols-3 gap-2 text-center">
+                <MiniStat label="Clientes" value={`${group.customerCount}`} />
+                <MiniStat label="Potencial" value={formatCurrency(group.potentialValue)} />
+                <MiniStat label="Abertas" value={`${group.openCount}`} />
+              </div>
+              <div className="mt-4 space-y-2">
+                {group.topCustomers.map((customer) => (
+                  <div key={customer} className="flex items-center justify-between rounded-md bg-white px-3 py-2 text-xs">
+                    <span className="font-semibold text-slate-700">{customer}</span>
+                    <ChevronRight size={14} className="text-slate-400" />
+                  </div>
+                ))}
+              </div>
+            </article>
+          ))}
+          {!opportunityGroups.length && <EmptyState text="Nenhuma campanha de oportunidade gerada ainda." />}
+        </div>
+      </Panel>
+      <Panel title="Clientes alvo" icon={ShoppingBag} action={`${visibleItems.length} de ${filteredItems.length} oportunidades`}>
+        <div className="mb-4 grid gap-3 md:grid-cols-[1.2fr_0.75fr_0.9fr]">
+          <div className="flex h-11 items-center gap-2 rounded-lg border border-blue-100 bg-[#f8fbff] px-3 focus-within:border-cyan-400">
+            <Search size={17} className="text-slate-400" />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Cliente, origem ou produto"
+              className="w-full bg-transparent text-sm outline-none"
+            />
+          </div>
+          <FilterSelect label="Status" value={statusFilter} onChange={(value) => setStatusFilter(value as CrmOpportunity["status"] | "todos")}>
+            <option value="todos">Todos</option>
+            <option value="aberta">Aberta</option>
+            <option value="em_contato">Em contato</option>
+            <option value="convertida">Convertida</option>
+            <option value="descartada">Descartada</option>
+          </FilterSelect>
+          <FilterSelect label="Produto sugerido" value={productFilter} onChange={setProductFilter}>
+            <option value="todos">Todos os produtos</option>
+            {productOptions.map((product) => <option key={product} value={product}>{product}</option>)}
+          </FilterSelect>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="min-w-[980px] w-full text-left text-sm">
+            <thead className="text-xs uppercase tracking-wide text-slate-400">
+              <tr>
+                <th className="px-3 py-2">Cliente</th>
+                <th className="px-3 py-2">Comprou</th>
+                <th className="px-3 py-2">Sugerir</th>
+                <th className="px-3 py-2">Responsável</th>
+                <th className="px-3 py-2">Status</th>
+                <th className="px-3 py-2">Ação</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-blue-50">
+              {visibleItems.map((item) => {
+                const customer = customers.find((entry) => entry.id === item.customerId);
+
+                return (
+                  <tr key={item.id} className="align-top hover:bg-cyan-50/60">
+                    <td className="px-3 py-3">
+                      <p className="font-semibold text-[#123252]">{item.customerName}</p>
+                      <p className="mt-1 text-xs text-slate-500">{item.confidence}% confiança</p>
+                    </td>
+                    <td className="px-3 py-3">{item.sourceProductName}</td>
+                    <td className="px-3 py-3 font-semibold text-[#0753a6]">{item.suggestedProductName}</td>
+                    <td className="px-3 py-3">{item.sellerName}</td>
+                    <td className="px-3 py-3">
+                      <span className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-semibold capitalize text-cyan-700">
+                        {item.status.replace("_", " ")}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3">
+                      <div className="flex flex-wrap gap-2">
+                        {customer && (
+                          <WhatsAppButton
+                            customer={customer}
+                            message={`Olá! Aqui é da Hennder CRM. Temos uma sugestão que combina com sua compra de ${item.sourceProductName}: ${item.suggestedProductName}. Gostaria de saber mais?`}
+                            compact
+                          />
+                        )}
+                        {canManage(item) && (
+                          <>
+                            <button type="button" aria-label={`Editar oportunidade de ${item.customerName}`} onClick={() => setEditing(item)} className="flex h-10 w-10 items-center justify-center rounded-lg border border-blue-100 bg-white text-[#0753a6]">
+                              <Pencil size={15} />
+                            </button>
+                            <button type="button" aria-label={`Excluir oportunidade de ${item.customerName}`} onClick={() => { if (window.confirm("Excluir esta oportunidade?")) void onDelete(item.id); }} className="flex h-10 w-10 items-center justify-center rounded-lg border border-red-200 bg-white text-red-700">
+                              <Trash2 size={15} />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {!filteredItems.length && <EmptyState text="Nenhuma oportunidade encontrada para os filtros atuais." />}
+        </div>
+      </Panel>
       {editing && (
         <OpportunityModal
           opportunity={editing === "new" ? undefined : editing}
@@ -3950,6 +4383,54 @@ function Opportunities({
       )}
     </div>
   );
+}
+
+function buildOpportunityGroups(items: CrmOpportunity[], customers: CustomerRow[]) {
+  const customerById = new Map(customers.map((customer) => [customer.id, customer]));
+  const groups = new Map<string, {
+    productName: string;
+    customerIds: Set<string>;
+    confidenceValues: number[];
+    potentialValue: number;
+    openCount: number;
+    topCustomers: string[];
+  }>();
+
+  for (const item of items) {
+    const current = groups.get(item.suggestedProductName) ?? {
+      productName: item.suggestedProductName,
+      customerIds: new Set<string>(),
+      confidenceValues: [],
+      potentialValue: 0,
+      openCount: 0,
+      topCustomers: [],
+    };
+    const customer = customerById.get(item.customerId);
+    if (!current.customerIds.has(item.customerId)) {
+      current.customerIds.add(item.customerId);
+      current.potentialValue += customer?.potentialValue ?? 0;
+      if (current.topCustomers.length < 5) current.topCustomers.push(item.customerName);
+    }
+    current.confidenceValues.push(item.confidence);
+    if (item.status === "aberta" || item.status === "em_contato") current.openCount += 1;
+    groups.set(item.suggestedProductName, current);
+  }
+
+  return [...groups.values()]
+    .map((group) => ({
+      productName: group.productName,
+      customerCount: group.customerIds.size,
+      averageConfidence: average(group.confidenceValues),
+      potentialValue: group.potentialValue,
+      openCount: group.openCount,
+      topCustomers: group.topCustomers,
+    }))
+    .sort((left, right) => right.customerCount - left.customerCount || right.averageConfidence - left.averageConfidence);
+}
+
+function average(values: number[]) {
+  if (!values.length) return 0;
+  return Math.round(values.reduce((total, value) => total + value, 0) / values.length);
 }
 
 function Agenda({
@@ -5242,6 +5723,59 @@ function formatDateTime(value: string) {
     dateStyle: "short",
     timeStyle: "short",
   }).format(new Date(value));
+}
+
+function normalizeContactDateIso(value: string) {
+  const rawValue = value.trim();
+  const isoDate = rawValue.match(/^(\d{4})-(\d{2})-(\d{2})/u);
+  if (isoDate) return isoDate[0];
+
+  const brazilianDate = rawValue.match(/^(\d{2})\/(\d{2})\/(\d{4})/u);
+  if (brazilianDate) {
+    const [, day, month, year] = brazilianDate;
+    return `${year}-${month}-${day}`;
+  }
+
+  const parsed = new Date(rawValue);
+  return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString().slice(0, 10);
+}
+
+function buildSellerContactMetrics(contactRecords: ContactRecord[], todayIso: string) {
+  const weekStartIso = addIsoDays(todayIso, -6);
+  const monthPrefix = todayIso.slice(0, 7);
+  const rows = new Map<string, {
+    responsible: string;
+    today: number;
+    week: number;
+    month: number;
+    interested: number;
+    followUps: number;
+    noAnswer: number;
+  }>();
+
+  for (const record of contactRecords) {
+    const dateIso = normalizeContactDateIso(record.contactedAt);
+    const responsible = record.responsible || "Sem responsável";
+    const current = rows.get(responsible) ?? {
+      responsible,
+      today: 0,
+      week: 0,
+      month: 0,
+      interested: 0,
+      followUps: 0,
+      noAnswer: 0,
+    };
+
+    if (dateIso === todayIso) current.today += 1;
+    if (dateIso >= weekStartIso && dateIso <= todayIso) current.week += 1;
+    if (dateIso.startsWith(monthPrefix)) current.month += 1;
+    if (record.outcome === "interested") current.interested += 1;
+    if (record.outcome === "follow_up") current.followUps += 1;
+    if (record.outcome === "no_answer") current.noAnswer += 1;
+    rows.set(responsible, current);
+  }
+
+  return [...rows.values()].sort((left, right) => right.today - left.today || right.week - left.week || right.month - left.month);
 }
 
 function addIsoDays(value: string, days: number) {

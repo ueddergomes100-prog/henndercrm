@@ -146,12 +146,30 @@ export class SupabaseCrmWorkspaceRepository implements ICrmWorkspaceRepository {
   async createContact(input: Omit<CrmContactRecord, "id">) {
     const customer = await this.resolveCustomer(input.customerId);
     const sellerId = await this.resolvePreferredSellerId(input.customerId);
+    const channel = toDatabaseChannel(input.channel);
+    const existingAutomaticContact = isAutomaticContactNote(input.note)
+      ? await this.findAutomaticContactToday(customer.id, channel)
+      : undefined;
+
+    if (existingAutomaticContact) {
+      return {
+        ...input,
+        id: existingAutomaticContact.id,
+        outcome: fromDatabaseOutcome(existingAutomaticContact.resultado),
+        note: existingAutomaticContact.observacao ?? input.note,
+        nextContact: existingAutomaticContact.proximo_contato ?? "",
+        contactedAt: formatContactDate(existingAutomaticContact.data_contato),
+        channel: fromDatabaseChannel(existingAutomaticContact.tipo_contato),
+        responsible: existingAutomaticContact.responsavel_nome ?? input.responsible,
+      };
+    }
+
     const [row] = await this.client.insert<{ id: string }>(
       "crm_historico_contatos",
       [{
         cliente_id: customer.id,
         vendedor_id: sellerId,
-        tipo_contato: toDatabaseChannel(input.channel),
+        tipo_contato: channel,
         data_contato: new Date().toISOString(),
         resultado: toDatabaseOutcome(input.outcome),
         observacao: input.note || null,
@@ -232,6 +250,20 @@ export class SupabaseCrmWorkspaceRepository implements ICrmWorkspaceRepository {
 
   async deleteOpportunity(id: string) {
     await this.client.delete("crm_oportunidades", { id });
+  }
+
+  private async findAutomaticContactToday(customerId: string, channel: string) {
+    const rows = await this.client.select<ContactRow>("crm_historico_contatos", {
+      select:
+        "id,cliente_id,vendedor_id,tipo_contato,data_contato,resultado,observacao,proximo_contato,responsavel_nome",
+      cliente_id: `eq.${customerId}`,
+      tipo_contato: `eq.${channel}`,
+      data_contato: `gte.${todayStartIso()}`,
+      order: "data_contato.desc",
+      limit: 25,
+    });
+
+    return rows.find((row) => isAutomaticContactNote(row.observacao ?? ""));
   }
 
   private async resolveCustomer(domainId: string) {
@@ -330,6 +362,15 @@ function formatContactDate(value: string) {
   return new Intl.DateTimeFormat("pt-BR", {
     timeZone: "America/Sao_Paulo",
   }).format(new Date(value));
+}
+
+function todayStartIso() {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+}
+
+function isAutomaticContactNote(note: string) {
+  return note.trim().toLowerCase().startsWith("registro autom");
 }
 
 function toDatabaseChannel(channel: ContactChannel) {
