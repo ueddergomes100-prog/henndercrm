@@ -188,6 +188,12 @@ type SyncLogResponse = {
     message: string;
   }>;
 };
+type CustomerContactUpdate = {
+  customerId: string;
+  phone: string;
+  whatsapp: string;
+  customerName?: string;
+};
 
 const contactOutcomeLabels: Record<ContactOutcome, string> = {
   not_interested: "Cliente não quis",
@@ -312,6 +318,7 @@ export default function Home() {
   const [theme, setTheme] = useState<Theme>("light");
   const [manualCustomers, setManualCustomers] = useState<CustomerRow[]>([]);
   const [manualAlerts, setManualAlerts] = useState<AlertRow[]>([]);
+  const [customerContactUpdates, setCustomerContactUpdates] = useState<Record<string, CustomerContactUpdate>>({});
   const [quickAction, setQuickAction] = useState<QuickAction | null>(null);
   const [isSigningOut, setIsSigningOut] = useState(false);
 
@@ -429,9 +436,16 @@ export default function Home() {
     );
   }
 
-  const scopedData = buildScopedCrmData(user, manualCustomers, manualAlerts, agendaItems, opportunityItems);
+  const scopedData = applyCustomerContactUpdates(
+    buildScopedCrmData(user, manualCustomers, manualAlerts, agendaItems, opportunityItems),
+    customerContactUpdates,
+  );
   const appCustomers = scopedData.customers;
-  const appSaleCustomers = includeSaleCustomers(appCustomers, customers, scopedData.sales);
+  const appSaleCustomers = includeSaleCustomers(
+    appCustomers,
+    applyCustomerListContactUpdates(customers, customerContactUpdates),
+    scopedData.sales,
+  );
   const appAlerts = scopedData.alerts;
   const appContactRecords = filterContactRecordsForData(contactRecords, appCustomers);
   const safeSelectedCustomer =
@@ -543,6 +557,40 @@ export default function Home() {
     setOpportunityItems((current) => current.filter((item) => item.id !== id));
   };
 
+  const updateCustomerContact = async (customer: CustomerRow, rawPhone: string) => {
+    const normalized = normalizeBrazilianWhatsAppNumber(rawPhone);
+    if (!normalized) {
+      throw new Error("Informe um WhatsApp valido com DDD. Exemplo: (33) 99999-9999.");
+    }
+
+    const update: CustomerContactUpdate = customer.id.startsWith("manual-customer-")
+      ? {
+          customerId: customer.id,
+          customerName: customer.name,
+          phone: rawPhone.trim(),
+          whatsapp: rawPhone.trim(),
+        }
+      : await mutateWorkspace<CustomerContactUpdate>({
+          action: "update_customer_contact",
+          contact: {
+            customerId: customer.id,
+            phone: rawPhone.trim(),
+            whatsapp: rawPhone.trim(),
+          },
+        });
+
+    setCustomerContactUpdates((current) => ({
+      ...current,
+      [customer.id]: update,
+    }));
+    setManualCustomers((current) =>
+      current.map((item) => (item.id === customer.id ? patchCustomerContact(item, update) : item)),
+    );
+    setSelectedCustomer((current) =>
+      current?.id === customer.id ? patchCustomerContact(current, update) : current,
+    );
+  };
+
   const changeTheme = (nextTheme: Theme) => {
     setTheme(nextTheme);
     document.documentElement.dataset.theme = nextTheme;
@@ -594,6 +642,8 @@ export default function Home() {
                 saleItems={scopedData.saleItems}
                 products={scopedData.products}
                 sellers={scopedData.sellers}
+                user={user}
+                onUpdateContact={updateCustomerContact}
               />
             )}
             {visibleView === "resultados" && (
@@ -605,7 +655,14 @@ export default function Home() {
                 sales={scopedData.sales}
               />
             )}
-            {visibleView === "clientes" && <Customers customers={appCustomers} openProfile={openProfile} />}
+            {visibleView === "clientes" && (
+              <Customers
+                customers={appCustomers}
+                openProfile={openProfile}
+                user={user}
+                onUpdateContact={updateCustomerContact}
+              />
+            )}
             {visibleView === "vendas" && (
               <SalesModule
                 customers={appSaleCustomers}
@@ -628,6 +685,8 @@ export default function Home() {
                 openProfile={openProfile}
                 contactRecords={appContactRecords}
                 onRegisterContact={registerContact}
+                user={user}
+                onUpdateContact={updateCustomerContact}
               />
             )}
             {visibleView === "perfil" && (
@@ -641,6 +700,7 @@ export default function Home() {
                 products={scopedData.products}
                 user={user}
                 onCreateAlert={createManualAlert}
+                onUpdateContact={updateCustomerContact}
               />
             )}
             {visibleView === "recompra" && (
@@ -654,6 +714,7 @@ export default function Home() {
                 onStatusChange={updateAlertStatus}
                 onRegisterContact={registerContact}
                 onCreateAlert={createManualAlert}
+                onUpdateContact={updateCustomerContact}
               />
             )}
             {visibleView === "carteira" && (
@@ -664,6 +725,7 @@ export default function Home() {
                 onRegisterContact={registerContact}
                 user={user}
                 sellers={scopedData.sellers}
+                onUpdateContact={updateCustomerContact}
               />
             )}
             {visibleView === "vendedores" && <SellersModule customers={appCustomers} alerts={appAlerts} />}
@@ -678,6 +740,7 @@ export default function Home() {
               sellers={scopedData.sellers}
               onSave={saveOpportunity}
               onDelete={deleteOpportunity}
+              onUpdateContact={updateCustomerContact}
             />
             )}
             {visibleView === "agenda" && (
@@ -829,6 +892,32 @@ function buildScopedCrmData(
             event.sellerId === scopedSellerId ||
         (event.customerId ? customerIds.has(event.customerId) : false),
     ),
+  };
+}
+
+function applyCustomerContactUpdates(
+  data: ScopedCrmData,
+  updates: Record<string, CustomerContactUpdate>,
+): ScopedCrmData {
+  return {
+    ...data,
+    customers: applyCustomerListContactUpdates(data.customers, updates),
+  };
+}
+
+function applyCustomerListContactUpdates(
+  list: CustomerRow[],
+  updates: Record<string, CustomerContactUpdate>,
+) {
+  return list.map((customer) => patchCustomerContact(customer, updates[customer.id]));
+}
+
+function patchCustomerContact(customer: CustomerRow, update?: CustomerContactUpdate): CustomerRow {
+  if (!update) return customer;
+  return {
+    ...customer,
+    phone: update.phone || customer.phone,
+    whatsapp: update.whatsapp || customer.whatsapp,
   };
 }
 
@@ -2920,6 +3009,8 @@ function Dashboard({
   saleItems,
   products,
   sellers,
+  user,
+  onUpdateContact,
 }: {
   customers: CustomerRow[];
   openProfile: (customer: CustomerRow) => void;
@@ -2930,6 +3021,8 @@ function Dashboard({
   saleItems: SaleItemRow[];
   products: ProductRow[];
   sellers: SellerRow[];
+  user: CrmSessionUser;
+  onUpdateContact: (customer: CustomerRow, phone: string) => Promise<void>;
 }) {
   const chartColors = getChartColors(theme);
   const inactiveCustomers = [...customers]
@@ -3100,7 +3193,9 @@ function Dashboard({
               <div className="flex items-center gap-2 md:justify-end">
                 <WhatsAppButton
                   customer={customer}
+                  user={user}
                   message={`Olá! Aqui é da Hennder CRM. Identificamos uma oportunidade de recompra e gostaríamos de conversar com você.`}
+                  onUpdateContact={onUpdateContact}
                   compact
                 />
                 <button
@@ -3166,11 +3261,15 @@ function RecoveryCustomers({
   openProfile,
   contactRecords,
   onRegisterContact,
+  user,
+  onUpdateContact,
 }: {
   customers: CustomerRow[];
   openProfile: (customer: CustomerRow) => void;
   contactRecords: ContactRecord[];
   onRegisterContact: (record: Omit<ContactRecord, "id">) => Promise<void>;
+  user: CrmSessionUser;
+  onUpdateContact: (customer: CustomerRow, phone: string) => Promise<void>;
 }) {
   const [contactCustomer, setContactCustomer] = useState<CustomerRow | null>(null);
   const [activeFilter, setActiveFilter] = useState<RecoveryFilter>("todos");
@@ -3271,7 +3370,9 @@ function RecoveryCustomers({
                 <div className="mt-4">
                   <WhatsAppButton
                     customer={customer}
+                    user={user}
                     message="Olá! Aqui é da Hennder CRM. Sentimos sua falta e gostaríamos de ajudar com sua próxima compra. Podemos conversar?"
+                    onUpdateContact={onUpdateContact}
                   />
                 </div>
                 <div className="mt-2 grid grid-cols-2 gap-2">
@@ -3340,9 +3441,13 @@ function RecoveryCustomers({
 function Customers({
   customers,
   openProfile,
+  user,
+  onUpdateContact,
 }: {
   customers: CustomerRow[];
   openProfile: (customer: CustomerRow) => void;
+  user: CrmSessionUser;
+  onUpdateContact: (customer: CustomerRow, phone: string) => Promise<void>;
 }) {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("todos");
@@ -3428,7 +3533,12 @@ function Customers({
                   <td className="px-3 py-4 font-semibold text-orange-700">{customer.potential}</td>
                   <td className="rounded-r-lg px-3 py-4 text-right">
                     <div className="flex items-center justify-end gap-2">
-                      <WhatsAppButton customer={customer} compact />
+                      <WhatsAppButton
+                        customer={customer}
+                        user={user}
+                        onUpdateContact={onUpdateContact}
+                        compact
+                      />
                       <button onClick={() => openProfile(customer)} className="rounded-lg bg-[#0753a6] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#063d7c]">
                         Abrir perfil
                       </button>
@@ -3454,6 +3564,7 @@ function CustomerProfile({
   products,
   user,
   onCreateAlert,
+  onUpdateContact,
 }: {
   alerts: AlertRow[];
   customer: CustomerRow;
@@ -3464,6 +3575,7 @@ function CustomerProfile({
   products: ProductRow[];
   user: CrmSessionUser;
   onCreateAlert: (alert: AlertRow, note?: string) => Promise<void>;
+  onUpdateContact: (customer: CustomerRow, phone: string) => Promise<void>;
 }) {
   const customerSales = sales
     .filter((sale) => sale.customerId === customer.id)
@@ -3492,7 +3604,9 @@ function CustomerProfile({
               <div className="mt-4">
                 <WhatsAppButton
                   customer={customer}
+                  user={user}
                   message={`Olá, ${customer.name}! Aqui é da Hennder CRM. Gostaria de conversar sobre suas próximas compras e oportunidades comerciais.`}
+                  onUpdateContact={onUpdateContact}
                 />
               </div>
             </div>
@@ -3665,6 +3779,7 @@ function RepurchaseAlerts({
   onStatusChange,
   onRegisterContact,
   onCreateAlert,
+  onUpdateContact,
 }: {
   alerts: AlertRow[];
   customers: CustomerRow[];
@@ -3675,6 +3790,7 @@ function RepurchaseAlerts({
   onStatusChange: (id: string, status: RepurchaseAlertStatus) => Promise<void>;
   onRegisterContact: (record: Omit<ContactRecord, "id">) => Promise<void>;
   onCreateAlert: (alert: AlertRow, note?: string) => Promise<void>;
+  onUpdateContact: (customer: CustomerRow, phone: string) => Promise<void>;
 }) {
   const [filter, setFilter] = useState("todos");
   const [page, setPage] = useState(1);
@@ -3754,7 +3870,9 @@ function RepurchaseAlerts({
                     {customer && (
                       <WhatsAppButton
                         customer={customer}
+                        user={user}
                         message={`Olá! Aqui é da Hennder CRM. Notamos que pode estar próximo o momento de recomprar ${alert.product}. Podemos ajudar?`}
+                        onUpdateContact={onUpdateContact}
                         compact
                       />
                     )}
@@ -4066,6 +4184,7 @@ function SellerPortfolio({
   onRegisterContact,
   user,
   sellers,
+  onUpdateContact,
 }: {
   customers: CustomerRow[];
   alerts: AlertRow[];
@@ -4073,6 +4192,7 @@ function SellerPortfolio({
   onRegisterContact: (record: Omit<ContactRecord, "id">) => Promise<void>;
   user: CrmSessionUser;
   sellers: SellerRow[];
+  onUpdateContact: (customer: CustomerRow, phone: string) => Promise<void>;
 }) {
   const [selectedSellerId, setSelectedSellerId] = useState(sellers[0]?.id ?? "");
   const [contactCustomer, setContactCustomer] = useState<CustomerRow | null>(null);
@@ -4149,6 +4269,12 @@ function SellerPortfolio({
                     <p className="text-xs uppercase tracking-wide text-slate-400">Potencial</p>
                     <p className="mt-1 font-bold text-orange-700">{customer.potential}</p>
                     <div className="mt-3 flex flex-wrap justify-end gap-2">
+                      <WhatsAppButton
+                        customer={customer}
+                        user={user}
+                        onUpdateContact={onUpdateContact}
+                        compact
+                      />
                       <button
                         type="button"
                         onClick={() => setContactCustomer(customer)}
@@ -4267,6 +4393,7 @@ function Opportunities({
   sellers,
   onSave,
   onDelete,
+  onUpdateContact,
 }: {
   items: CrmOpportunity[];
   user: CrmSessionUser;
@@ -4274,6 +4401,7 @@ function Opportunities({
   sellers: SellerRow[];
   onSave: (opportunity: Omit<CrmOpportunity, "id">, id?: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
+  onUpdateContact: (customer: CustomerRow, phone: string) => Promise<void>;
 }) {
   const [editing, setEditing] = useState<CrmOpportunity | "new" | null>(null);
   const [query, setQuery] = useState("");
@@ -4404,7 +4532,9 @@ function Opportunities({
                         {customer && (
                           <WhatsAppButton
                             customer={customer}
+                            user={user}
                             message={`Olá! Aqui é da Hennder CRM. Temos uma sugestão que combina com sua compra de ${item.sourceProductName}: ${item.suggestedProductName}. Gostaria de saber mais?`}
+                            onUpdateContact={onUpdateContact}
                             compact
                           />
                         )}
@@ -6281,51 +6411,97 @@ function formatGenericList(items: string[]) {
 }
 function WhatsAppButton({
   customer,
-  message = "Olá! Aqui é da Hennder CRM. Gostaria de conversar sobre suas próximas compras.",
+  user,
+  message,
+  sellerName,
+  onUpdateContact,
   compact = false,
 }: {
   customer: CustomerRow;
   message?: string;
+  user?: CrmSessionUser;
+  sellerName?: string;
+  onUpdateContact?: (customer: CustomerRow, phone: string) => Promise<void>;
   compact?: boolean;
 }) {
-  if (!customer.whatsapp) {
+  const [editingContact, setEditingContact] = useState(false);
+  const responsibleName = resolveWhatsAppSellerName(user, customer, sellerName);
+  const resolvedMessage = buildShoppingRuralWhatsAppMessage(customer, responsibleName, message);
+  const phone = normalizeBrazilianWhatsAppNumber(customer.whatsapp);
+
+  if (!phone) {
     return (
-      <span
-        aria-label={`${customer.name} não possui WhatsApp cadastrado`}
-        title="WhatsApp não cadastrado"
-        className={`inline-flex cursor-not-allowed items-center justify-center gap-2 rounded-lg bg-slate-200 font-semibold text-slate-500 ${
+      <>
+        <button
+          type="button"
+          onClick={() => setEditingContact(true)}
+          aria-label={`Atualizar WhatsApp de ${customer.name}`}
+          title="Atualizar WhatsApp"
+          className={`inline-flex items-center justify-center gap-2 rounded-lg bg-amber-100 font-semibold text-amber-800 shadow-sm transition hover:bg-amber-200 ${
+            compact ? "h-10 w-10" : "h-11 px-4 text-sm"
+          }`}
+        >
+          <Pencil size={compact ? 17 : 16} />
+          {!compact && <span>Atualizar WhatsApp</span>}
+        </button>
+        {editingContact && onUpdateContact && (
+          <CustomerContactModal
+            customer={customer}
+            onClose={() => setEditingContact(false)}
+            onSave={async (phoneValue) => {
+              await onUpdateContact(customer, phoneValue);
+              setEditingContact(false);
+            }}
+          />
+        )}
+      </>
+    );
+  }
+
+  const href = `https://wa.me/${phone}?text=${encodeURIComponent(resolvedMessage)}`;
+
+  return (
+    <span className="inline-flex items-center gap-1">
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={() => recordAutomaticContactIntent(customer, resolvedMessage, responsibleName)}
+        aria-label={`Chamar ${customer.name} no WhatsApp`}
+        title={`Chamar ${customer.name} no WhatsApp`}
+        className={`inline-flex items-center justify-center gap-2 rounded-lg bg-[#25d366] font-semibold text-white shadow-sm transition hover:bg-[#1ebe5d] focus-visible:outline-[#25d366] ${
           compact ? "h-10 w-10" : "h-11 px-4 text-sm"
         }`}
       >
         <MessageCircle size={compact ? 18 : 17} />
-        {!compact && <span>Sem WhatsApp</span>}
-      </span>
-    );
-  }
-
-  const phone = normalizeBrazilianWhatsAppNumber(customer.whatsapp);
-  if (!phone) return null;
-  const href = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
-
-  return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      onClick={() => recordAutomaticContactIntent(customer, message)}
-      aria-label={`Chamar ${customer.name} no WhatsApp`}
-      title={`Chamar ${customer.name} no WhatsApp`}
-      className={`inline-flex items-center justify-center gap-2 rounded-lg bg-[#25d366] font-semibold text-white shadow-sm transition hover:bg-[#1ebe5d] focus-visible:outline-[#25d366] ${
-        compact ? "h-10 w-10" : "h-11 px-4 text-sm"
-      }`}
-    >
-      <MessageCircle size={compact ? 18 : 17} />
-      {!compact && <span>Chamar no WhatsApp</span>}
-    </a>
+        {!compact && <span>Chamar no WhatsApp</span>}
+      </a>
+      {onUpdateContact && (
+        <button
+          type="button"
+          onClick={() => setEditingContact(true)}
+          aria-label={`Trocar WhatsApp de ${customer.name}`}
+          title="Trocar WhatsApp"
+          className="flex h-10 w-10 items-center justify-center rounded-lg border border-blue-100 bg-white text-[#0753a6] transition hover:border-cyan-400 hover:bg-cyan-50"
+        >
+          <Pencil size={15} />
+        </button>
+      )}
+      {editingContact && onUpdateContact && (
+        <CustomerContactModal
+          customer={customer}
+          onClose={() => setEditingContact(false)}
+          onSave={async (phoneValue) => {
+            await onUpdateContact(customer, phoneValue);
+            setEditingContact(false);
+          }}
+        />
+      )}
+    </span>
   );
 }
 
-function recordAutomaticContactIntent(customer: CustomerRow, message: string) {
+function recordAutomaticContactIntent(customer: CustomerRow, message: string, responsibleName: string) {
   const today = new Date().toISOString().slice(0, 10);
   const storageKey = `hennder-crm-contact-intent:${customer.id}:${today}:whatsapp`;
   try {
@@ -6345,9 +6521,92 @@ function recordAutomaticContactIntent(customer: CustomerRow, message: string) {
       nextContact: "",
       contactedAt: new Date().toISOString(),
       channel: "WhatsApp",
-      responsible: customer.preferredSeller || "Hennder CRM",
+      responsible: responsibleName || customer.preferredSeller || "Hennder CRM",
     },
   }).catch(() => undefined);
+}
+
+function resolveWhatsAppSellerName(
+  user: CrmSessionUser | undefined,
+  customer: CustomerRow,
+  sellerName?: string,
+) {
+  const rawName =
+    sellerName ||
+    (user?.role === "vendedor" ? resolveSellerForUser(user.sellerId)?.name : undefined) ||
+    user?.name ||
+    customer.preferredSeller ||
+    "vendedor";
+  return rawName.trim().split(/\s+/u)[0] || "vendedor";
+}
+
+function buildShoppingRuralWhatsAppMessage(
+  customer: CustomerRow,
+  sellerName: string,
+  detail?: string,
+) {
+  const intro = `Olá${customer.name ? `, ${customer.name}` : ""}! Aqui é do Shopping Rural, meu nome é ${sellerName} e sou vendedor da loja.`;
+  const cleanDetail = sanitizeWhatsAppDetail(detail);
+  return `${intro} ${cleanDetail}`;
+}
+
+function sanitizeWhatsAppDetail(detail?: string) {
+  if (!detail?.trim()) {
+    return "Sentimos sua falta e gostaríamos de ajudar com sua próxima compra. Está precisando de algo como ração, medicamento ou algum produto da loja?";
+  }
+
+  return detail
+    .replace(/^Olá,?\s*[^.!?]*[.!?]\s*/iu, "")
+    .replace(/^Aqui\s+(é|e)\s+da?\s+Hennder CRM[.!?]?\s*/iu, "")
+    .replace(/\bHennder CRM\b/giu, "Shopping Rural")
+    .trim();
+}
+
+function CustomerContactModal({
+  customer,
+  onClose,
+  onSave,
+}: {
+  customer: CustomerRow;
+  onClose: () => void;
+  onSave: (phone: string) => Promise<void>;
+}) {
+  const [phone, setPhone] = useState(customer.whatsapp || customer.phone || "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  return (
+    <ModalFrame title="Atualizar WhatsApp" onClose={onClose}>
+      <form
+        className="grid gap-4"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          setError("");
+          if (!normalizeBrazilianWhatsAppNumber(phone)) {
+            setError("Informe um WhatsApp valido com DDD. Exemplo: (33) 99999-9999.");
+            return;
+          }
+
+          setSaving(true);
+          try {
+            await onSave(phone);
+          } catch (saveError) {
+            setError(saveError instanceof Error ? saveError.message : "Falha ao atualizar WhatsApp.");
+          } finally {
+            setSaving(false);
+          }
+        }}
+      >
+        <div className="rounded-lg border border-blue-100 bg-[#f8fbff] p-3">
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Cliente</p>
+          <p className="mt-1 font-semibold text-[#123252]">{customer.name}</p>
+          <p className="mt-1 text-xs text-slate-500">Atualize quando estiver sem WhatsApp ou quando o numero estiver errado.</p>
+        </div>
+        <FormInput label="WhatsApp com DDD" value={phone} onChange={setPhone} />
+        <ModalActions saving={saving} error={error} onClose={onClose} />
+      </form>
+    </ModalFrame>
+  );
 }
 
 function Badge({ children }: { children: React.ReactNode }) {

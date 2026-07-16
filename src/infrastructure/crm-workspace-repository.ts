@@ -12,6 +12,8 @@ import type {
   RepurchaseAlertStatus,
 } from "@/domain/crm/types";
 import type {
+  CustomerContactUpdateInput,
+  CustomerContactUpdateResult,
   ICrmWorkspaceRepository,
   ManualRepurchaseAlertInput,
 } from "./crm-workspace-contract";
@@ -70,6 +72,16 @@ export class CrmWorkspaceRepository implements ICrmWorkspaceRepository {
       origin: "manual",
       department: "Manual",
       note: input.note,
+    };
+  }
+
+  async updateCustomerContact(
+    input: CustomerContactUpdateInput,
+  ): Promise<CustomerContactUpdateResult> {
+    return {
+      customerId: input.customerId,
+      phone: input.phone.trim(),
+      whatsapp: input.whatsapp.trim() || input.phone.trim(),
     };
   }
 

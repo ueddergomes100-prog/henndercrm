@@ -11,12 +11,21 @@ import type {
   RepurchaseAlertStatus,
 } from "@/domain/crm/types";
 import type {
+  CustomerContactUpdateInput,
+  CustomerContactUpdateResult,
   ICrmWorkspaceRepository,
   ManualRepurchaseAlertInput,
 } from "@/infrastructure/crm-workspace-contract";
 import { SupabaseRestClient } from "./supabase-rest-client";
 
 type ClientRow = { id: string; uniplus_id: number; nome: string };
+type ClientContactRow = {
+  id: string;
+  nome: string;
+  telefone: string | null;
+  celular: string | null;
+  whatsapp: string | null;
+};
 type SellerRow = { id: string; uniplus_id: number; nome: string };
 type ProductRow = { id: string; uniplus_id: number; nome: string; departamento?: string | null };
 type SaleForAlertRow = {
@@ -254,6 +263,33 @@ export class SupabaseCrmWorkspaceRepository implements ICrmWorkspaceRepository {
       department: product.departamento ?? "",
       note: row.observacao ?? undefined,
     } satisfies CrmRepurchaseAlert;
+  }
+
+  async updateCustomerContact(
+    input: CustomerContactUpdateInput,
+  ): Promise<CustomerContactUpdateResult> {
+    const phone = input.phone.trim();
+    const whatsapp = input.whatsapp.trim() || phone;
+    if (!phone && !whatsapp) throw new Error("Informe um telefone ou WhatsApp valido.");
+
+    const rows = await this.client.update<ClientContactRow>(
+      "crm_clientes",
+      { id: input.customerId },
+      {
+        telefone: phone || whatsapp,
+        celular: whatsapp || phone,
+        whatsapp: whatsapp || phone,
+      },
+    );
+    const row = rows[0];
+    if (!row) throw new Error("Cliente nao encontrado no Supabase.");
+
+    return {
+      customerId: row.id,
+      customerName: row.nome,
+      phone: row.telefone ?? phone,
+      whatsapp: row.whatsapp ?? row.celular ?? whatsapp,
+    };
   }
 
   async updateAlertStatus(id: string, status: RepurchaseAlertStatus) {

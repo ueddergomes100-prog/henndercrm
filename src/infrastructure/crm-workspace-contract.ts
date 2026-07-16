@@ -17,10 +17,23 @@ export type ManualRepurchaseAlertInput = {
   note?: string;
 };
 
+export type CustomerContactUpdateInput = {
+  customerId: string;
+  phone: string;
+  whatsapp: string;
+};
+
+export type CustomerContactUpdateResult = CustomerContactUpdateInput & {
+  customerName?: string;
+};
+
 export interface ICrmWorkspaceRepository {
   getWorkspace(): Promise<CrmWorkspace>;
   createContact(input: Omit<CrmContactRecord, "id">): Promise<CrmContactRecord>;
   createManualAlert(input: ManualRepurchaseAlertInput): Promise<CrmRepurchaseAlert>;
+  updateCustomerContact(
+    input: CustomerContactUpdateInput,
+  ): Promise<CustomerContactUpdateResult>;
   updateAlertStatus(
     id: string,
     status: RepurchaseAlertStatus,

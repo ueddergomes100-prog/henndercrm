@@ -7,7 +7,10 @@ import type {
   CrmSnapshot,
   RepurchaseAlertStatus,
 } from "@/domain/crm/types";
-import type { ManualRepurchaseAlertInput } from "@/infrastructure/crm-workspace-contract";
+import type {
+  CustomerContactUpdateInput,
+  ManualRepurchaseAlertInput,
+} from "@/infrastructure/crm-workspace-contract";
 import { getCrmWorkspaceRepository } from "@/infrastructure/crm-workspace-provider";
 import { SupabaseCrmSnapshotRepository } from "@/infrastructure/supabase/supabase-crm-snapshot-repository";
 import { CRM_SESSION_COOKIE, readSessionToken } from "@/lib/crm-auth";
@@ -15,6 +18,7 @@ import { CRM_SESSION_COOKIE, readSessionToken } from "@/lib/crm-auth";
 type WorkspaceAction =
   | { action: "create_contact"; record: Omit<CrmContactRecord, "id"> }
   | { action: "create_manual_alert"; alert: ManualRepurchaseAlertInput }
+  | { action: "update_customer_contact"; contact: CustomerContactUpdateInput }
   | { action: "update_alert"; id: string; status: RepurchaseAlertStatus }
   | { action: "create_agenda"; event: Omit<CrmAgendaEvent, "id"> }
   | { action: "update_agenda"; id: string; event: Partial<Omit<CrmAgendaEvent, "id">> }
@@ -104,6 +108,10 @@ export async function POST(request: Request) {
           await repository.createManualAlert(command.alert),
           { status: 201 },
         );
+      case "update_customer_contact":
+        return Response.json(
+          await repository.updateCustomerContact(command.contact),
+        );
       case "update_alert":
         return Response.json(
           await repository.updateAlertStatus(command.id, command.status),
@@ -179,6 +187,11 @@ async function denyUnauthorizedChange(
         (!command.alert.sellerId || command.alert.sellerId === allowedSellerId)
           ? allowedSellerId
           : undefined;
+      break;
+    case "update_customer_contact":
+      assignedSellerId = getSellerCustomerIds(allowedSellerId, snapshot).has(command.contact.customerId)
+        ? allowedSellerId
+        : undefined;
       break;
     case "update_alert":
       assignedSellerId = command.id.startsWith("manual-alert-")
