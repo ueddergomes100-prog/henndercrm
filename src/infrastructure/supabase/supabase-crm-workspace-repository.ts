@@ -6,15 +6,29 @@ import type {
   CrmAgendaEvent,
   CrmContactRecord,
   CrmOpportunity,
+  CrmRepurchaseAlert,
   CrmWorkspace,
   RepurchaseAlertStatus,
 } from "@/domain/crm/types";
-import type { ICrmWorkspaceRepository } from "@/infrastructure/crm-workspace-contract";
+import type {
+  ICrmWorkspaceRepository,
+  ManualRepurchaseAlertInput,
+} from "@/infrastructure/crm-workspace-contract";
 import { SupabaseRestClient } from "./supabase-rest-client";
 
 type ClientRow = { id: string; uniplus_id: number; nome: string };
 type SellerRow = { id: string; uniplus_id: number; nome: string };
-type ProductRow = { id: string; uniplus_id: number; nome: string };
+type ProductRow = { id: string; uniplus_id: number; nome: string; departamento?: string | null };
+type SaleForAlertRow = {
+  id: string;
+  vendedor_id: string | null;
+  data_venda: string;
+};
+type SaleItemForAlertRow = {
+  id: string;
+  venda_id: string;
+  produto_id: string | null;
+};
 type ContactRow = {
   id: string;
   cliente_id: string;
@@ -27,6 +41,21 @@ type ContactRow = {
   responsavel_nome: string | null;
 };
 type AlertRow = { id: string; status: RepurchaseAlertStatus };
+type ManualAlertRow = {
+  id: string;
+  cliente_id: string;
+  produto_id: string;
+  venda_id: string;
+  item_venda_id: string;
+  vendedor_responsavel_id: string | null;
+  data_compra: string;
+  data_prevista_recompra: string;
+  dias_recompra: number;
+  status: RepurchaseAlertStatus;
+  prioridade: CrmRepurchaseAlert["priority"];
+  origem: CrmRepurchaseAlert["origin"];
+  observacao: string | null;
+};
 type AgendaRow = {
   id: string;
   titulo: string;
@@ -180,6 +209,53 @@ export class SupabaseCrmWorkspaceRepository implements ICrmWorkspaceRepository {
     return { ...input, id: row.id };
   }
 
+  async createManualAlert(input: ManualRepurchaseAlertInput) {
+    const customer = await this.resolveCustomer(input.customerId);
+    const product = await this.resolveProductByName(input.productName);
+    const latest = await this.findLatestSaleItemForAlert(customer.id, product.id);
+    const requestedSeller = input.sellerId ? await this.resolveSeller(input.sellerId) : undefined;
+    const sellerId = requestedSeller?.id ?? latest.sale.vendedor_id ?? await this.resolvePreferredSellerId(customer.id);
+    const seller = sellerId ? await this.resolveSeller(sellerId) : undefined;
+    const [row] = await this.client.upsert<ManualAlertRow>(
+      "crm_alertas_recompra",
+      [{
+        cliente_id: customer.id,
+        produto_id: product.id,
+        venda_id: latest.sale.id,
+        item_venda_id: latest.item.id,
+        vendedor_responsavel_id: sellerId,
+        data_compra: latest.sale.data_venda,
+        data_prevista_recompra: input.recommendedIso,
+        dias_recompra: Math.max(1, Math.round(input.recurrenceDays)),
+        status: "pendente",
+        prioridade: input.priority,
+        origem: "manual",
+        observacao: input.note || null,
+      }],
+      "cliente_id,produto_id,venda_id,item_venda_id",
+    );
+
+    return {
+      id: row.id,
+      customerId: customer.id,
+      customerName: customer.nome,
+      productId: product.id,
+      productName: product.nome,
+      sellerId: sellerId ?? undefined,
+      sellerName: seller?.nome ?? requestedSeller?.nome ?? "Nao atribuido",
+      saleId: latest.sale.id,
+      saleItemId: latest.item.id,
+      purchaseDate: latest.sale.data_venda.slice(0, 10),
+      expectedDate: row.data_prevista_recompra,
+      repurchaseDays: row.dias_recompra,
+      status: row.status,
+      priority: row.prioridade,
+      origin: row.origem,
+      department: product.departamento ?? "",
+      note: row.observacao ?? undefined,
+    } satisfies CrmRepurchaseAlert;
+  }
+
   async updateAlertStatus(id: string, status: RepurchaseAlertStatus) {
     const rows = await this.client.update<{ id: string }>(
       "crm_alertas_recompra",
@@ -264,6 +340,44 @@ export class SupabaseCrmWorkspaceRepository implements ICrmWorkspaceRepository {
     });
 
     return rows.find((row) => isAutomaticContactNote(row.observacao ?? ""));
+  }
+
+  private async resolveProductByName(name: string) {
+    const rows = await this.client.select<ProductRow>("crm_produtos", {
+      select: "id,uniplus_id,nome,departamento",
+      nome: `eq.${name}`,
+      limit: 1,
+    });
+    if (!rows[0]) throw new Error("Produto ainda nao foi carregado no Supabase.");
+    return rows[0];
+  }
+
+  private async findLatestSaleItemForAlert(customerId: string, productId: string) {
+    const sales = await this.client.select<SaleForAlertRow>("crm_vendas", {
+      select: "id,vendedor_id,data_venda",
+      cliente_id: `eq.${customerId}`,
+      order: "data_venda.desc",
+      limit: 100,
+    });
+    const saleIds = sales.map((sale) => sale.id);
+    if (!saleIds.length) {
+      throw new Error("Cliente ainda nao possui venda importada para criar alerta manual.");
+    }
+
+    const items = await this.client.select<SaleItemForAlertRow>("crm_itens_venda", {
+      select: "id,venda_id,produto_id",
+      produto_id: `eq.${productId}`,
+      venda_id: `in.(${saleIds.join(",")})`,
+      limit: 100,
+    });
+    const itemBySaleId = new Map(items.map((item) => [item.venda_id, item]));
+    const sale = sales.find((item) => itemBySaleId.has(item.id));
+    const saleItem = sale ? itemBySaleId.get(sale.id) : undefined;
+    if (!sale || !saleItem) {
+      throw new Error("Este cliente ainda nao tem compra importada deste produto.");
+    }
+
+    return { sale, item: saleItem };
   }
 
   private async resolveCustomer(domainId: string) {

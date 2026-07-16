@@ -2,13 +2,25 @@ import type {
   CrmAgendaEvent,
   CrmContactRecord,
   CrmOpportunity,
+  CrmRepurchaseAlert,
   CrmWorkspace,
   RepurchaseAlertStatus,
 } from "@/domain/crm/types";
 
+export type ManualRepurchaseAlertInput = {
+  customerId: string;
+  productName: string;
+  recommendedIso: string;
+  recurrenceDays: number;
+  priority: CrmRepurchaseAlert["priority"];
+  sellerId?: string;
+  note?: string;
+};
+
 export interface ICrmWorkspaceRepository {
   getWorkspace(): Promise<CrmWorkspace>;
   createContact(input: Omit<CrmContactRecord, "id">): Promise<CrmContactRecord>;
+  createManualAlert(input: ManualRepurchaseAlertInput): Promise<CrmRepurchaseAlert>;
   updateAlertStatus(
     id: string,
     status: RepurchaseAlertStatus,

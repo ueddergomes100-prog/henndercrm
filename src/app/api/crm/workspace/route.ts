@@ -7,12 +7,14 @@ import type {
   CrmSnapshot,
   RepurchaseAlertStatus,
 } from "@/domain/crm/types";
+import type { ManualRepurchaseAlertInput } from "@/infrastructure/crm-workspace-contract";
 import { getCrmWorkspaceRepository } from "@/infrastructure/crm-workspace-provider";
 import { SupabaseCrmSnapshotRepository } from "@/infrastructure/supabase/supabase-crm-snapshot-repository";
 import { CRM_SESSION_COOKIE, readSessionToken } from "@/lib/crm-auth";
 
 type WorkspaceAction =
   | { action: "create_contact"; record: Omit<CrmContactRecord, "id"> }
+  | { action: "create_manual_alert"; alert: ManualRepurchaseAlertInput }
   | { action: "update_alert"; id: string; status: RepurchaseAlertStatus }
   | { action: "create_agenda"; event: Omit<CrmAgendaEvent, "id"> }
   | { action: "update_agenda"; id: string; event: Partial<Omit<CrmAgendaEvent, "id">> }
@@ -97,6 +99,11 @@ export async function POST(request: Request) {
           await repository.createContact(command.record),
           { status: 201 },
         );
+      case "create_manual_alert":
+        return Response.json(
+          await repository.createManualAlert(command.alert),
+          { status: 201 },
+        );
       case "update_alert":
         return Response.json(
           await repository.updateAlertStatus(command.id, command.status),
@@ -165,6 +172,13 @@ async function denyUnauthorizedChange(
       assignedSellerId = getSellerCustomerIds(allowedSellerId, snapshot).has(command.record.customerId)
         ? allowedSellerId
         : undefined;
+      break;
+    case "create_manual_alert":
+      assignedSellerId =
+        getSellerCustomerIds(allowedSellerId, snapshot).has(command.alert.customerId) &&
+        (!command.alert.sellerId || command.alert.sellerId === allowedSellerId)
+          ? allowedSellerId
+          : undefined;
       break;
     case "update_alert":
       assignedSellerId = command.id.startsWith("manual-alert-")

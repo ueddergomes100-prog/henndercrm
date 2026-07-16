@@ -7,10 +7,14 @@ import type {
   CrmAgendaEvent,
   CrmContactRecord,
   CrmOpportunity,
+  CrmRepurchaseAlert,
   CrmWorkspace,
   RepurchaseAlertStatus,
 } from "@/domain/crm/types";
-import type { ICrmWorkspaceRepository } from "./crm-workspace-contract";
+import type {
+  ICrmWorkspaceRepository,
+  ManualRepurchaseAlertInput,
+} from "./crm-workspace-contract";
 
 const dataDirectory = path.join(process.cwd(), ".data");
 const dataFile = path.join(dataDirectory, "crm-workspace.json");
@@ -46,6 +50,27 @@ export class CrmWorkspaceRepository implements ICrmWorkspaceRepository {
     workspace.contacts.unshift(record);
     await this.save(workspace);
     return record;
+  }
+
+  async createManualAlert(input: ManualRepurchaseAlertInput): Promise<CrmRepurchaseAlert> {
+    return {
+      id: randomUUID(),
+      customerId: input.customerId,
+      customerName: "Cliente manual",
+      productName: input.productName,
+      sellerId: input.sellerId,
+      sellerName: "Hennder CRM",
+      saleId: "manual",
+      saleItemId: "manual",
+      purchaseDate: new Date().toISOString().slice(0, 10),
+      expectedDate: input.recommendedIso,
+      repurchaseDays: Math.max(1, Math.round(input.recurrenceDays)),
+      status: "pendente",
+      priority: input.priority,
+      origin: "manual",
+      department: "Manual",
+      note: input.note,
+    };
   }
 
   async updateAlertStatus(id: string, status: RepurchaseAlertStatus) {

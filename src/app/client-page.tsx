@@ -66,6 +66,7 @@ import type {
   CrmContactRecord,
   CrmOpportunity,
   CrmProduct,
+  CrmRepurchaseAlert,
   CrmSale,
   CrmSaleItem,
   CrmSessionUser,
@@ -479,9 +480,25 @@ export default function Home() {
     setAlertStatuses((current) => ({ ...current, [id]: status }));
   };
 
-  const createManualAlert = (alert: AlertRow) => {
-    setManualAlerts((current) => [alert, ...current]);
-    setAlertStatuses((current) => ({ ...current, [alert.id]: alert.status }));
+  const createManualAlert = async (alert: AlertRow, note = "") => {
+    const saved = await mutateWorkspace<CrmRepurchaseAlert>({
+      action: "create_manual_alert",
+      alert: {
+        customerId: alert.customerId,
+        productName: alert.product,
+        recommendedIso: alert.recommendedIso,
+        recurrenceDays: Number.parseInt(alert.days, 10) || 45,
+        priority: alert.priorityCode,
+        sellerId: alert.sellerId,
+        note,
+      },
+    });
+    const viewAlert = mapRepurchaseAlertToAlertRow(saved);
+    setManualAlerts((current) => [
+      viewAlert,
+      ...current.filter((item) => item.id !== viewAlert.id),
+    ]);
+    setAlertStatuses((current) => ({ ...current, [viewAlert.id]: viewAlert.status }));
   };
 
   const saveAgendaEvent = async (
@@ -710,8 +727,8 @@ export default function Home() {
           setSelectedCustomer(customer);
           setActiveView("perfil");
         }}
-        onCreateAlert={(alert) => {
-          createManualAlert(alert);
+        onCreateAlert={async (alert) => {
+          await createManualAlert(alert);
           setActiveView("recompra");
         }}
         onCreateAgenda={saveAgendaEvent}
@@ -958,7 +975,7 @@ function QuickActionModals({
   onClose: () => void;
   onGoTo: (view: View) => void;
   onCreateCustomer: (customer: CustomerRow) => void;
-  onCreateAlert: (alert: AlertRow) => void;
+  onCreateAlert: (alert: AlertRow, note?: string) => Promise<void>;
   onCreateAgenda: (event: Omit<CrmAgendaEvent, "id">) => Promise<void>;
   onCreateOpportunity: (opportunity: Omit<CrmOpportunity, "id">) => Promise<void>;
   onCreateContact: (record: Omit<ContactRecord, "id">) => Promise<void>;
@@ -988,8 +1005,8 @@ function QuickActionModals({
         sellers={availableSellers}
         user={user}
         onClose={onClose}
-        onSave={(alert) => {
-          onCreateAlert(alert);
+        onSave={async (alert) => {
+          await onCreateAlert(alert);
           onClose();
         }}
       />
@@ -1138,7 +1155,7 @@ function ManualAlertModal({
   sellers: SellerRow[];
   user: CrmSessionUser;
   onClose: () => void;
-  onSave: (alert: AlertRow) => void;
+  onSave: (alert: AlertRow) => Promise<void>;
 }) {
   const defaultCustomer = customers[0];
   const defaultProduct = products[0];
@@ -1149,25 +1166,35 @@ function ManualAlertModal({
   const [recommendedIso, setRecommendedIso] = useState(addIsoDays(crmReferenceDate, 7));
   const [priority, setPriority] = useState<AlertRow["priorityCode"]>("alta");
   const [sellerId, setSellerId] = useState(defaultSeller?.id ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
   return (
     <ModalFrame title="Cadastrar alerta manual" onClose={onClose}>
       <form
         className="grid gap-4"
-        onSubmit={(event) => {
+        onSubmit={async (event) => {
           event.preventDefault();
           const customer = customers.find((item) => item.id === customerId);
           const product = products.find((item) => item.id === productId);
           const seller = sellers.find((item) => item.id === sellerId);
           if (!customer || !product) return;
-          onSave(buildManualAlertRow({
-            customer,
-            product,
-            recurrenceDays: Number(days) || product.defaultRepurchaseDays || customer.purchaseCycleDays || 45,
-            recommendedIso,
-            priority,
-            seller,
-          }));
+          setSaving(true);
+          setError("");
+          try {
+            await onSave(buildManualAlertRow({
+              customer,
+              product,
+              recurrenceDays: Number(days) || product.defaultRepurchaseDays || customer.purchaseCycleDays || 45,
+              recommendedIso,
+              priority,
+              seller,
+            }));
+          } catch (saveError) {
+            setError(saveError instanceof Error ? saveError.message : "Falha ao salvar alerta manual.");
+          } finally {
+            setSaving(false);
+          }
         }}
       >
         <FormSelect label="Cliente" value={customerId} onChange={setCustomerId}>
@@ -1190,7 +1217,7 @@ function ManualAlertModal({
             {sellers.map((seller) => <option key={seller.id} value={seller.id}>{seller.name}</option>)}
           </FormSelect>
         </div>
-        <ModalActions saving={false} error="" onClose={onClose} />
+        <ModalActions saving={saving} error={error} onClose={onClose} />
       </form>
     </ModalFrame>
   );
@@ -3436,7 +3463,7 @@ function CustomerProfile({
   sellers: SellerRow[];
   products: ProductRow[];
   user: CrmSessionUser;
-  onCreateAlert: (alert: AlertRow) => void;
+  onCreateAlert: (alert: AlertRow, note?: string) => Promise<void>;
 }) {
   const customerSales = sales
     .filter((sale) => sale.customerId === customer.id)
@@ -3647,7 +3674,7 @@ function RepurchaseAlerts({
   alertStatuses: Record<string, RepurchaseAlertStatus>;
   onStatusChange: (id: string, status: RepurchaseAlertStatus) => Promise<void>;
   onRegisterContact: (record: Omit<ContactRecord, "id">) => Promise<void>;
-  onCreateAlert: (alert: AlertRow) => void;
+  onCreateAlert: (alert: AlertRow, note?: string) => Promise<void>;
 }) {
   const [filter, setFilter] = useState("todos");
   const [page, setPage] = useState(1);
@@ -3824,7 +3851,7 @@ function ManualAlertPanel({
   products: ProductRow[];
   sellers: SellerRow[];
   user: CrmSessionUser;
-  onCreateAlert: (alert: AlertRow) => void;
+  onCreateAlert: (alert: AlertRow, note?: string) => Promise<void>;
   initialCustomerId?: string;
   compact?: boolean;
 }) {
@@ -3839,6 +3866,7 @@ function ManualAlertPanel({
   const [alsoWhatsapp, setAlsoWhatsapp] = useState(true);
   const [error, setError] = useState("");
   const [savedMessage, setSavedMessage] = useState("");
+  const [saving, setSaving] = useState(false);
   const customerDatalistId = compact ? "manual-alert-customers-compact" : "manual-alert-customers";
   const productDatalistId = compact ? "manual-alert-products-compact" : "manual-alert-products";
   const selectedCustomer = findByName(customers, customerQuery, (customer) => customer.name);
@@ -3852,7 +3880,7 @@ function ManualAlertPanel({
     >
       <form
         className="grid gap-3"
-        onSubmit={(event) => {
+        onSubmit={async (event) => {
           event.preventDefault();
           setError("");
           setSavedMessage("");
@@ -3877,15 +3905,25 @@ function ManualAlertPanel({
             resolveSellerForUser(user.sellerId) ??
             sellers[0];
 
-          onCreateAlert(buildManualAlertRow({
-            customer: selectedCustomer,
-            product: selectedProduct,
-            recurrenceDays,
-            recommendedIso,
-            priority,
-            seller,
-          }));
-          setSavedMessage(`Alerta salvo para ${selectedCustomer.name}.`);
+          setSaving(true);
+          try {
+            await onCreateAlert(
+              buildManualAlertRow({
+                customer: selectedCustomer,
+                product: selectedProduct,
+                recurrenceDays,
+                recommendedIso,
+                priority,
+                seller,
+              }),
+              `${note}${alsoWhatsapp ? " Avisar tambem por WhatsApp." : ""}`.trim(),
+            );
+            setSavedMessage(`Alerta salvo para ${selectedCustomer.name}.`);
+          } catch (saveError) {
+            setError(saveError instanceof Error ? saveError.message : "Falha ao salvar alerta manual.");
+          } finally {
+            setSaving(false);
+          }
         }}
       >
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[1.2fr_1.2fr_0.65fr_0.75fr_0.7fr_auto]">
@@ -3924,10 +3962,11 @@ function ManualAlertPanel({
           </FormSelect>
           <button
             type="submit"
+            disabled={saving}
             className="flex h-11 items-center justify-center gap-2 self-end rounded-lg bg-[#0753a6] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-[#063d7c]"
           >
             <Bell size={16} />
-            Salvar
+            {saving ? "Salvando" : "Salvar"}
           </button>
         </div>
         <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
@@ -3991,6 +4030,27 @@ function buildManualAlertRow({
     department: product.department || "Manual",
     status: "pendente",
     origin: "manual",
+  };
+}
+
+function mapRepurchaseAlertToAlertRow(alert: CrmRepurchaseAlert): AlertRow {
+  return {
+    id: alert.id,
+    customerId: alert.customerId,
+    product: alert.productName,
+    client: alert.customerName,
+    buyDate: formatContactDate(alert.purchaseDate),
+    buyDateIso: alert.purchaseDate,
+    days: `${alert.repurchaseDays} dias`,
+    recommended: formatContactDate(alert.expectedDate),
+    recommendedIso: alert.expectedDate,
+    priority: capitalizePriority(alert.priority),
+    priorityCode: alert.priority,
+    seller: alert.sellerName,
+    sellerId: alert.sellerId,
+    department: alert.department,
+    status: alert.status,
+    origin: alert.origin,
   };
 }
 
