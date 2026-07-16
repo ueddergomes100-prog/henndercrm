@@ -1,6 +1,11 @@
 import { cookies } from "next/headers";
 import type { CrmSessionUser, CrmUserRole } from "@/domain/crm/types";
-import { CRM_SESSION_COOKIE, readSessionToken } from "@/lib/crm-auth";
+import {
+  createSessionToken,
+  CRM_SESSION_COOKIE,
+  readSessionToken,
+  sessionCookieOptions,
+} from "@/lib/crm-auth";
 
 type CrmUserRow = {
   id: string;
@@ -23,6 +28,11 @@ type CreateUserBody = {
   password?: string;
   role?: CrmUserRole;
   sellerId?: string;
+};
+
+type UpdateUserBody = {
+  id?: string;
+  name?: string;
 };
 
 export async function GET() {
@@ -94,6 +104,55 @@ export async function POST(request: Request) {
   }
 }
 
+export async function PATCH(request: Request) {
+  const currentUser = await requireAdmin();
+  if (currentUser instanceof Response) return currentUser;
+
+  const body = (await request.json()) as UpdateUserBody;
+  const id = body.id?.trim();
+  const name = body.name?.trim();
+
+  if (!id || !name) {
+    return Response.json({ error: "Informe usuario e nome." }, { status: 400 });
+  }
+
+  try {
+    const [target] = await supabaseRequest<CrmUserRow[]>(
+      `/rest/v1/crm_usuarios?select=id,auth_user_id,nome,email,perfil,vendedor_id,ativo&id=eq.${encodeURIComponent(id)}&limit=1`,
+    );
+    if (!target) return Response.json({ error: "Usuario nao encontrado." }, { status: 404 });
+    if (!target.ativo) return Response.json({ error: "Usuario inativo nao pode ser editado." }, { status: 400 });
+
+    const [updated] = await supabaseRequest<CrmUserRow[]>(`/rest/v1/crm_usuarios?id=eq.${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: { nome: name },
+      prefer: "return=representation",
+    });
+    if (!updated) throw new Error("Usuario nao retornado apos atualizacao.");
+    await updateAuthUserMetadata(target.auth_user_id, name);
+
+    const responseUser = toResponseUser(updated);
+    const sessionUser = updated.id === currentUser.id
+      ? {
+          ...currentUser,
+          name: updated.nome,
+        }
+      : undefined;
+
+    if (sessionUser) {
+      const cookieStore = await cookies();
+      cookieStore.set(CRM_SESSION_COOKIE, createSessionToken(sessionUser), sessionCookieOptions());
+    }
+
+    return Response.json({ user: responseUser, sessionUser });
+  } catch (error) {
+    return Response.json(
+      { error: error instanceof Error ? error.message : "Falha ao atualizar usuario." },
+      { status: 400 },
+    );
+  }
+}
+
 export async function DELETE(request: Request) {
   const user = await requireAdmin();
   if (user instanceof Response) return user;
@@ -144,6 +203,16 @@ async function deleteAuthUser(authUserId: string) {
   if (!authUserId) return;
   await supabaseRequest(`/auth/v1/admin/users/${encodeURIComponent(authUserId)}`, {
     method: "DELETE",
+  });
+}
+
+async function updateAuthUserMetadata(authUserId: string, name: string) {
+  if (!authUserId) return;
+  await supabaseRequest(`/auth/v1/admin/users/${encodeURIComponent(authUserId)}`, {
+    method: "PATCH",
+    body: {
+      user_metadata: { name },
+    },
   });
 }
 

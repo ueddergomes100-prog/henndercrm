@@ -615,6 +615,8 @@ export default function Home() {
             theme={theme}
             onThemeChange={changeTheme}
             user={user}
+            customers={appCustomers}
+            onOpenCustomer={openProfile}
             onQuickAction={setQuickAction}
             onLogout={async () => {
               setIsSigningOut(true);
@@ -769,7 +771,13 @@ export default function Home() {
             )}
             {visibleView === "motor-recompra" && <RepurchaseEngineModule alerts={appAlerts} user={user} />}
             {visibleView === "sincronizacao" && <SyncModule />}
-            {visibleView === "configuracoes" && <SettingsModule user={user} sellers={sellers} />}
+            {visibleView === "configuracoes" && (
+              <SettingsModule
+                user={user}
+                sellers={sellers}
+                onUserChange={(nextUser) => setUser(nextUser)}
+              />
+            )}
             {visibleView === "relatorios" && (
               <Reports
                 theme={theme}
@@ -1618,6 +1626,8 @@ function Topbar({
   theme,
   onThemeChange,
   user,
+  customers,
+  onOpenCustomer,
   onQuickAction,
   onLogout,
 }: {
@@ -1625,6 +1635,8 @@ function Topbar({
   theme: Theme;
   onThemeChange: (theme: Theme) => void;
   user: CrmSessionUser;
+  customers: CustomerRow[];
+  onOpenCustomer: (customer: CustomerRow) => void;
   onQuickAction: (action: QuickAction) => void;
   onLogout: () => Promise<void>;
 }) {
@@ -1632,7 +1644,16 @@ function Topbar({
   const ThemeIcon = theme === "dark" ? Sun : Moon;
   const themeLabel = theme === "dark" ? "Ativar tema claro" : "Ativar tema escuro";
   const [actionOpen, setActionOpen] = useState(false);
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
   const quickActionRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLDivElement>(null);
+  const normalizedCustomerSearch = normalizeManualAlertSearch(customerSearch.trim());
+  const customerSearchResults = normalizedCustomerSearch.length >= 2
+    ? customers
+        .filter((customer) => normalizeManualAlertSearch(customer.name).includes(normalizedCustomerSearch))
+        .slice(0, 7)
+    : [];
   const quickActions: Array<{
     id: QuickAction;
     label: string;
@@ -1661,6 +1682,27 @@ function Topbar({
     return () => document.removeEventListener("pointerdown", handlePointerDown);
   }, [actionOpen]);
 
+  useEffect(() => {
+    if (!searchOpen) {
+      return;
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      if (!searchRef.current?.contains(event.target as Node)) {
+        setSearchOpen(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [searchOpen]);
+
+  function openCustomerFromSearch(customer: CustomerRow) {
+    onOpenCustomer(customer);
+    setCustomerSearch("");
+    setSearchOpen(false);
+  }
+
   return (
     <header className="crm-topbar sticky top-0 z-20 border-b border-blue-700/30 bg-[#0753a6] text-white shadow-[0_4px_18px_rgba(6,61,128,0.18)]">
       <div className="mx-auto flex h-16 max-w-[1560px] items-center justify-between px-4 sm:px-5 lg:px-6">
@@ -1673,9 +1715,73 @@ function Topbar({
           >
             <Menu size={21} />
           </button>
-          <div className="hidden h-10 w-[340px] items-center gap-2 rounded-lg border border-white/15 bg-white/10 px-3 text-sm text-blue-50 md:flex">
-            <Search size={17} />
-            Buscar cliente, produto ou alerta
+          <div ref={searchRef} className="relative hidden w-[390px] md:block">
+            <div className="flex h-11 items-center gap-2 rounded-xl border border-white/20 bg-white/10 px-3 text-sm text-white shadow-inner shadow-blue-950/10 transition focus-within:border-cyan-200 focus-within:bg-white/15 focus-within:shadow-lg">
+              <Search size={17} className="shrink-0 text-cyan-100" />
+              <input
+                value={customerSearch}
+                onChange={(event) => {
+                  setCustomerSearch(event.target.value);
+                  setSearchOpen(true);
+                }}
+                onFocus={() => setSearchOpen(true)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && customerSearchResults[0]) {
+                    event.preventDefault();
+                    openCustomerFromSearch(customerSearchResults[0]);
+                  }
+                }}
+                placeholder="Pesquisar cliente pelo nome"
+                className="w-full bg-transparent text-sm font-medium text-inherit placeholder:text-blue-100 outline-none"
+              />
+              {customerSearch && (
+                <button
+                  type="button"
+                  aria-label="Limpar pesquisa"
+                  onClick={() => {
+                    setCustomerSearch("");
+                    setSearchOpen(false);
+                  }}
+                  className="grid size-7 shrink-0 place-items-center rounded-lg text-blue-100 transition hover:bg-slate-100 hover:text-[#0753a6]"
+                >
+                  <X size={15} />
+                </button>
+              )}
+            </div>
+            {searchOpen && customerSearch.trim() && (
+              <motion.div
+                initial={{ opacity: 0, y: -6, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                className="absolute left-0 top-[3.35rem] z-40 w-full overflow-hidden rounded-2xl border border-blue-100 bg-white p-2 text-slate-900 shadow-2xl"
+              >
+                {normalizedCustomerSearch.length < 2 ? (
+                  <p className="px-3 py-4 text-sm text-slate-500">Digite pelo menos 2 letras do nome do cliente.</p>
+                ) : customerSearchResults.length ? (
+                  <div className="space-y-1">
+                    {customerSearchResults.map((customer) => (
+                      <button
+                        key={customer.id}
+                        type="button"
+                        onClick={() => openCustomerFromSearch(customer)}
+                        className="grid w-full gap-2 rounded-xl px-3 py-3 text-left transition hover:bg-cyan-50"
+                      >
+                        <span className="flex items-center justify-between gap-3">
+                          <span className="min-w-0 truncate text-sm font-black text-[#123252]">{customer.name}</span>
+                          <StatusBadge status={customer.activityStatus} label={customer.status} />
+                        </span>
+                        <span className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
+                          <span>{customer.city || "Cidade nao informada"}</span>
+                          <span>{customer.preferredSeller}</span>
+                          <span>{customer.totalPurchases} compras</span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="px-3 py-4 text-sm text-slate-500">Nenhum cliente encontrado com esse nome.</p>
+                )}
+              </motion.div>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -2792,9 +2898,11 @@ function SyncModule() {
 function SettingsModule({
   user,
   sellers,
+  onUserChange,
 }: {
   user: CrmSessionUser;
   sellers: typeof snapshot.sellers;
+  onUserChange: (user: CrmSessionUser) => void;
 }) {
   const settings = [
     ["Usuários", "Perfis de administrador, supervisor e vendedor."],
@@ -2807,7 +2915,7 @@ function SettingsModule({
 
   return (
     <div className="space-y-5">
-      <UserManagementPanel user={user} sellers={sellers} />
+      <UserManagementPanel user={user} sellers={sellers} onUserChange={onUserChange} />
       <PageTitle eyebrow="Sistema" title="Configurações" description="Parâmetros operacionais, usuários, permissões e integração." />
       <Panel title="Central de configurações" icon={Settings}>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -2826,9 +2934,11 @@ function SettingsModule({
 function UserManagementPanel({
   user,
   sellers,
+  onUserChange,
 }: {
   user: CrmSessionUser;
   sellers: typeof snapshot.sellers;
+  onUserChange: (user: CrmSessionUser) => void;
 }) {
   const [managedUsers, setManagedUsers] = useState<ManagedCrmUser[]>([]);
   const [name, setName] = useState("");
@@ -2839,6 +2949,9 @@ function UserManagementPanel({
   const [loadingUsers, setLoadingUsers] = useState(user.role === "administrador");
   const [savingUser, setSavingUser] = useState(false);
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const [editingUserName, setEditingUserName] = useState("");
+  const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
   const [userMessage, setUserMessage] = useState("");
   const [userError, setUserError] = useState("");
 
@@ -2932,6 +3045,61 @@ function UserManagementPanel({
     }
   }
 
+  function startEditingUserName(managedUser: ManagedCrmUser) {
+    setEditingUserId(managedUser.id);
+    setEditingUserName(managedUser.name);
+    setUserError("");
+    setUserMessage("");
+  }
+
+  async function updateUserName(managedUser: ManagedCrmUser) {
+    const nextName = editingUserName.trim();
+    if (!nextName) {
+      setUserError("Informe o nome do usuario.");
+      return;
+    }
+    if (nextName === managedUser.name) {
+      setEditingUserId(null);
+      setEditingUserName("");
+      return;
+    }
+
+    setUpdatingUserId(managedUser.id);
+    setUserError("");
+    setUserMessage("");
+
+    try {
+      const response = await fetch("/api/crm/users", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          id: managedUser.id,
+          name: nextName,
+        }),
+      });
+      const result = (await response.json()) as {
+        user?: ManagedCrmUser;
+        sessionUser?: CrmSessionUser;
+        error?: string;
+      };
+      if (!response.ok || !result.user) throw new Error(result.error ?? "Falha ao atualizar usuário.");
+
+      setManagedUsers((current) =>
+        current.map((item) => (item.id === result.user?.id ? result.user : item)),
+      );
+      if (result.sessionUser) {
+        onUserChange(result.sessionUser);
+      }
+      setEditingUserId(null);
+      setEditingUserName("");
+      setUserMessage("Nome do usuario atualizado com sucesso.");
+    } catch (error) {
+      setUserError(error instanceof Error ? error.message : "Falha ao atualizar usuário.");
+    } finally {
+      setUpdatingUserId(null);
+    }
+  }
+
   return (
     <div className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
       <Panel title="Cadastrar usuário" icon={UsersRound} action={user.role === "administrador" ? "Supabase Auth" : "Acesso restrito"}>
@@ -2984,17 +3152,70 @@ function UserManagementPanel({
           <div className="space-y-2">
             {managedUsers.map((managedUser) => {
               const seller = sellers.find((item) => item.id === managedUser.sellerId);
+              const editingThisUser = editingUserId === managedUser.id;
               return (
                 <div key={managedUser.id} className="rounded-lg border border-blue-50 bg-[#f8fbff] p-3">
                   <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="font-bold text-[#123252]">{managedUser.name}</p>
+                    <div className="min-w-0 flex-1">
+                      {editingThisUser ? (
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                          <input
+                            value={editingUserName}
+                            onChange={(event) => setEditingUserName(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                void updateUserName(managedUser);
+                              }
+                              if (event.key === "Escape") {
+                                setEditingUserId(null);
+                                setEditingUserName("");
+                              }
+                            }}
+                            className="h-10 min-w-0 flex-1 rounded-lg border border-cyan-200 bg-white px-3 text-sm font-bold text-[#123252] outline-none focus:border-cyan-500"
+                          />
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => void updateUserName(managedUser)}
+                              disabled={updatingUserId === managedUser.id}
+                              className="grid size-10 place-items-center rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+                              title="Salvar nome"
+                            >
+                              <CheckCircle2 size={16} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingUserId(null);
+                                setEditingUserName("");
+                              }}
+                              className="grid size-10 place-items-center rounded-lg border border-blue-100 bg-white text-slate-500 hover:bg-slate-50"
+                              title="Cancelar edição"
+                            >
+                              <X size={16} />
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="truncate font-bold text-[#123252]">{managedUser.name}</p>
+                      )}
                       <p className="mt-1 text-sm text-slate-500">{managedUser.email}</p>
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="rounded-full bg-white px-2 py-1 text-xs font-bold uppercase text-cyan-700">
                         {managedUser.role}
                       </span>
+                      {!editingThisUser && (
+                        <button
+                          type="button"
+                          onClick={() => startEditingUserName(managedUser)}
+                          className="grid size-8 place-items-center rounded-lg border border-blue-100 bg-white text-[#0753a6] hover:bg-cyan-50"
+                          title="Editar nome do usuário"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                      )}
                       {managedUser.role !== "administrador" && (
                         <button
                           type="button"
