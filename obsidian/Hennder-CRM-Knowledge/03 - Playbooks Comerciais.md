@@ -4,9 +4,12 @@
 
 Objetivo: recuperar relacionamento e entender necessidade atual.
 
-Mensagem base:
+Mensagem padrao atual no botao de WhatsApp:
 
-> Ola! Aqui e do Shopping Rural, meu nome e {{vendedor}}. Sentimos sua falta e gostariamos de ajudar com sua proxima compra. Esta precisando de algo como racao, medicamento ou algum item da loja?
+> Bom dia! Tudo bem? Aqui é o {{vendedor}} do Shopping Rural 🤠.
+>
+> Passei aqui porque lembrei de você e vi que já tem um tempinho que não passa por aqui…
+> Fico a disposição para te atender, está precisando de algo?
 
 ## Recompra
 

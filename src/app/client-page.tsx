@@ -7552,7 +7552,6 @@ function formatGenericList(items: string[]) {
 function WhatsAppButton({
   customer,
   user,
-  message,
   sellerName,
   onUpdateContact,
   onRegisterContact,
@@ -7569,7 +7568,7 @@ function WhatsAppButton({
   const [editingContact, setEditingContact] = useState(false);
   const responsibleName = resolveWhatsAppResponsibleName(user, customer, sellerName);
   const sellerFirstName = firstName(responsibleName);
-  const resolvedMessage = buildShoppingRuralWhatsAppMessage(customer, sellerFirstName, message);
+  const resolvedMessage = buildShoppingRuralWhatsAppMessage(sellerFirstName);
   const phone = normalizeBrazilianWhatsAppNumber(customer.whatsapp);
 
   if (!phone) {
@@ -7687,38 +7686,30 @@ function resolveWhatsAppResponsibleName(
   sellerName?: string,
 ) {
   return (
-    sellerName ||
     (user?.role === "vendedor" ? resolveSellerForUser(user.sellerId)?.name : undefined) ||
     user?.name ||
+    sellerName ||
     customer.preferredSeller ||
     "Hennder CRM"
   ).trim();
 }
 
 function firstName(value: string) {
-  return value.trim().split(/\s+/u)[0] || "vendedor";
-}
-
-function buildShoppingRuralWhatsAppMessage(
-  customer: CustomerRow,
-  sellerName: string,
-  detail?: string,
-) {
-  const intro = `Olá${customer.name ? `, ${customer.name}` : ""}! Aqui é do Shopping Rural, meu nome é ${sellerName} e sou vendedor da loja.`;
-  const cleanDetail = sanitizeWhatsAppDetail(detail);
-  return `${intro} ${cleanDetail}`;
-}
-
-function sanitizeWhatsAppDetail(detail?: string) {
-  if (!detail?.trim()) {
-    return "Sentimos sua falta e gostaríamos de ajudar com sua próxima compra. Está precisando de algo como ração, medicamento ou algum produto da loja?";
+  const name = value.trim().split(/\s+/u)[0] || "vendedor";
+  const lowerName = name.toLocaleLowerCase("pt-BR");
+  if (name === name.toLocaleUpperCase("pt-BR") || name === lowerName) {
+    return lowerName.replace(/^./u, (letter) => letter.toLocaleUpperCase("pt-BR"));
   }
+  return name;
+}
 
-  return detail
-    .replace(/^Olá,?\s*[^.!?]*[.!?]\s*/iu, "")
-    .replace(/^Aqui\s+(é|e)\s+da?\s+Hennder CRM[.!?]?\s*/iu, "")
-    .replace(/\bHennder CRM\b/giu, "Shopping Rural")
-    .trim();
+function buildShoppingRuralWhatsAppMessage(sellerName: string) {
+  return [
+    `Bom dia! Tudo bem? Aqui é o ${sellerName} do Shopping Rural 🤠.`,
+    "",
+    "Passei aqui porque lembrei de você e vi que já tem um tempinho que não passa por aqui…",
+    "Fico a disposição para te atender, está precisando de algo?",
+  ].join("\n");
 }
 
 function CustomerContactModal({
