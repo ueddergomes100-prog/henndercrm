@@ -1,4 +1,4 @@
-const CACHE_NAME = "hennder-crm-static-v1";
+const CACHE_NAME = "hennder-crm-static-v2";
 const STATIC_ASSETS = [
   "/manifest.webmanifest",
   "/apple-touch-icon.png",

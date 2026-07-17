@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 :root {
-  --background: #eaf3fb;
-  --foreground: #0f172a;
+  --background: #02040a;
+  --foreground: #f8fafc;
 }
 
 [data-theme="dark"] {
@@ -26,6 +26,15 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+body::before {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    linear-gradient(135deg, rgba(4, 29, 64, 0.98) 0%, rgba(6, 53, 108, 0.94) 48%, rgba(2, 4, 10, 1) 100%);
+  content: "";
 }
 
 button,
@@ -353,35 +362,21 @@ textarea:focus-visible {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(circle at 22% 24%, rgba(34, 211, 238, 0.16), transparent 26%),
-    radial-gradient(circle at 78% 70%, rgba(22, 199, 134, 0.14), transparent 28%),
-    linear-gradient(145deg, #02040a 0%, #061324 52%, #02040a 100%);
+    linear-gradient(115deg, rgba(34, 211, 238, 0.12) 0 1px, transparent 1px 18px),
+    linear-gradient(205deg, rgba(16, 185, 129, 0.1) 0 1px, transparent 1px 22px),
+    linear-gradient(145deg, #02040a 0%, #041d40 44%, #06356c 100%);
+  background-size: auto, auto, auto;
   content: "";
 }
 
-.crm-loading-orb {
+.crm-loading-screen::after {
   position: absolute;
-  border-radius: 999px;
-  filter: blur(4px);
-  opacity: 0.65;
-  animation: crm-orb-float 4.8s ease-in-out infinite;
-}
-
-.crm-loading-orb-a {
-  left: 16%;
-  top: 18%;
-  height: 140px;
-  width: 140px;
-  background: rgba(34, 211, 238, 0.18);
-}
-
-.crm-loading-orb-b {
-  bottom: 14%;
-  right: 14%;
-  height: 180px;
-  width: 180px;
-  background: rgba(16, 185, 129, 0.16);
-  animation-delay: -1.3s;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 34%),
+    linear-gradient(90deg, transparent, rgba(103, 232, 249, 0.16), transparent);
+  content: "";
+  opacity: 0.55;
 }
 
 .crm-loader-grid {
@@ -428,16 +423,6 @@ textarea:focus-visible {
   }
   100% {
     transform: translateX(110%) scaleX(0.35);
-  }
-}
-
-@keyframes crm-orb-float {
-  0%,
-  100% {
-    transform: translate3d(0, 0, 0) scale(1);
-  }
-  50% {
-    transform: translate3d(18px, -16px, 0) scale(1.08);
   }
 }
 

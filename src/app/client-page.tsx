@@ -1183,10 +1183,10 @@ function SystemLoadingScreen({
 }) {
   return (
     <main className="crm-loading-screen flex min-h-screen items-center justify-center overflow-hidden bg-[#02040a] px-6 text-white">
-      <div className="crm-loading-orb crm-loading-orb-a" />
-      <div className="crm-loading-orb crm-loading-orb-b" />
-      <div className="crm-loading-card relative z-10 w-full max-w-md rounded-3xl border border-cyan-300/18 bg-white/8 p-8 text-center shadow-2xl shadow-cyan-950/30 backdrop-blur-xl">
-        <LogoMark />
+      <div className="crm-loading-card relative z-10 w-full max-w-md rounded-3xl border border-cyan-300/18 bg-[#061324]/86 p-8 text-center shadow-2xl shadow-cyan-950/30 backdrop-blur-xl">
+        <div className="flex justify-center">
+          <LogoMark />
+        </div>
         <div className="crm-loader-grid mx-auto mt-8">
           {Array.from({ length: 9 }).map((_, index) => (
             <span key={index} style={{ animationDelay: `${index * 0.08}s` }} />
