@@ -2530,7 +2530,7 @@ function SalesModule({
       <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
         <Panel title="Listagem de vendas" icon={ShoppingBag} action={displayedSales.length + " de " + filteredSales.length + " registros"}>
           <div className="mb-4 space-y-3">
-            <div className="inline-flex rounded-lg border border-blue-100 bg-[#f8fbff] p-1">
+            <div className="flex w-full rounded-lg border border-blue-100 bg-[#f8fbff] p-1 sm:inline-flex sm:w-auto">
               {[
                 ["latest", "Última sincronização"],
                 ["all", "Todas"],
@@ -2540,7 +2540,7 @@ function SalesModule({
                   type="button"
                   onClick={() => setViewMode(mode as "latest" | "all")}
                   className={
-                    "h-9 rounded-md px-3 text-xs font-bold transition " +
+                    "h-9 flex-1 rounded-md px-3 text-xs font-bold transition sm:flex-none " +
                     (viewMode === mode ? "bg-[#0753a6] text-white shadow-sm" : "text-slate-500 hover:bg-white")
                   }
                 >
@@ -2576,8 +2576,43 @@ function SalesModule({
               Último lote: {latestSyncLabel}. A aba de última sincronização mostra as 5 vendas mais recentes tocadas pelo Sync.
             </div>
           </div>
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-left text-sm">
+          <div className="space-y-3 md:hidden">
+            {displayedSales.map((sale) => {
+              const saleCustomer = customerById.get(sale.customerId);
+              const itemCount = itemsBySale.get(sale.id)?.length ?? 0;
+              const active = selectedSale?.id === sale.id;
+
+              return (
+                <button
+                  key={sale.id}
+                  type="button"
+                  onClick={() => setSelectedSaleId(sale.id)}
+                  className={`w-full rounded-xl border p-3 text-left transition ${
+                    active ? "border-cyan-300 bg-cyan-50" : "border-blue-50 bg-[#f8fbff] hover:border-cyan-200"
+                  }`}
+                >
+                  <div className="flex min-w-0 items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-black text-[#0753a6]">#{sale.uniplusId}</p>
+                      <p className="mt-1 break-words text-sm font-semibold text-[#123252]">
+                        {saleCustomer?.name ?? "Cliente não encontrado"}
+                      </p>
+                    </div>
+                    <span className="shrink-0 rounded-full bg-white px-2 py-1 text-xs font-bold text-cyan-700">
+                      {sale.approved ? "Aprovada" : sale.status}
+                    </span>
+                  </div>
+                  <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                    <MiniStat label="Data" value={formatContactDate(sale.soldAt)} />
+                    <MiniStat label="Valor" value={formatCurrency(sale.totalValue)} />
+                    <MiniStat label="Itens" value={`${itemCount}`} />
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          <div className="hidden overflow-x-auto md:block">
+            <table className="min-w-[760px] w-full text-left text-sm">
               <thead className="text-xs uppercase tracking-wide text-slate-400">
                 <tr>
                   <th className="px-3 py-2">Venda</th>
@@ -2604,8 +2639,8 @@ function SalesModule({
                 })}
               </tbody>
             </table>
-            {!filteredSales.length && <EmptyState text="Nenhuma venda encontrada para os filtros atuais." />}
           </div>
+          {!filteredSales.length && <EmptyState text="Nenhuma venda encontrada para os filtros atuais." />}
           {filteredSales.length > displayedSales.length && (
             <div className="mt-4 flex justify-center">
               <button
@@ -3344,13 +3379,13 @@ function SettingsModule({
               key={item.id}
               type="button"
               onClick={() => setSelectedSettingId(item.id)}
-              className={`rounded-xl border p-4 text-left transition ${
+              className={`min-w-0 rounded-xl border p-4 text-left transition ${
                 selectedSetting.id === item.id
                   ? "border-cyan-400 bg-cyan-50"
                   : "border-blue-100 bg-[#f8fbff] hover:border-cyan-300 hover:bg-white"
               }`}
             >
-              <p className="font-black text-[#123252]">{item.title}</p>
+              <p className="break-words font-black text-[#123252]">{item.title}</p>
               <p className="mt-2 text-sm leading-6 text-slate-500">{item.description}</p>
             </button>
           ))}
@@ -3623,7 +3658,7 @@ function UserManagementPanel({
               <button
                 type="submit"
                 disabled={savingUser}
-                className="flex h-11 items-center gap-2 rounded-lg bg-[#0753a6] px-4 text-sm font-semibold text-white disabled:opacity-60"
+                className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#0753a6] px-4 text-sm font-semibold text-white disabled:opacity-60 sm:w-auto"
               >
                 <Plus size={17} />
                 {savingUser ? "Cadastrando..." : "Cadastrar usuário"}
@@ -3645,7 +3680,7 @@ function UserManagementPanel({
               const editingThisUser = editingUserId === managedUser.id;
               return (
                 <div key={managedUser.id} className="rounded-lg border border-blue-50 bg-[#f8fbff] p-3">
-                  <div className="flex items-start justify-between gap-3">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0 flex-1">
                       {editingThisUser ? (
                         <div className="grid gap-2">
@@ -3666,7 +3701,7 @@ function UserManagementPanel({
                               value={editingUserRole}
                               onChange={(event) => setEditingUserRole(event.target.value as CrmUserRole)}
                               disabled={managedUser.role === "administrador"}
-                              className="h-10 rounded-lg border border-cyan-200 bg-white px-3 text-sm font-bold text-[#123252] outline-none focus:border-cyan-500 disabled:opacity-60"
+                              className="h-10 min-w-0 rounded-lg border border-cyan-200 bg-white px-3 text-sm font-bold text-[#123252] outline-none focus:border-cyan-500 disabled:opacity-60"
                             >
                               <option value="administrador">Administrador</option>
                               <option value="supervisor">Supervisor</option>
@@ -3678,7 +3713,7 @@ function UserManagementPanel({
                               value={editingUserSellerId}
                               onChange={(event) => setEditingUserSellerId(event.target.value)}
                               disabled={editingUserRole !== "vendedor"}
-                              className="h-10 rounded-lg border border-cyan-200 bg-white px-3 text-sm text-[#123252] outline-none focus:border-cyan-500 disabled:opacity-60"
+                              className="h-10 min-w-0 rounded-lg border border-cyan-200 bg-white px-3 text-sm text-[#123252] outline-none focus:border-cyan-500 disabled:opacity-60"
                             >
                               <option value="">Sem vendedor vinculado</option>
                               {sellers.map((sellerOption) => (
@@ -3690,9 +3725,9 @@ function UserManagementPanel({
                               onChange={(event) => setEditingUserPassword(event.target.value)}
                               type="password"
                               placeholder="Nova senha opcional"
-                              className="h-10 rounded-lg border border-cyan-200 bg-white px-3 text-sm outline-none focus:border-cyan-500"
+                              className="h-10 min-w-0 rounded-lg border border-cyan-200 bg-white px-3 text-sm outline-none focus:border-cyan-500"
                             />
-                            <div className="flex gap-2">
+                            <div className="flex justify-end gap-2">
                               <button
                                 type="button"
                                 onClick={() => void updateUserName(managedUser)}
@@ -3718,11 +3753,11 @@ function UserManagementPanel({
                           </div>
                         </div>
                       ) : (
-                        <p className="truncate font-bold text-[#123252]">{managedUser.name}</p>
+                        <p className="break-words font-bold text-[#123252]">{managedUser.name}</p>
                       )}
-                      <p className="mt-1 text-sm text-slate-500">{managedUser.email}</p>
+                      <p className="mt-1 break-all text-sm text-slate-500">{managedUser.email}</p>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2 sm:justify-end">
                       <span className="rounded-full bg-white px-2 py-1 text-xs font-bold uppercase text-cyan-700">
                         {managedUser.role}
                       </span>
@@ -3781,9 +3816,9 @@ function SimpleRows({
   return (
     <div className="space-y-2">
       {rows.map((row, index) => (
-        <div key={`${row.join("-")}-${index}`} className="grid gap-2 rounded-lg border border-blue-50 bg-[#f8fbff] p-3 text-sm text-slate-600 md:grid-cols-3">
+        <div key={`${row.join("-")}-${index}`} className="grid min-w-0 gap-2 rounded-lg border border-blue-50 bg-[#f8fbff] p-3 text-sm text-slate-600 md:grid-cols-3">
           {row.map((cell, cellIndex) => (
-            <span key={`${cell}-${cellIndex}`} className={cellIndex === 0 ? "font-bold text-[#123252]" : ""}>
+            <span key={`${cell}-${cellIndex}`} className={`min-w-0 break-words ${cellIndex === 0 ? "font-bold text-[#123252]" : ""}`}>
               {cell}
             </span>
           ))}
@@ -5627,7 +5662,7 @@ function Opportunities({
     <div className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <PageTitle eyebrow="Venda cruzada" title="Central de oportunidades" description="Oportunidades de Lona sugeridas a partir do comportamento de compra." />
-        <button type="button" onClick={() => setEditing("new")} className="flex h-11 shrink-0 items-center justify-center gap-2 rounded-lg bg-[#0753a6] px-4 text-sm font-semibold text-white hover:bg-[#063d7c]">
+        <button type="button" onClick={() => setEditing("new")} className="flex h-11 w-full shrink-0 items-center justify-center gap-2 rounded-lg bg-[#0753a6] px-4 text-sm font-semibold text-white hover:bg-[#063d7c] sm:w-auto">
           <Plus size={17} />
           Nova oportunidade
         </button>
@@ -5642,12 +5677,12 @@ function Opportunities({
         <div className="grid gap-3 xl:grid-cols-3">
           {opportunityGroups.map((group) => (
             <article key={group.productName} className="rounded-lg border border-blue-100 bg-[#f8fbff] p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
                   <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Produto sugerido</p>
-                  <h2 className="mt-1 text-lg font-black text-[#123252]">{group.productName}</h2>
+                  <h2 className="mt-1 break-words text-lg font-black text-[#123252]">{group.productName}</h2>
                 </div>
-                <span className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-bold text-cyan-700">
+                <span className="w-fit rounded-full bg-cyan-50 px-3 py-1 text-xs font-bold text-cyan-700">
                   {group.averageConfidence}% confiança
                 </span>
               </div>
@@ -5661,9 +5696,9 @@ function Opportunities({
               </div>
               <div className="mt-4 space-y-2">
                 {group.topCustomers.map((customer) => (
-                  <div key={customer} className="flex items-center justify-between rounded-md bg-white px-3 py-2 text-xs">
-                    <span className="font-semibold text-slate-700">{customer}</span>
-                    <ChevronRight size={14} className="text-slate-400" />
+                  <div key={customer} className="flex min-w-0 items-center justify-between gap-2 rounded-md bg-white px-3 py-2 text-xs">
+                    <span className="min-w-0 break-words font-semibold text-slate-700">{customer}</span>
+                    <ChevronRight size={14} className="shrink-0 text-slate-400" />
                   </div>
                 ))}
               </div>
@@ -5712,7 +5747,62 @@ function Opportunities({
             {productOptions.map((product) => <option key={product} value={product}>{product}</option>)}
           </FilterSelect>
         </div>
-        <div className="overflow-x-auto">
+        <div className="space-y-3 md:hidden">
+          {visibleItems.map((item) => {
+            const customer = customers.find((entry) => entry.id === item.customerId);
+
+            return (
+              <article key={item.id} className="rounded-xl border border-blue-50 bg-[#f8fbff] p-3">
+                <div className="flex min-w-0 items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="break-words font-bold text-[#123252]">{item.customerName}</p>
+                    <p className="mt-1 text-xs font-semibold text-cyan-700">{item.confidence}% confiança</p>
+                  </div>
+                  <span className="shrink-0 rounded-full bg-cyan-50 px-2 py-1 text-xs font-semibold capitalize text-cyan-700">
+                    {item.status.replace("_", " ")}
+                  </span>
+                </div>
+                <div className="mt-3 grid gap-2 text-sm">
+                  <div className="rounded-lg bg-white px-3 py-2">
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Comprou</p>
+                    <p className="mt-1 break-words text-slate-700">{item.sourceProductName}</p>
+                  </div>
+                  <div className="rounded-lg bg-white px-3 py-2">
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Sugerir</p>
+                    <p className="mt-1 break-words font-semibold text-[#0753a6]">{item.suggestedProductName}</p>
+                  </div>
+                  <div className="rounded-lg bg-white px-3 py-2">
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Responsável</p>
+                    <p className="mt-1 break-words text-slate-700">{item.sellerName}</p>
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {customer && (
+                    <WhatsAppButton
+                      customer={customer}
+                      user={user}
+                      message={`Olá! Aqui é da Hennder CRM. Temos uma sugestão que combina com sua compra de ${item.sourceProductName}: ${item.suggestedProductName}. Gostaria de saber mais?`}
+                      onUpdateContact={onUpdateContact}
+                      onRegisterContact={onRegisterContact}
+                      compact
+                    />
+                  )}
+                  {canManage(item) && (
+                    <>
+                      <button type="button" aria-label={`Editar oportunidade de ${item.customerName}`} onClick={() => setEditing(item)} className="flex h-10 w-10 items-center justify-center rounded-lg border border-blue-100 bg-white text-[#0753a6]">
+                        <Pencil size={15} />
+                      </button>
+                      <button type="button" aria-label={`Excluir oportunidade de ${item.customerName}`} onClick={() => { if (window.confirm("Excluir esta oportunidade?")) void onDelete(item.id); }} className="flex h-10 w-10 items-center justify-center rounded-lg border border-red-200 bg-white text-red-700">
+                        <Trash2 size={15} />
+                      </button>
+                    </>
+                  )}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+        <div className="hidden overflow-x-auto md:block">
           <table className="min-w-[980px] w-full text-left text-sm">
             <thead className="text-xs uppercase tracking-wide text-slate-400">
               <tr>
@@ -5771,8 +5861,8 @@ function Opportunities({
               })}
             </tbody>
           </table>
-          {!filteredItems.length && <EmptyState text="Nenhuma oportunidade encontrada para os filtros atuais." />}
         </div>
+        {!filteredItems.length && <EmptyState text="Nenhuma oportunidade encontrada para os filtros atuais." />}
         {filteredItems.length > visibleItems.length && (
           <div className="mt-4 flex justify-center">
             <button
@@ -6691,12 +6781,12 @@ function getChartColors(theme: Theme) {
 function PageTitle({ eyebrow, title, description }: { eyebrow: string; title: string; description: string }) {
   return (
     <div className="flex flex-col justify-between gap-3 rounded-xl border border-blue-100 bg-white/72 px-4 py-3 shadow-sm backdrop-blur sm:flex-row sm:items-center">
-      <div>
+      <div className="min-w-0">
         <p className="text-xs font-bold uppercase tracking-[0.18em] text-cyan-700">{eyebrow}</p>
-        <h1 className="mt-1 text-2xl font-bold tracking-tight text-[#123252] sm:text-3xl">{title}</h1>
+        <h1 className="mt-1 break-words text-2xl font-bold tracking-tight text-[#123252] sm:text-3xl">{title}</h1>
         <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">{description}</p>
       </div>
-      <div className="flex items-center gap-2 rounded-lg border border-blue-100 bg-[#f5faff] px-3 py-2 text-sm font-medium text-[#0753a6]">
+      <div className="flex w-fit max-w-full items-center gap-2 rounded-lg border border-blue-100 bg-[#f5faff] px-3 py-2 text-sm font-medium text-[#0753a6]">
         <Activity size={16} className="text-cyan-600" />
         Dados sincronizados
       </div>
@@ -6717,14 +6807,20 @@ function Panel({
 }) {
   return (
     <section className="rounded-xl border border-blue-100 bg-white p-4 shadow-[0_6px_18px_rgba(30,83,135,0.07)] sm:p-5">
-      <div className="mb-4 flex items-center justify-between gap-3 border-b border-blue-50 pb-3">
-        <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#e7f4ff] text-[#0753a6]">
+      <div className="mb-4 flex flex-col gap-3 border-b border-blue-50 pb-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#e7f4ff] text-[#0753a6]">
             <Icon size={18} />
           </div>
-          <h2 className="font-bold tracking-tight text-[#18334d]">{title}</h2>
+          <h2 className="min-w-0 break-words font-bold tracking-tight text-[#18334d]">{title}</h2>
         </div>
-        {action ? <span className="rounded-md bg-cyan-50 px-2 py-1 text-xs font-semibold text-cyan-700">{action}</span> : <MoreHorizontal size={18} className="text-slate-400" />}
+        {action ? (
+          <span className="w-fit max-w-full rounded-md bg-cyan-50 px-2 py-1 text-xs font-semibold text-cyan-700">
+            {action}
+          </span>
+        ) : (
+          <MoreHorizontal size={18} className="text-slate-400" />
+        )}
       </div>
       {children}
     </section>
@@ -6744,7 +6840,7 @@ function MetricCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-xl border border-blue-100 bg-white p-4 shadow-[0_6px_18px_rgba(30,83,135,0.07)]">
       <p className="text-sm text-slate-500">{label}</p>
-      <p className="mt-2 text-2xl font-semibold tracking-tight">{value}</p>
+      <p className="mt-2 break-words text-xl font-semibold tracking-tight sm:text-2xl">{value}</p>
     </div>
   );
 }
@@ -6763,7 +6859,7 @@ function FilterSelect({
   children: React.ReactNode;
 }) {
   return (
-    <label className={`flex h-11 items-center gap-2 rounded-lg border border-blue-100 bg-white px-3 text-sm text-[#0753a6] focus-within:border-cyan-400 ${disabled ? "opacity-70" : ""}`}>
+    <label className={`flex h-11 min-w-0 items-center gap-2 rounded-lg border border-blue-100 bg-white px-3 text-sm text-[#0753a6] focus-within:border-cyan-400 ${disabled ? "opacity-70" : ""}`}>
       <Filter size={15} className="shrink-0" />
       <span className="sr-only">{label}</span>
       <select
