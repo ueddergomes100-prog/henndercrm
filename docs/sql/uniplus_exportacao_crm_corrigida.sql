@@ -88,11 +88,29 @@ SELECT
         ELSE NULL
     END AS cliente_data_cadastro,
 
-    CASE
-        WHEN e.dataultcompra BETWEEN DATE '2000-01-01' AND CURRENT_DATE + INTERVAL '1 day'
-        THEN e.dataultcompra
-        ELSE NULL
-    END AS cliente_data_ultima_compra,
+    (
+        SELECT MAX(COALESCE(
+            CASE
+                WHEN dc.data BETWEEN DATE '2000-01-01' AND CURRENT_DATE + INTERVAL '1 day'
+                THEN dc.data
+                ELSE NULL
+            END,
+            CASE
+                WHEN dc.datainclusao BETWEEN DATE '2000-01-01' AND CURRENT_DATE + INTERVAL '1 day'
+                THEN dc.datainclusao
+                ELSE NULL
+            END,
+            CASE
+                WHEN dc.dataalteracao BETWEEN DATE '2000-01-01' AND CURRENT_DATE + INTERVAL '1 day'
+                THEN dc.dataalteracao
+                ELSE NULL
+            END
+        ))
+        FROM dav dc
+        WHERE dc.idcliente = d.idcliente
+          AND dc.status = 2
+          AND dc.datacancelamento IS NULL
+    ) AS cliente_data_ultima_compra,
 
     e.inativo AS cliente_inativo,
     e.idcategoriacliente AS cliente_categoria_id,
@@ -197,11 +215,31 @@ SELECT
         ELSE NULL
     END AS item_valor_estimado,
 
-    CASE
-        WHEN p.dataultimavenda BETWEEN DATE '2000-01-01' AND CURRENT_DATE + INTERVAL '1 day'
-        THEN p.dataultimavenda
-        ELSE NULL
-    END AS produto_data_ultima_venda,
+    (
+        SELECT MAX(COALESCE(
+            CASE
+                WHEN dp.data BETWEEN DATE '2000-01-01' AND CURRENT_DATE + INTERVAL '1 day'
+                THEN dp.data
+                ELSE NULL
+            END,
+            CASE
+                WHEN dp.datainclusao BETWEEN DATE '2000-01-01' AND CURRENT_DATE + INTERVAL '1 day'
+                THEN dp.datainclusao
+                ELSE NULL
+            END,
+            CASE
+                WHEN dp.dataalteracao BETWEEN DATE '2000-01-01' AND CURRENT_DATE + INTERVAL '1 day'
+                THEN dp.dataalteracao
+                ELSE NULL
+            END
+        ))
+        FROM dav dp
+        JOIN davitem dip
+            ON dip.iddav = dp.id
+        WHERE dip.idproduto = p.id
+          AND dp.status = 2
+          AND dp.datacancelamento IS NULL
+    ) AS produto_data_ultima_venda,
 
     CASE
         WHEN p.dataultimacompra BETWEEN DATE '2000-01-01' AND CURRENT_DATE + INTERVAL '1 day'
