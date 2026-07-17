@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { PwaRegister } from "./pwa-register";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -25,10 +26,19 @@ export const metadata: Metadata = {
   },
   other: {
     "apple-mobile-web-app-capable": "yes",
+    "mobile-web-app-capable": "yes",
+    "msapplication-TileColor": "#0753a6",
+    "msapplication-tap-highlight": "no",
   },
   icons: {
     icon: [
+      { url: "/icons/hennder-icon-72.png", sizes: "72x72", type: "image/png" },
+      { url: "/icons/hennder-icon-96.png", sizes: "96x96", type: "image/png" },
+      { url: "/icons/hennder-icon-128.png", sizes: "128x128", type: "image/png" },
+      { url: "/icons/hennder-icon-144.png", sizes: "144x144", type: "image/png" },
+      { url: "/icons/hennder-icon-152.png", sizes: "152x152", type: "image/png" },
       { url: "/icons/hennder-icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/hennder-icon-384.png", sizes: "384x384", type: "image/png" },
       { url: "/icons/hennder-icon-512.png", sizes: "512x512", type: "image/png" },
     ],
     apple: [
@@ -60,7 +70,10 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <PwaRegister />
+        {children}
+      </body>
     </html>
   );
 }
