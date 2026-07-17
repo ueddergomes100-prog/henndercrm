@@ -42,7 +42,7 @@ import {
   UsersRound,
   X,
 } from "lucide-react";
-import { motion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   Area,
   AreaChart,
@@ -1762,74 +1762,108 @@ function Sidebar({
     }))
     .filter((group) => group.items.length > 0);
 
-  return (
+  const renderSidebarContent = (showCloseButton: boolean) => (
     <>
-      {mobileOpen && <button className="fixed inset-0 z-30 bg-slate-950/40 lg:hidden" onClick={() => setMobileOpen(false)} />}
-      <aside
-        data-open={mobileOpen}
-        style={{ left: mobileOpen ? 0 : -288, transform: "none" }}
-        className="crm-sidebar fixed inset-y-0 z-40 w-64 overflow-hidden border-r border-white/10 bg-[#083d80] px-3 py-4 text-white shadow-2xl shadow-blue-950/25 lg:sticky lg:shadow-none"
-      >
-        <div className="flex items-center justify-between">
-          <LogoMark compact />
+      <div className="flex shrink-0 items-center justify-between">
+        <LogoMark compact />
+        {showCloseButton && (
           <button
             type="button"
             aria-label="Fechar menu"
-            className="rounded-md p-2 text-blue-100 lg:hidden"
+            className="rounded-md p-2 text-blue-100 transition hover:bg-white/10 hover:text-white lg:hidden"
             onClick={() => setMobileOpen(false)}
           >
             <X size={20} />
           </button>
-        </div>
-        <nav className="mt-7 space-y-5 overflow-y-auto pr-1">
-          {visibleNavGroups.map((group) => (
-            <div key={group.title}>
-              <p className="mb-2 px-3 text-[10px] font-black uppercase tracking-[0.18em] text-cyan-200/80">
-                {group.title}
-              </p>
-              <div className="space-y-1.5">
-                {group.items.map((item) => {
-                  const Icon = item.icon;
-                  const active = activeView === item.id || (activeView === "perfil" && item.id === "clientes");
-                  return (
-                    <button
-                      key={item.id}
-                      onClick={() => {
-                        setActiveView(item.id);
-                        setMobileOpen(false);
-                      }}
-                      className={`flex min-h-11 w-full items-start gap-3 rounded-lg px-3 py-3 text-left text-sm font-medium transition ${
-                        active
-                          ? "bg-white text-[#084d9f] shadow-lg shadow-blue-950/20"
-                          : "text-blue-100 hover:bg-white/10 hover:text-white"
-                      }`}
-                    >
-                      <Icon size={18} className="mt-0.5 shrink-0" />
-                      <span className="min-w-0">
-                        <span className="block">{item.label}</span>
-                        {active && (
-                          <span className="mt-1 block text-xs font-normal leading-4 text-slate-500">
-                            {item.description}
-                          </span>
-                        )}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
+        )}
+      </div>
+      <nav className="mt-7 shrink-0 space-y-5 pr-1">
+        {visibleNavGroups.map((group) => (
+          <div key={group.title}>
+            <p className="mb-2 px-3 text-[10px] font-black uppercase tracking-[0.18em] text-cyan-200/80">
+              {group.title}
+            </p>
+            <div className="space-y-1.5">
+              {group.items.map((item) => {
+                const Icon = item.icon;
+                const active = activeView === item.id || (activeView === "perfil" && item.id === "clientes");
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => {
+                      setActiveView(item.id);
+                      setMobileOpen(false);
+                    }}
+                    className={`flex min-h-11 w-full items-start gap-3 rounded-lg px-3 py-3 text-left text-sm font-medium transition ${
+                      active
+                        ? "bg-white text-[#084d9f] shadow-lg shadow-blue-950/20"
+                        : "text-blue-100 hover:bg-white/10 hover:text-white"
+                    }`}
+                  >
+                    <Icon size={18} className="mt-0.5 shrink-0" />
+                    <span className="min-w-0">
+                      <span className="block">{item.label}</span>
+                      {active && (
+                        <span className="mt-1 block text-xs font-normal leading-4 text-slate-500">
+                          {item.description}
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
-          ))}
-        </nav>
-        <div className="mt-8 rounded-xl border border-cyan-300/25 bg-white/10 p-4">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-cyan-400 text-[#06356c]">
-            <Sparkles size={18} />
           </div>
-          <p className="mt-3 text-sm font-semibold text-white">Motor de recompra</p>
-          <p className="mt-1 text-xs leading-5 text-blue-100">
-            {alerts.length} alertas priorizados pelas regras comerciais.
-          </p>
+        ))}
+      </nav>
+      <div className="mt-8 shrink-0 rounded-xl border border-cyan-300/25 bg-white/10 p-4">
+        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-cyan-400 text-[#06356c]">
+          <Sparkles size={18} />
         </div>
+        <p className="mt-3 text-sm font-semibold text-white">Motor de recompra</p>
+        <p className="mt-1 text-xs leading-5 text-blue-100">
+          {alerts.length} alertas priorizados pelas regras comerciais.
+        </p>
+      </div>
+    </>
+  );
+
+  return (
+    <>
+      <aside
+        aria-label="Menu principal"
+        className="crm-sidebar sticky top-0 z-20 hidden h-screen w-64 shrink-0 flex-col overflow-y-auto overscroll-contain border-r border-white/10 bg-[#083d80] px-3 py-4 text-white shadow-none lg:flex"
+      >
+        {renderSidebarContent(false)}
       </aside>
+      <AnimatePresence initial={false}>
+        {mobileOpen && (
+          <motion.button
+            key="mobile-sidebar-backdrop"
+            type="button"
+            aria-label="Fechar menu lateral"
+            className="fixed inset-0 z-30 bg-slate-950/45 backdrop-blur-[2px] lg:hidden"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.18, ease: "easeOut" }}
+            onClick={() => setMobileOpen(false)}
+          />
+        )}
+        {mobileOpen && (
+          <motion.aside
+            key="mobile-sidebar-panel"
+            aria-label="Menu principal"
+            initial={{ opacity: 0, x: "-104%" }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: "-104%" }}
+            transition={{ type: "spring", stiffness: 360, damping: 36, mass: 0.82 }}
+            className="crm-sidebar crm-mobile-sidebar fixed inset-y-0 left-0 z-40 flex h-screen h-[100dvh] w-[min(18rem,calc(100vw-1.25rem))] max-w-[18rem] flex-col overflow-y-auto overscroll-contain border-r border-white/10 bg-[#083d80] px-3 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-[calc(1rem+env(safe-area-inset-top))] text-white shadow-2xl shadow-blue-950/25 touch-pan-y lg:hidden"
+          >
+            {renderSidebarContent(true)}
+          </motion.aside>
+        )}
+      </AnimatePresence>
     </>
   );
 }

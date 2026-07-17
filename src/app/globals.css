@@ -65,6 +65,26 @@ textarea:focus-visible {
   color: #dbeafe;
 }
 
+.crm-mobile-sidebar {
+  -webkit-overflow-scrolling: touch;
+  scrollbar-color: rgba(191, 219, 254, 0.58) transparent;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+.crm-mobile-sidebar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.crm-mobile-sidebar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.crm-mobile-sidebar::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(191, 219, 254, 0.52);
+}
+
 .crm-kpi {
   border: 1px solid rgba(255, 255, 255, 0.18);
 }
