@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
+const { createServer } = require("node:http");
 const { existsSync } = require("node:fs");
 const { join } = require("node:path");
 
@@ -8,12 +9,13 @@ process.env.PORT = String(resolvePort());
 
 const standaloneServer = join(__dirname, ".next", "standalone", "server.js");
 
-if (!existsSync(standaloneServer)) {
-  console.error("Hennder CRM standalone server not found. Run npm run build before npm run start.");
-  process.exit(1);
+if (existsSync(standaloneServer)) {
+  console.log(`Hennder CRM starting standalone runtime on port ${process.env.PORT}.`);
+  require(standaloneServer);
+} else {
+  console.warn("Hennder CRM standalone server not found. Falling back to Next runtime.");
+  startFallbackNextServer();
 }
-
-require(standaloneServer);
 
 function resolvePort() {
   const portFromEnv = Number(process.env.PORT);
@@ -28,4 +30,26 @@ function resolvePort() {
   if (Number.isInteger(inlinePort) && inlinePort > 0) return inlinePort;
 
   return 3000;
+}
+
+function startFallbackNextServer() {
+  const next = require("next");
+  const port = Number(process.env.PORT);
+  const hostname = process.env.HOSTNAME;
+  const app = next({ dev: false, hostname, port });
+  const handle = app.getRequestHandler();
+
+  app
+    .prepare()
+    .then(() => {
+      createServer((request, response) => {
+        handle(request, response);
+      }).listen(port, hostname, () => {
+        console.log(`Hennder CRM fallback runtime ready on http://${hostname}:${port}`);
+      });
+    })
+    .catch((error) => {
+      console.error("Hennder CRM failed to start", error);
+      process.exit(1);
+    });
 }
