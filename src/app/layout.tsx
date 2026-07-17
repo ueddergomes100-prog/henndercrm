@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -13,9 +13,32 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
+  applicationName: "Hennder CRM",
   title: "Hennder CRM | Transforme clientes esquecidos em novas vendas",
   description:
-    "Hennder CRM: transforme clientes esquecidos em novas vendas com inteligência comercial e recompra.",
+    "Hennder CRM: transforme clientes esquecidos em novas vendas com inteligencia comercial e recompra.",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    title: "Hennder CRM",
+    statusBarStyle: "black-translucent",
+  },
+  other: {
+    "apple-mobile-web-app-capable": "yes",
+  },
+  icons: {
+    icon: [
+      { url: "/icons/hennder-icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/hennder-icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [
+      { url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
+    ],
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#0753a6",
 };
 
 export default function RootLayout({
