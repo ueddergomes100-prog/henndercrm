@@ -1,34 +1,19 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
-const { createServer } = require("node:http");
-const next = require("next");
+const { existsSync } = require("node:fs");
+const { join } = require("node:path");
 
-const dev = process.env.NODE_ENV === "development";
-const hostname = "0.0.0.0";
-const port = resolvePort();
-const canonicalHost = "gestao.nexarcompany.com.br";
-const redirectHosts = new Set(["nexarcompany.com.br", "www.nexarcompany.com.br"]);
+process.env.NODE_ENV = process.env.NODE_ENV === "development" ? "development" : "production";
+process.env.HOSTNAME = "0.0.0.0";
+process.env.PORT = String(resolvePort());
 
-const app = next({ dev, hostname, port });
-const handle = app.getRequestHandler();
+const standaloneServer = join(__dirname, ".next", "standalone", "server.js");
 
-app
-  .prepare()
-  .then(() => {
-    createServer((request, response) => {
-      if (shouldRedirectToCanonicalHost(request)) {
-        redirectToCanonicalHost(request, response);
-        return;
-      }
+if (!existsSync(standaloneServer)) {
+  console.error("Hennder CRM standalone server not found. Run npm run build before npm run start.");
+  process.exit(1);
+}
 
-      handle(request, response);
-    }).listen(port, hostname, () => {
-      console.log(`Hennder CRM ready on http://${hostname}:${port}`);
-    });
-  })
-  .catch((error) => {
-    console.error("Hennder CRM failed to start", error);
-    process.exit(1);
-  });
+require(standaloneServer);
 
 function resolvePort() {
   const portFromEnv = Number(process.env.PORT);
@@ -43,18 +28,4 @@ function resolvePort() {
   if (Number.isInteger(inlinePort) && inlinePort > 0) return inlinePort;
 
   return 3000;
-}
-
-function shouldRedirectToCanonicalHost(request) {
-  const host = request.headers.host?.split(":")[0]?.toLowerCase();
-  return redirectHosts.has(host);
-}
-
-function redirectToCanonicalHost(request, response) {
-  const target = new URL(request.url || "/", `https://${canonicalHost}`);
-  response.writeHead(308, {
-    Location: target.toString(),
-    "Cache-Control": "public, max-age=3600",
-  });
-  response.end();
 }

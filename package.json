@@ -12,7 +12,9 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "postbuild": "node scripts/prepare-standalone.mjs",
     "start": "node server.js",
+    "start:standalone": "node .next/standalone/server.js",
     "lint": "eslint",
     "test": "node --test scripts/*.test.mjs",
     "sync:uniplus": "node scripts/hennder-sync.mjs --dry-run",

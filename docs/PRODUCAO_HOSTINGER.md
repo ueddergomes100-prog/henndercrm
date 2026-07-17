@@ -145,6 +145,18 @@ Configuracao recomendada do app Node.js:
 - Start command: `npm run start -- -p $PORT`
 - App URL: subdominio com HTTPS
 
+O build usa `output: "standalone"` do Next.js. O comando `npm run build`
+gera `.next/standalone` e copia `public` + `.next/static` para dentro do
+pacote standalone. O comando `npm run start` executa o wrapper `server.js`,
+que inicia `.next/standalone/server.js`, define `NODE_ENV=production` quando
+necessario e respeita `PORT`, `-p` ou `--port`.
+
+Mantenha o CRM apenas em `gestao.nexarcompany.com.br`. Se existir outro app
+Node.js ligado a `nexarcompany.com.br`, remova/desconecte esse app para nao
+duplicar consumo de recursos. O codigo tambem redireciona o dominio raiz para
+o subdominio quando o runtime esta ativo, mas isso nao substitui a remocao do
+app duplicado no painel.
+
 Depois do deploy, testar:
 
 ```text
