@@ -37,7 +37,15 @@ export async function GET() {
   const user = await requireUser();
   if (user instanceof Response) return user;
   const workspace = await getCrmWorkspaceRepository().getWorkspace();
-  if (user.role !== "vendedor" || !user.sellerId) return Response.json(workspace);
+  if (user.role === "administrador") return Response.json(workspace);
+  if (!user.sellerId) {
+    return Response.json({
+      contacts: [],
+      alertStatuses: {},
+      agenda: [],
+      opportunities: [],
+    });
+  }
 
   const snapshot = await new SupabaseCrmSnapshotRepository().getSnapshot();
   const allowedSellerId = resolveSnapshotSellerId(user.sellerId, snapshot);
@@ -172,9 +180,9 @@ async function denyUnauthorizedChange(
   command: WorkspaceAction,
   repository: ReturnType<typeof getCrmWorkspaceRepository>,
 ) {
-  if (user.role !== "vendedor") return null;
+  if (user.role === "administrador") return null;
   if (!user.sellerId) {
-    return Response.json({ error: "Vendedor sem carteira vinculada." }, { status: 403 });
+    return Response.json({ error: "Usuario sem vendedor vinculado." }, { status: 403 });
   }
 
   const snapshot = await new SupabaseCrmSnapshotRepository().getSnapshot();

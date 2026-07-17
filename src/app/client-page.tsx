@@ -903,11 +903,23 @@ function buildScopedCrmData(
     agenda: agendaItems,
   };
 
-  if (user.role !== "vendedor" || !user.sellerId) {
+  if (user.role === "administrador") {
     return baseData;
   }
 
   const seller = resolveSellerForUser(user.sellerId);
+  if (!seller) {
+    return {
+      customers: [],
+      alerts: [],
+      sales: [],
+      saleItems: [],
+      products: [],
+      sellers: [],
+      opportunities: [],
+      agenda: [],
+    };
+  }
   const scopedSellerId = seller?.id;
   const scopedSales = sales.filter((sale) => sale.sellerId === scopedSellerId);
   const saleIds = new Set(scopedSales.map((sale) => sale.id));
@@ -1092,7 +1104,7 @@ function includeSaleCustomers(scopedCustomers: CustomerRow[], allCustomers: Cust
 }
 
 function getAvailableSellers(user: CrmSessionUser) {
-  if (user.role !== "vendedor" || !user.sellerId) return sellers;
+  if (user.role === "administrador") return sellers;
   const seller = resolveSellerForUser(user.sellerId);
   return seller ? [seller] : [];
 }
@@ -1388,7 +1400,7 @@ function ManualCustomerModal({
         <div className="grid gap-4 sm:grid-cols-3">
           <FormInput label="Categoria" value={category} onChange={setCategory} />
           <FormInput label="Ciclo estimado (dias)" value={cycleDays} onChange={setCycleDays} type="number" />
-          <FormSelect label="Vendedor responsavel" value={sellerId} onChange={setSellerId} disabled={user.role === "vendedor"}>
+          <FormSelect label="Vendedor responsavel" value={sellerId} onChange={setSellerId} disabled={user.role !== "administrador"}>
             {sellers.map((seller) => <option key={seller.id} value={seller.id}>{seller.name}</option>)}
           </FormSelect>
         </div>
@@ -1517,7 +1529,7 @@ function ManualAlertModal({
           <ManualAlertPriorityPicker value={priority} onChange={setPriority} />
         </div>
         <div className="grid gap-4">
-          {user.role === "vendedor" ? (
+          {user.role !== "administrador" ? (
             <ManualAlertLockedField label="Responsavel" value={selectedSeller?.name ?? "Vendedor logado"} />
           ) : (
             <ManualAlertPicker
@@ -4163,12 +4175,17 @@ function Customers({
   const [qualityFilter, setQualityFilter] = useState("todas");
   const cities = [...new Set(customers.map((customer) => customer.city))].sort();
   const sellerNames = [...new Set(customers.map((customer) => customer.preferredSeller))].sort();
+  const canSwitchSeller = user.role === "administrador";
+  const lockedSeller = resolveSellerForUser(user.sellerId);
+  const lockedSellerLabel = lockedSeller?.name ?? sellerNames[0] ?? "Vendedor logado";
   const filtered = customers.filter((customer) => {
     const matchesQuery =
       customer.name.toLowerCase().includes(query.toLowerCase()) ||
       customer.city.toLowerCase().includes(query.toLowerCase());
     const matchesStatus = statusFilter === "todos" || customer.activityStatus === statusFilter;
-    const matchesSeller = sellerFilter === "todos" || customer.preferredSeller === sellerFilter;
+    const matchesSeller = canSwitchSeller
+      ? sellerFilter === "todos" || customer.preferredSeller === sellerFilter
+      : true;
     const matchesCity = cityFilter === "todas" || customer.city === cityFilter;
     const matchesQuality = qualityFilter === "todas" || customer.qualityStatus === qualityFilter;
     return matchesQuery && matchesStatus && matchesSeller && matchesCity && matchesQuality;
@@ -4190,9 +4207,20 @@ function Customers({
             <option value="risco">Em risco</option>
             <option value="perdido">Perdidos</option>
           </FilterSelect>
-          <FilterSelect label="Vendedor" value={sellerFilter} onChange={setSellerFilter}>
-            <option value="todos">Todos vendedores</option>
-            {sellerNames.map((seller) => <option key={seller} value={seller}>{seller}</option>)}
+          <FilterSelect
+            label="Vendedor"
+            value={canSwitchSeller ? sellerFilter : lockedSellerLabel}
+            onChange={canSwitchSeller ? setSellerFilter : () => undefined}
+            disabled={!canSwitchSeller}
+          >
+            {canSwitchSeller ? (
+              <>
+                <option value="todos">Todos vendedores</option>
+                {sellerNames.map((seller) => <option key={seller} value={seller}>{seller}</option>)}
+              </>
+            ) : (
+              <option value={lockedSellerLabel}>{lockedSellerLabel}</option>
+            )}
           </FilterSelect>
           <FilterSelect label="Cidade" value={cityFilter} onChange={setCityFilter}>
             <option value="todas">Todas as cidades</option>
@@ -5156,20 +5184,21 @@ function SellerPortfolioBySeller({
   sellers: SellerRow[];
   onUpdateContact: (customer: CustomerRow, phone: string) => Promise<void>;
 }) {
-  const initialSellerId = user.role === "vendedor"
-    ? resolveSellerForUser(user.sellerId)?.id ?? sellers[0]?.id ?? "todos"
-    : "todos";
+  const canSwitchSeller = user.role === "administrador";
+  const initialSellerId = canSwitchSeller
+    ? "todos"
+    : resolveSellerForUser(user.sellerId)?.id ?? sellers[0]?.id ?? "todos";
   const [selectedSellerId, setSelectedSellerId] = useState(initialSellerId);
   const [sellerQuery, setSellerQuery] = useState("");
   const [visibleLimit, setVisibleLimit] = useState(30);
   const [contactCustomer, setContactCustomer] = useState<CustomerRow | null>(null);
-  const sellerId = user.role === "vendedor"
-    ? resolveSellerForUser(user.sellerId)?.id ?? ""
-    : sellers.some((item) => item.id === selectedSellerId)
+  const sellerId = canSwitchSeller
+    ? sellers.some((item) => item.id === selectedSellerId)
       ? selectedSellerId
-      : "todos";
+      : "todos"
+    : resolveSellerForUser(user.sellerId)?.id ?? selectedSellerId;
   const selectedSeller = sellers.find((item) => item.id === sellerId);
-  const seller = user.role === "vendedor" ? selectedSeller ?? sellers[0] : selectedSeller;
+  const seller = canSwitchSeller ? selectedSeller : selectedSeller ?? sellers[0];
   const sellerSummaries = sellers
     .map((item) => {
       const portfolioCustomers = customers.filter((customer) => sellerPortfolioCustomerMatches(customer, item));
@@ -5192,17 +5221,19 @@ function SellerPortfolioBySeller({
   const filteredSellerSummaries = normalizedSellerQuery
     ? sellerSummaries.filter((item) => normalizeManualAlertSearch(item.seller.name).includes(normalizedSellerQuery))
     : sellerSummaries;
-  const sellerCustomers = user.role === "vendedor"
+  const visibleSellerSummaries = canSwitchSeller
+    ? filteredSellerSummaries
+    : filteredSellerSummaries.filter((item) => item.seller.id === seller?.id);
+  const sellerCustomers = !canSwitchSeller
     ? customers
     : seller
       ? customers.filter((customer) => sellerPortfolioCustomerMatches(customer, seller))
       : customers;
-  const sellerAlerts = user.role === "vendedor"
+  const sellerAlerts = !canSwitchSeller
     ? alerts
     : seller
       ? alerts.filter((alert) => sellerPortfolioAlertMatches(alert, seller))
       : alerts;
-  const canSwitchSeller = user.role !== "vendedor";
   const sellerRiskCustomers = sellerCustomers.filter(
     (customer) => customer.activityStatus === "risco" || customer.activityStatus === "perdido",
   ).length;
@@ -5252,7 +5283,7 @@ function SellerPortfolioBySeller({
           </div>
         )}
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {filteredSellerSummaries.map(({ seller: item, customerCount, alertCount, riskCustomers, potentialValue }) => (
+          {visibleSellerSummaries.map(({ seller: item, customerCount, alertCount, riskCustomers, potentialValue }) => (
             <button
               key={item.id}
               type="button"
@@ -5892,7 +5923,7 @@ function OpportunityModal({
             <option value="convertida">Convertida</option>
             <option value="descartada">Descartada</option>
           </FormSelect>
-          <FormSelect label="Responsável" value={sellerId} onChange={setSellerId} disabled={user.role === "vendedor"}>
+          <FormSelect label="Responsável" value={sellerId} onChange={setSellerId} disabled={user.role !== "administrador"}>
             {sellers.map((seller) => <option key={seller.id} value={seller.id}>{seller.name}</option>)}
           </FormSelect>
         </div>
@@ -5957,7 +5988,7 @@ function AgendaEventModal({
             <option value="">Sem cliente vinculado</option>
             {customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}
           </FormSelect>
-          <FormSelect label="Responsável" value={sellerId} onChange={setSellerId} disabled={user.role === "vendedor"}>
+          <FormSelect label="Responsável" value={sellerId} onChange={setSellerId} disabled={user.role !== "administrador"}>
             {sellers.map((seller) => <option key={seller.id} value={seller.id}>{seller.name}</option>)}
           </FormSelect>
         </div>
@@ -6629,22 +6660,25 @@ function FilterSelect({
   label,
   value,
   onChange,
+  disabled = false,
   children,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
+  disabled?: boolean;
   children: React.ReactNode;
 }) {
   return (
-    <label className="flex h-11 items-center gap-2 rounded-lg border border-blue-100 bg-white px-3 text-sm text-[#0753a6] focus-within:border-cyan-400">
+    <label className={`flex h-11 items-center gap-2 rounded-lg border border-blue-100 bg-white px-3 text-sm text-[#0753a6] focus-within:border-cyan-400 ${disabled ? "opacity-70" : ""}`}>
       <Filter size={15} className="shrink-0" />
       <span className="sr-only">{label}</span>
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
         aria-label={label}
-        className="min-w-0 flex-1 bg-transparent outline-none"
+        disabled={disabled}
+        className="min-w-0 flex-1 bg-transparent outline-none disabled:cursor-not-allowed"
       >
         {children}
       </select>
