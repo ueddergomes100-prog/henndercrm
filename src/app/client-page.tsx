@@ -720,9 +720,9 @@ export default function Home() {
               <CrmResults
                 customers={appCustomers}
                 alerts={appAlerts}
-                opportunities={scopedData.opportunities}
                 contactRecords={appContactRecords}
                 sales={scopedData.sales}
+                sellers={scopedData.sellers}
               />
             )}
             {visibleView === "clientes" && (
@@ -2211,27 +2211,26 @@ function Topbar({
 function CrmResults({
   customers,
   alerts,
-  opportunities,
   contactRecords,
   sales,
+  sellers,
 }: {
   customers: CustomerRow[];
   alerts: AlertRow[];
-  opportunities: CrmOpportunity[];
   contactRecords: ContactRecord[];
   sales: SaleRow[];
+  sellers: SellerRow[];
 }) {
   const attribution = buildCrmAttributionSummary({ customers, sales, contactRecords });
   const convertedAlerts = alerts.filter((alert) => alert.status === "convertido");
   const roi = attribution.totalAttributedRevenue ? Math.max(1, Math.round(attribution.totalAttributedRevenue / 350)) : 0;
-  const sellerRanking = buildSellerAttentionRanking({ customers, alerts, opportunities, agenda: [], contactRecords })
-    .slice(0, 5);
   const latestAttributedSales = attribution.attributedSales
     .slice()
     .sort((left, right) => right.sale.soldAt.localeCompare(left.sale.soldAt) || right.sale.uniplusId - left.sale.uniplusId)
     .slice(0, 8);
   const attributionTrend = buildAttributionTrend(attribution.attributedSales);
-  const sellerResultRows = buildSellerResultRows(attribution.attributedSales);
+  const sellerResultRows = buildSellerResultRows(attribution.attributedSales, sellers);
+  const sellerRecoveryRanking = sellerResultRows.slice(0, 5);
 
   return (
     <div className="space-y-5">
@@ -2325,18 +2324,20 @@ function CrmResults({
             </MeasuredChart>
           </div>
         </Panel>
-        <Panel title="Ranking por recuperação" icon={UsersRound}>
+        <Panel title="Ranking por recuperação" icon={UsersRound} action={`${sellerRecoveryRanking.length} vendedor(es)`}>
           <div className="space-y-3">
-            {sellerRanking.map((seller, index) => (
+            {sellerRecoveryRanking.map((seller, index) => (
               <div key={seller.name} className="flex items-center justify-between rounded-lg border border-blue-50 bg-[#f8fbff] p-3">
                 <div>
                   <p className="font-bold text-[#123252]">{index + 1}. {seller.name}</p>
-                  <p className="text-xs text-slate-500">{seller.riskCustomers} clientes em risco · {seller.pendingAlerts} alertas</p>
+                  <p className="text-xs text-slate-500">
+                    {seller.sales} venda(s) · {seller.customers} cliente(s) · {formatCurrency(seller.recoveredRevenue)} recuperado · {formatCurrency(seller.influencedRevenue)} influenciado
+                  </p>
                 </div>
-                <span className="font-black text-[#0753a6]">{formatCurrency(seller.potentialValue)}</span>
+                <span className="font-black text-[#0753a6]">{formatCurrency(seller.totalRevenue)}</span>
               </div>
             ))}
-            {!sellerRanking.length && <EmptyState text="Sem vendedores vinculados aos dados atuais." />}
+            {!sellerRecoveryRanking.length && <EmptyState text="Nenhuma venda atribuída ao CRM ainda." />}
           </div>
         </Panel>
       </div>
@@ -2398,7 +2399,7 @@ function buildAttributionTrend(attributedSales: CrmAttributedSale[]) {
     }));
 }
 
-function buildSellerResultRows(attributedSales: CrmAttributedSale[]) {
+function buildSellerResultRows(attributedSales: CrmAttributedSale[], availableSellers: SellerRow[]) {
   const rows = new Map<string, {
     name: string;
     recoveredRevenue: number;
@@ -2410,8 +2411,8 @@ function buildSellerResultRows(attributedSales: CrmAttributedSale[]) {
 
   for (const item of attributedSales) {
     const seller =
-      sellers.find((entry) => entry.name === item.contact.responsible) ??
-      sellers.find((entry) => entry.id === item.sale.sellerId);
+      availableSellers.find((entry) => entry.name === item.contact.responsible) ??
+      availableSellers.find((entry) => entry.id === item.sale.sellerId);
     const name = seller?.name ?? item.contact.responsible ?? item.customer?.preferredSeller ?? "Sem vendedor";
     const current = rows.get(name) ?? {
       name,
