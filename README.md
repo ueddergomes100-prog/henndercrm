@@ -122,7 +122,7 @@ São importadas apenas vendas que possuam:
 
 - Cliente identificado e ativo.
 - Nome de cliente preenchido.
-- Venda aprovada e não cancelada.
+- Venda faturada no Uniplus (`dav.status = 2`) e não cancelada.
 - Pelo menos um item.
 - Produto válido em todos os itens.
 
@@ -130,6 +130,7 @@ Registros rejeitados são classificados como:
 
 - `cliente_nao_identificado`
 - `venda_cancelada`
+- `venda_nao_faturada`
 - `item_sem_produto`
 - `cliente_inativo`
 - `dados_incompletos`

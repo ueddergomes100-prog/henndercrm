@@ -212,6 +212,7 @@ create table if not exists public.crm_vendas_ignoradas (
     motivo in (
       'cliente_nao_identificado',
       'venda_cancelada',
+      'venda_nao_faturada',
       'item_sem_produto',
       'cliente_inativo',
       'dados_incompletos'

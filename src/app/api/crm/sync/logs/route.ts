@@ -171,5 +171,16 @@ function resolveDailyStatus(
 
 function describeIgnoredSale(row: IgnoredSaleRow) {
   const sale = row.uniplus_venda_id ? `Venda ${row.uniplus_venda_id}` : "Venda sem ID";
-  return `${sale}: ${row.motivo}`;
+  return `${sale}: ${describeIgnoredReason(row.motivo)}`;
+}
+
+function describeIgnoredReason(reason: string) {
+  return {
+    cliente_nao_identificado: "cliente nao identificado",
+    venda_cancelada: "venda cancelada",
+    venda_nao_faturada: "venda nao faturada",
+    item_sem_produto: "item sem produto",
+    cliente_inativo: "cliente inativo",
+    dados_incompletos: "dados incompletos",
+  }[reason] ?? reason;
 }

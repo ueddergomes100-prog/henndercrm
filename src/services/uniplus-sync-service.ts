@@ -81,6 +81,7 @@ function getIgnoredReason(
 ): IgnoredSale["reason"] | undefined {
   if (!sale.clientId || !sale.clientName?.trim()) return "cliente_nao_identificado";
   if (sale.cancelledAt || sale.status.toLocaleUpperCase("pt-BR").includes("CANCEL")) return "venda_cancelada";
+  if (!isBilledSale(sale.status)) return "venda_nao_faturada";
 
   const client = clients.get(sale.clientId);
   if (!client) return "dados_incompletos";
@@ -90,4 +91,12 @@ function getIgnoredReason(
     return "item_sem_produto";
   }
   return undefined;
+}
+
+function isBilledSale(status: string) {
+  const normalized = status
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLocaleUpperCase("pt-BR");
+  return normalized === "FATURADA" || normalized === "FINALIZADA" || normalized === "STATUS_2";
 }

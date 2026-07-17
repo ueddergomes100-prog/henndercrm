@@ -160,6 +160,20 @@ test("one sale with multiple item ids creates one sale and many items", () => {
   assert.equal(result.metadata.maxItemsPerSale, 3);
 });
 
+test("Uniplus status 2 is billed and status 1 is not billed", () => {
+  const result = transformRows(
+    [
+      row({ uniplus_venda_id: "10", uniplus_item_id: "40", venda_status: "2" }),
+      row({ uniplus_venda_id: "11", uniplus_item_id: "41", item_uniplus_venda_id: "11", venda_status: "1" }),
+    ],
+    { referenceDate: "2026-07-17" },
+  );
+
+  const statuses = new Map(result.sales.map((sale) => [sale.id, sale.status]));
+  assert.equal(statuses.get(10), "FATURADA");
+  assert.equal(statuses.get(11), "NAO_FATURADA");
+});
+
 test("item rows linked to a different sale are rejected", () => {
   const result = transformRows(
     [

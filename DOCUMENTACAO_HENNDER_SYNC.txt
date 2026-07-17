@@ -547,9 +547,21 @@ O UniplusSyncService ja ignora venda quando:
 
 - cliente nao identificado
 - venda cancelada
+- venda nao faturada
 - item sem produto
 - cliente inativo
 - dados incompletos
+
+A exportacao oficial do Uniplus tambem filtra somente vendas faturadas:
+
+dav.status = 2
+
+No Uniplus observado em 17/07/2026:
+
+- dav.status = 1 -> Nao faturado
+- dav.status = 2 -> Faturado
+- dav.aprovado veio 0 para os dois casos e nao deve ser usado como criterio
+  principal de faturamento.
 
 Essas vendas sao gravadas em:
 
@@ -980,6 +992,7 @@ WHERE d.codigo IS NOT NULL
   AND d.idcliente IS NOT NULL
   AND d.nomecliente IS NOT NULL
   AND TRIM(d.nomecliente) <> ''
+  AND d.status = 2
   AND d.datacancelamento IS NULL
 
 ORDER BY
@@ -1278,6 +1291,7 @@ left join entidade e on e.id = d.idcliente
 where d.idcliente is not null
   and d.nomecliente is not null
   and trim(d.nomecliente) <> ''
+  and d.status = 2
   and d.datacancelamento is null;
 
 ================================================================================

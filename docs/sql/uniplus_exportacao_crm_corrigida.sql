@@ -236,6 +236,7 @@ WHERE d.codigo IS NOT NULL
   AND d.idcliente IS NOT NULL
   AND d.nomecliente IS NOT NULL
   AND TRIM(d.nomecliente) <> ''
+  AND d.status = 2
   AND d.datacancelamento IS NULL
 
 ORDER BY

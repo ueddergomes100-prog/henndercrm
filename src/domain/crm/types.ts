@@ -302,6 +302,7 @@ export interface IgnoredSale {
   reason:
     | "cliente_nao_identificado"
     | "venda_cancelada"
+    | "venda_nao_faturada"
     | "item_sem_produto"
     | "cliente_inativo"
     | "dados_incompletos";

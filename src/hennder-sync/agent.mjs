@@ -288,6 +288,7 @@ function selectValidRecords(data) {
 function getIgnoredReason(sale, items, clients, products) {
   if (!sale.clientId || !sale.clientName?.trim()) return "cliente_nao_identificado";
   if (sale.cancelledAt || sale.status.toLocaleUpperCase("pt-BR").includes("CANCEL")) return "venda_cancelada";
+  if (!isBilledSale(sale.status)) return "venda_nao_faturada";
   const client = clients.get(sale.clientId);
   if (!client) return "dados_incompletos";
   if (client.inactive) return "cliente_inativo";
@@ -296,6 +297,14 @@ function getIgnoredReason(sale, items, clients, products) {
     return "item_sem_produto";
   }
   return undefined;
+}
+
+function isBilledSale(status) {
+  const normalized = String(status ?? "")
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLocaleUpperCase("pt-BR");
+  return normalized === "FATURADA" || normalized === "FINALIZADA" || normalized === "STATUS_2";
 }
 
 class DryRunTarget {

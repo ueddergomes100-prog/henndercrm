@@ -328,8 +328,8 @@ function cityName(id) {
 
 function saleStatus(value) {
   return {
-    "1": "EMITIDA",
-    "2": "FINALIZADA",
+    "1": "NAO_FATURADA",
+    "2": "FATURADA",
   }[String(value ?? "")] ?? `STATUS_${text(value) || "NAO_INFORMADO"}`;
 }
 
