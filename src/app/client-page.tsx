@@ -344,6 +344,7 @@ export default function Home() {
   const [customerContactUpdates, setCustomerContactUpdates] = useState<Record<string, CustomerContactUpdate>>({});
   const [quickAction, setQuickAction] = useState<QuickAction | null>(null);
   const [isSigningOut, setIsSigningOut] = useState(false);
+  const [dismissedNotificationIds, setDismissedNotificationIds] = useState<string[]>([]);
 
   useEffect(() => {
     let active = true;
@@ -359,13 +360,16 @@ export default function Home() {
         const result = response.ok
           ? ((await response.json()) as { user: CrmSessionUser | null })
           : { user: null };
+        const nextUser = result.user ?? null;
 
         if (!active) return;
         setTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
-        setUser(result.user ?? null);
+        setDismissedNotificationIds(nextUser ? readDismissedNotificationIds(nextUser.id, crmReferenceDate) : []);
+        setUser(nextUser);
       } catch {
         if (!active) return;
         setTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
+        setDismissedNotificationIds([]);
         setUser(null);
       } finally {
         window.clearTimeout(timeout);
@@ -386,6 +390,7 @@ export default function Home() {
 
   useEffect(() => {
     if (!user) return;
+    const sessionUser = user;
     let active = true;
 
     async function loadSnapshot() {
@@ -396,6 +401,7 @@ export default function Home() {
       if (!active) return;
       const nextViewModel = crmViewService.getViewModel(result);
       setRuntimeViewModel(nextViewModel);
+      setDismissedNotificationIds(readDismissedNotificationIds(sessionUser.id, nextViewModel.snapshot.referenceDate));
       setAgendaItems(nextViewModel.snapshot.agenda);
       setOpportunityItems(nextViewModel.snapshot.opportunities);
       setSelectedCustomer(nextViewModel.customers[0]);
@@ -453,6 +459,7 @@ export default function Home() {
             throw new Error(result.error ?? "Não foi possível entrar.");
           }
           setTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
+          setDismissedNotificationIds(readDismissedNotificationIds(result.user.id, crmReferenceDate));
           setUser(result.user);
         }}
       />
@@ -476,7 +483,10 @@ export default function Home() {
     appCustomers[0] ??
     selectedCustomer;
   const visibleView = canAccessView(user, activeView) ? activeView : "dashboard";
-  const notifications = buildTopbarNotifications(appCustomers, appAlerts, appContactRecords, scopedData.agenda);
+  const notificationContacts = filterNotificationContactRecordsForUser(user, appContactRecords);
+  const generatedNotifications = buildTopbarNotifications(appCustomers, appAlerts, notificationContacts, scopedData.agenda);
+  const dismissedNotifications = new Set(dismissedNotificationIds);
+  const notifications = generatedNotifications.filter((notification) => !dismissedNotifications.has(notification.id));
 
   if (!safeSelectedCustomer) {
     return (
@@ -644,6 +654,13 @@ export default function Home() {
     localStorage.removeItem("agrocrm-theme");
   };
 
+  const clearNotifications = () => {
+    if (!notifications.length) return;
+    const nextDismissed = [...new Set([...dismissedNotificationIds, ...notifications.map((notification) => notification.id)])];
+    setDismissedNotificationIds(nextDismissed);
+    localStorage.setItem(getNotificationStorageKey(user.id, crmReferenceDate), JSON.stringify(nextDismissed));
+  };
+
   return (
     <main className="crm-app min-h-screen bg-[#eaf3fb] text-slate-950">
       <div className="flex min-h-screen">
@@ -664,11 +681,13 @@ export default function Home() {
             notifications={notifications}
             onOpenCustomer={openProfile}
             onOpenView={(view) => setActiveView(view)}
+            onClearNotifications={clearNotifications}
             onQuickAction={setQuickAction}
             onLogout={async () => {
               setIsSigningOut(true);
               await new Promise((resolve) => window.setTimeout(resolve, 650));
               await fetch("/api/auth/session", { method: "DELETE" });
+              setDismissedNotificationIds([]);
               setUser(null);
               setActiveView("dashboard");
               setIsSigningOut(false);
@@ -1073,6 +1092,31 @@ function buildTopbarNotifications(
     }));
 
   return [...overdueAlerts, ...todayAlerts, ...todayAgenda, ...weakRegistration];
+}
+
+function filterNotificationContactRecordsForUser(user: CrmSessionUser, records: ContactRecord[]) {
+  if (user.role === "administrador") return records;
+  const seller = resolveSellerForUser(user.sellerId);
+  const responsibleNames = new Set(
+    [user.name, seller?.name]
+      .filter(Boolean)
+      .map((name) => normalizeManualAlertSearch(name as string)),
+  );
+  return records.filter((record) => responsibleNames.has(normalizeManualAlertSearch(record.responsible)));
+}
+
+function getNotificationStorageKey(userId: string, referenceDate: string) {
+  return `hennder-crm-notifications:${userId}:${referenceDate}`;
+}
+
+function readDismissedNotificationIds(userId: string, referenceDate: string) {
+  try {
+    const stored = localStorage.getItem(getNotificationStorageKey(userId, referenceDate));
+    const parsed = stored ? JSON.parse(stored) : [];
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 function notificationToneClass(tone: CrmNotification["tone"]) {
@@ -1799,6 +1843,7 @@ function Topbar({
   notifications,
   onOpenCustomer,
   onOpenView,
+  onClearNotifications,
   onQuickAction,
   onLogout,
 }: {
@@ -1810,6 +1855,7 @@ function Topbar({
   notifications: CrmNotification[];
   onOpenCustomer: (customer: CustomerRow) => void;
   onOpenView: (view: View) => void;
+  onClearNotifications: () => void;
   onQuickAction: (action: QuickAction) => void;
   onLogout: () => Promise<void>;
 }) {
@@ -2057,9 +2103,21 @@ function Topbar({
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 className="absolute right-0 top-12 z-40 w-80 overflow-hidden rounded-xl border border-blue-100 bg-white p-2 text-slate-900 shadow-2xl"
               >
-                <div className="px-3 py-2">
-                  <p className="text-sm font-black text-[#123252]">Notificacoes comerciais</p>
-                  <p className="mt-1 text-xs text-slate-500">Resumo rapido de hoje, atrasos e cadastros para revisar.</p>
+                <div className="flex items-start justify-between gap-3 px-3 py-2">
+                  <div>
+                    <p className="text-sm font-black text-[#123252]">Notificacoes comerciais</p>
+                    <p className="mt-1 text-xs text-slate-500">Resumo individual da sua carteira, atrasos e cadastros para revisar.</p>
+                  </div>
+                  {notifications.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={onClearNotifications}
+                      className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border border-blue-100 bg-[#f8fbff] px-2 text-xs font-bold text-[#0753a6] transition hover:border-cyan-300 hover:bg-cyan-50"
+                    >
+                      <Trash2 size={13} />
+                      Limpar
+                    </button>
+                  )}
                 </div>
                 {notifications.length ? (
                   <div className="max-h-96 space-y-1 overflow-y-auto pr-1">
