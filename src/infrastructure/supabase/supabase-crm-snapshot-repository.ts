@@ -345,7 +345,12 @@ function mapCustomers(
     const clientSales = sales
       .filter((sale) => sale.cliente_id === client.id)
       .sort((a, b) => b.data_venda.localeCompare(a.data_venda));
-    const lastPurchaseAt = dateOnly(clientSales[0]?.data_venda ?? client.data_ultima_compra ?? referenceDate);
+    const lastPurchaseAt = dateOnly(
+      clientSales[0]?.data_venda ??
+        client.data_ultima_compra ??
+        client.data_cadastro ??
+        referenceDate,
+    );
     const daysWithoutPurchase = daysBetween(lastPurchaseAt, referenceDate);
     const totalPurchased = roundCurrency(
       clientSales.reduce((total, sale) => total + Number(sale.valor_total ?? 0), 0),

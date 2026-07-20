@@ -8,7 +8,24 @@ import { transformRows } from "./uniplus-row-transformer.mjs";
 
 const DEFAULT_SQL_PATH = "docs/sql/uniplus_exportacao_crm_corrigida.sql";
 const DEFAULT_LIMIT = 5000;
+const DEFAULT_SYNC_LOOKBACK_MINUTES = 15;
+const DEFAULT_SYNC_START_DATE = "2026-05-01";
+const UNIPLUS_TIME_ZONE = "America/Sao_Paulo";
 const SYNC_ORIGIN = "uniplus";
+const RESOLVED_SALE_DATE_SQL = `COALESCE(
+    CASE
+      WHEN d.data BETWEEN DATE '2000-01-01' AND CURRENT_DATE + INTERVAL '1 day'
+      THEN d.data
+    END,
+    CASE
+      WHEN d.datainclusao BETWEEN DATE '2000-01-01' AND CURRENT_DATE + INTERVAL '1 day'
+      THEN d.datainclusao
+    END,
+    CASE
+      WHEN d.dataalteracao BETWEEN DATE '2000-01-01' AND CURRENT_DATE + INTERVAL '1 day'
+      THEN d.dataalteracao
+    END
+  )`;
 
 loadEnvFile(".env.local");
 loadEnvFile(".env");
@@ -24,6 +41,7 @@ async function main() {
   const limit = positiveInteger(options.limit) ?? positiveInteger(process.env.UNIPLUS_SYNC_BATCH_SIZE) ?? DEFAULT_LIMIT;
   const since = await resolveSince(options.since);
   const dateWindow = since ? undefined : resolveDateWindow(options);
+  const minimumSaleDate = since ? resolveMinimumSaleDate() : undefined;
   const startedAt = new Date().toISOString();
 
   const databaseUrl = process.env.UNIPLUS_DATABASE_URL;
@@ -40,7 +58,12 @@ async function main() {
   let target;
   let syncId;
   try {
-    const sql = await buildExtractionSql(options.sqlPath ?? DEFAULT_SQL_PATH, { dateWindow, since, limit });
+    const sql = await buildExtractionSql(options.sqlPath ?? DEFAULT_SQL_PATH, {
+      dateWindow,
+      since,
+      minimumSaleDate,
+      limit,
+    });
     const queryStartedAt = Date.now();
     const result = await client.query(sql.text, sql.values);
     const queryDurationMs = Date.now() - queryStartedAt;
@@ -65,6 +88,7 @@ async function main() {
       finishedAt: new Date().toISOString(),
       queryDurationMs,
       since: since ?? null,
+      minimumSaleDate: minimumSaleDate ?? null,
       dateWindow: dateWindow ?? null,
       limit,
       rowsRead: result.rowCount,
@@ -151,22 +175,37 @@ Opcoes:
 `);
 }
 
-async function buildExtractionSql(sqlPath, { dateWindow, since, limit }) {
+async function buildExtractionSql(sqlPath, { dateWindow, since, minimumSaleDate, limit }) {
   let sql = await readFile(resolve(sqlPath), "utf8");
   const values = [];
   sql = sql.replace(/;\s*$/u, "").replace(/\s+LIMIT\s+\d+\s*$/iu, "");
 
   if (since) {
-    values.push(since);
+    values.push(since, UNIPLUS_TIME_ZONE);
+    const incrementalConditions = [
+      `  AND (
+    (d.dataalteracao AT TIME ZONE $2) >= $1::timestamptz
+    OR (d.datainclusao AT TIME ZONE $2) >= $1::timestamptz
+    OR (
+      (d.dataalteracao BETWEEN DATE '2000-01-01' AND CURRENT_DATE + INTERVAL '1 day') IS NOT TRUE
+      AND (d.datainclusao BETWEEN DATE '2000-01-01' AND CURRENT_DATE + INTERVAL '1 day') IS NOT TRUE
+      AND ${RESOLVED_SALE_DATE_SQL} >= ($1::timestamptz AT TIME ZONE $2)::date
+    )
+  )`,
+    ];
+    if (minimumSaleDate) {
+      values.push(minimumSaleDate);
+      incrementalConditions.push(`  AND ${RESOLVED_SALE_DATE_SQL} >= $${values.length}`);
+    }
     sql = sql.replace(
       /\nORDER BY/iu,
-      `\n  AND (\n    d.dataalteracao >= $${values.length}\n    OR d.datainclusao >= $${values.length}\n    OR d.data >= $${values.length}\n  )\n\nORDER BY`,
+      `\n${incrementalConditions.join("\n")}\n\nORDER BY`,
     );
   } else if (dateWindow) {
     values.push(dateWindow.from, dateWindow.to);
     sql = sql.replace(
       /\nORDER BY/iu,
-      `\n  AND d.data >= $${values.length - 1}\n  AND d.data < $${values.length}\n\nORDER BY`,
+      `\n  AND ${RESOLVED_SALE_DATE_SQL} >= $${values.length - 1}\n  AND ${RESOLVED_SALE_DATE_SQL} < $${values.length}\n\nORDER BY`,
     );
   }
 
@@ -183,6 +222,12 @@ function resolveDateWindow(options) {
   assertDateOnly(to, "--to");
   if (to <= from) throw new Error("--to precisa ser maior que --from.");
   return { from, to };
+}
+
+function resolveMinimumSaleDate() {
+  const value = process.env.UNIPLUS_SYNC_START_DATE?.trim() || DEFAULT_SYNC_START_DATE;
+  assertDateOnly(value, "UNIPLUS_SYNC_START_DATE");
+  return value;
 }
 
 function todayLocalDate() {
@@ -234,7 +279,13 @@ async function resolveSince(value) {
   }
 
   const target = new SupabaseTarget();
-  return target.getLastSuccessfulSync();
+  const lastSuccessfulSync = await target.getLastSuccessfulSync();
+  if (!lastSuccessfulSync) return undefined;
+
+  const lookbackMinutes =
+    positiveInteger(process.env.UNIPLUS_SYNC_LOOKBACK_MINUTES) ??
+    DEFAULT_SYNC_LOOKBACK_MINUTES;
+  return subtractMinutes(lastSuccessfulSync, lookbackMinutes);
 }
 
 function normalizeRows(rows) {
@@ -429,6 +480,8 @@ class SupabaseTarget {
     const storedSales = await this.selectAll("crm_vendas", { select: "id,uniplus_id" });
     const saleIds = new Map(storedSales.map((row) => [Number(row.uniplus_id), row.id]));
 
+    await this.removeStaleSaleItems(sales, items, saleIds);
+
     await this.upsert(
       "crm_itens_venda",
       items.map((item) => completeRow({
@@ -442,6 +495,36 @@ class SupabaseTarget {
       })),
       "uniplus_id",
     );
+  }
+
+  async removeStaleSaleItems(sales, items, saleIds) {
+    const importedSaleIds = new Set(
+      sales.flatMap((sale) => {
+        const id = saleIds.get(sale.id);
+        return id ? [id] : [];
+      }),
+    );
+    if (importedSaleIds.size === 0) return;
+
+    const [storedItems, alerts] = await Promise.all([
+      this.selectAll("crm_itens_venda", { select: "id,uniplus_id,venda_id" }),
+      this.selectAll("crm_alertas_recompra", { select: "item_venda_id" }),
+    ]);
+    const expectedSaleByItemId = new Map(
+      items.map((item) => [item.id, saleIds.get(item.saleId)]),
+    );
+    const protectedItemIds = new Set(
+      alerts.flatMap((alert) => alert.item_venda_id ? [alert.item_venda_id] : []),
+    );
+    const staleItems = storedItems.filter((item) =>
+      importedSaleIds.has(item.venda_id) &&
+      expectedSaleByItemId.get(Number(item.uniplus_id)) !== item.venda_id &&
+      !protectedItemIds.has(item.id),
+    );
+
+    for (const item of staleItems) {
+      await this.delete("crm_itens_venda", { id: item.id });
+    }
   }
 
   async saveIgnoredSales(ignoredSales) {
@@ -516,6 +599,16 @@ class SupabaseTarget {
       query: Object.fromEntries(Object.entries(filters).map(([key, value]) => [key, `eq.${value}`])),
       body: values,
       prefer: "return=representation",
+    });
+  }
+
+  async delete(table, filters) {
+    return this.request(table, {
+      method: "DELETE",
+      query: Object.fromEntries(
+        Object.entries(filters).map(([key, value]) => [key, `eq.${value}`]),
+      ),
+      prefer: "return=minimal",
     });
   }
 
@@ -708,6 +801,13 @@ function positiveInteger(value) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
+function subtractMinutes(value, minutes) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  date.setUTCMinutes(date.getUTCMinutes() - minutes);
+  return date.toISOString();
+}
+
 function parseBoolean(value) {
   return ["1", "true", "t", "sim", "s", "yes", "y"].includes(String(value ?? "").trim().toLowerCase());
 }
@@ -717,7 +817,7 @@ function loadEnvFile(path) {
     const text = readFileSync(resolve(path), "utf8");
     for (const line of text.split(/\r?\n/u)) {
       const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)\s*$/u);
-      if (!match || process.env[match[1]] !== undefined) continue;
+      if (!match || process.env[match[1]]?.trim()) continue;
       process.env[match[1]] = unquoteEnvValue(match[2]);
     }
   } catch (error) {

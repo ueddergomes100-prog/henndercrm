@@ -51,6 +51,8 @@ UNIPLUS_DATABASE_URL=postgres://readonly-user:readonly-password@uniplus-host:543
 UNIPLUS_SSL=false
 UNIPLUS_SYNC_BATCH_SIZE=5000
 UNIPLUS_SYNC_MODE=incremental
+UNIPLUS_SYNC_LOOKBACK_MINUTES=15
+UNIPLUS_SYNC_START_DATE=2026-05-01
 HENNDER_SYNC_LOG_DIR=.data/hennder-sync-logs
 ```
 
@@ -88,7 +90,14 @@ Supabase. Ele e o comportamento padrao e recomendado para o primeiro teste.
 Para gravar no Supabase, use `--apply` explicitamente.
 Na VPS Linux, `HENNDER_SYNC_LOG_DIR` pode ser trocado para `/var/log/hennder-sync`.
 Sem `--since`, `--date`, `--from` ou `--to`, o Sync busca somente vendas de hoje
-pelo campo `d.data`.
+pela data saneada da venda. `npm run sync:uniplus:auto` usa o ultimo sync
+concluido, refaz os 15 minutos anteriores de forma idempotente e nunca importa
+vendas anteriores a `UNIPLUS_SYNC_START_DATE`.
+
+Os campos `dav.datainclusao` e `dav.dataalteracao` do Uniplus sao horarios
+locais sem fuso. O modo incremental os interpreta em `America/Sao_Paulo` antes
+de comparar com o horario UTC salvo no Supabase. Datas absurdas em `dav.data`
+sao descartadas e substituidas por inclusao ou alteracao validas.
 
 ## Ordem De Implementacao
 
@@ -107,22 +116,27 @@ pelo campo `d.data`.
 O CRM nao carrega mais fixture mockada. O front-end le o snapshot comercial do
 Supabase, e o agente real fica em `src/hennder-sync`.
 
-Em 10/07/2026, a rotina local Windows esta ativa no Agendador de Tarefas com
-`npm run sync:uniplus:auto`, sincronizando somente vendas do dia. A ultima
-execucao validada importou 25 vendas e 36 itens, sem erros e sem ignoradas.
+Em 20/07/2026, a rotina local Windows esta ativa no Agendador de Tarefas a cada
+5 minutos com `npm run sync:uniplus:auto`. A consulta incremental validada leva
+cerca de 2 segundos e usa uma sobreposicao de 15 minutos para capturar vendas
+faturadas ou alteradas entre execucoes sem criar duplicidades.
 
 A tela **Vendas** usa `crm_vendas.updated_at` para separar as vendas tocadas
 pela ultima sincronizacao da lista completa. A aba **Todas** continua
 disponivel, mas a interface aplica busca, filtros e carregamento incremental
 para evitar uma tabela grande demais.
 
-Dry-run historico executado sem gravar no Supabase:
+Reconciliacao historica aplicada e auditada:
 
 ```bash
-node scripts/hennder-sync.mjs --from 2026-05-10 --to 2026-07-11 --dry-run
+node scripts/hennder-sync.mjs --from 2026-05-01 --to 2026-07-21 --apply --limit 100000
 ```
 
-Resultado: 5000 linhas lidas, 2664 vendas identificadas, 4999 itens validos e 1
-venda ignorada por cliente inativo. Antes de aplicar a carga historica real,
-revisar se o limite de 5000 linhas deve ser aumentado ou se a carga sera feita
-em janelas menores.
+Resultado final conferido em 20/07/2026: 6.403 vendas, 12.055 itens e
+R$ 1.318.641,45 tanto no Uniplus quanto no Supabase. A auditoria encontrou zero
+vendas ou itens faltantes, excedentes ou divergentes e zero clientes com
+`data_ultima_compra` desatualizada.
+
+O caso `PATRICIA WERNER` foi validado com as vendas 326958, de 05/06/2026, e
+335452, de 11/07/2026. O snapshot passou a exibir ultima compra em 11/07,
+9 dias sem compra e status ativo.

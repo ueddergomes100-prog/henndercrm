@@ -99,10 +99,11 @@ Hennder CRM Web na Hostinger
 ```
 
 No ambiente do Sync, configure `UNIPLUS_DATABASE_URL`, `UNIPLUS_SSL`,
-`UNIPLUS_SYNC_BATCH_SIZE`, `UNIPLUS_SYNC_MODE`, `HENNDER_SYNC_LOG_DIR` e as
-chaves Supabase server-side. O usuario PostgreSQL do Uniplus deve ser somente
-leitura. A gravacao no Supabase exige o comando explicito `npm run
-sync:uniplus:apply`.
+`UNIPLUS_SYNC_BATCH_SIZE`, `UNIPLUS_SYNC_MODE`,
+`UNIPLUS_SYNC_LOOKBACK_MINUTES`, `UNIPLUS_SYNC_START_DATE`,
+`HENNDER_SYNC_LOG_DIR` e as chaves Supabase server-side. O usuario PostgreSQL
+do Uniplus deve ser somente leitura. A gravacao no Supabase exige o comando
+explicito `npm run sync:uniplus:apply`.
 
 ## 6. RLS e permissoes
 

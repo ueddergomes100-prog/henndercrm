@@ -21,6 +21,58 @@
 -- antigo exportou 330777 porque estava usando d.id. Com este SQL, esperamos
 -- que uniplus_venda_id seja d.codigo.
 
+WITH cliente_ultima_compra AS (
+    SELECT
+        dc.idcliente,
+        MAX(COALESCE(
+            CASE
+                WHEN dc.data BETWEEN DATE '2000-01-01' AND CURRENT_DATE + INTERVAL '1 day'
+                THEN dc.data
+                ELSE NULL
+            END,
+            CASE
+                WHEN dc.datainclusao BETWEEN DATE '2000-01-01' AND CURRENT_DATE + INTERVAL '1 day'
+                THEN dc.datainclusao
+                ELSE NULL
+            END,
+            CASE
+                WHEN dc.dataalteracao BETWEEN DATE '2000-01-01' AND CURRENT_DATE + INTERVAL '1 day'
+                THEN dc.dataalteracao
+                ELSE NULL
+            END
+        )) AS data_ultima_compra
+    FROM dav dc
+    WHERE dc.status = 2
+      AND dc.datacancelamento IS NULL
+    GROUP BY dc.idcliente
+),
+produto_ultima_venda AS (
+    SELECT
+        dip.idproduto,
+        MAX(COALESCE(
+            CASE
+                WHEN dp.data BETWEEN DATE '2000-01-01' AND CURRENT_DATE + INTERVAL '1 day'
+                THEN dp.data
+                ELSE NULL
+            END,
+            CASE
+                WHEN dp.datainclusao BETWEEN DATE '2000-01-01' AND CURRENT_DATE + INTERVAL '1 day'
+                THEN dp.datainclusao
+                ELSE NULL
+            END,
+            CASE
+                WHEN dp.dataalteracao BETWEEN DATE '2000-01-01' AND CURRENT_DATE + INTERVAL '1 day'
+                THEN dp.dataalteracao
+                ELSE NULL
+            END
+        )) AS data_ultima_venda
+    FROM dav dp
+    JOIN davitem dip
+        ON dip.iddav = dp.id
+    WHERE dp.status = 2
+      AND dp.datacancelamento IS NULL
+    GROUP BY dip.idproduto
+)
 SELECT
     -- VENDA - IDs separados para nao confundir numero comercial com ID interno
     d.codigo AS uniplus_venda_id,
@@ -88,29 +140,7 @@ SELECT
         ELSE NULL
     END AS cliente_data_cadastro,
 
-    (
-        SELECT MAX(COALESCE(
-            CASE
-                WHEN dc.data BETWEEN DATE '2000-01-01' AND CURRENT_DATE + INTERVAL '1 day'
-                THEN dc.data
-                ELSE NULL
-            END,
-            CASE
-                WHEN dc.datainclusao BETWEEN DATE '2000-01-01' AND CURRENT_DATE + INTERVAL '1 day'
-                THEN dc.datainclusao
-                ELSE NULL
-            END,
-            CASE
-                WHEN dc.dataalteracao BETWEEN DATE '2000-01-01' AND CURRENT_DATE + INTERVAL '1 day'
-                THEN dc.dataalteracao
-                ELSE NULL
-            END
-        ))
-        FROM dav dc
-        WHERE dc.idcliente = d.idcliente
-          AND dc.status = 2
-          AND dc.datacancelamento IS NULL
-    ) AS cliente_data_ultima_compra,
+    cuc.data_ultima_compra AS cliente_data_ultima_compra,
 
     e.inativo AS cliente_inativo,
     e.idcategoriacliente AS cliente_categoria_id,
@@ -215,31 +245,7 @@ SELECT
         ELSE NULL
     END AS item_valor_estimado,
 
-    (
-        SELECT MAX(COALESCE(
-            CASE
-                WHEN dp.data BETWEEN DATE '2000-01-01' AND CURRENT_DATE + INTERVAL '1 day'
-                THEN dp.data
-                ELSE NULL
-            END,
-            CASE
-                WHEN dp.datainclusao BETWEEN DATE '2000-01-01' AND CURRENT_DATE + INTERVAL '1 day'
-                THEN dp.datainclusao
-                ELSE NULL
-            END,
-            CASE
-                WHEN dp.dataalteracao BETWEEN DATE '2000-01-01' AND CURRENT_DATE + INTERVAL '1 day'
-                THEN dp.dataalteracao
-                ELSE NULL
-            END
-        ))
-        FROM dav dp
-        JOIN davitem dip
-            ON dip.iddav = dp.id
-        WHERE dip.idproduto = p.id
-          AND dp.status = 2
-          AND dp.datacancelamento IS NULL
-    ) AS produto_data_ultima_venda,
+    puv.data_ultima_venda AS produto_data_ultima_venda,
 
     CASE
         WHEN p.dataultimacompra BETWEEN DATE '2000-01-01' AND CURRENT_DATE + INTERVAL '1 day'
@@ -261,6 +267,9 @@ LEFT JOIN produto p
 LEFT JOIN entidade e
     ON e.id = d.idcliente
 
+LEFT JOIN cliente_ultima_compra cuc
+    ON cuc.idcliente = d.idcliente
+
 LEFT JOIN entidade vr
     ON vr.id = d.idrepresentante
 
@@ -269,6 +278,9 @@ LEFT JOIN usuario u
 
 LEFT JOIN usuario uf
     ON uf.id = d.idusuariofaturamento
+
+LEFT JOIN produto_ultima_venda puv
+    ON puv.idproduto = p.id
 
 WHERE d.codigo IS NOT NULL
   AND d.idcliente IS NOT NULL

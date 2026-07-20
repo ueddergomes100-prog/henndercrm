@@ -1811,11 +1811,12 @@ function LoginScreen({
         </section>
         <section className="crm-auth-media relative hidden min-h-[620px] overflow-hidden lg:block" aria-hidden="true">
           <Image
-            src="/assets/login-circuitry.png"
+            src="/assets/login-crm-dashboard.webp"
             alt=""
             fill
             sizes="(min-width: 1024px) 52vw, 0vw"
             priority
+            unoptimized
             className="h-full w-full object-cover"
           />
         </section>
