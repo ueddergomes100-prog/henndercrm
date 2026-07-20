@@ -344,108 +344,264 @@ textarea:focus-visible {
   background: transparent;
 }
 
-.crm-loading-screen {
+.app-loading-screen {
+  display: grid;
+  min-height: 100svh;
+  place-items: center;
+  overflow: hidden;
+  background: #02070c;
+  color: #f8fafc;
+}
+
+.app-loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  background: rgba(2, 7, 12, 0.76);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  backdrop-filter: blur(7px);
+  transition:
+    opacity 180ms ease,
+    visibility 0s linear 180ms;
+}
+
+.app-loading-overlay--visible {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition-delay: 0s;
+}
+
+.app-loading-animation {
+  display: grid;
+  width: clamp(9rem, 20vw, 13rem);
+  aspect-ratio: 1;
+  place-items: center;
+}
+
+.app-loading-animation--compact {
+  width: 5rem;
+}
+
+.app-inline-loading {
+  display: grid;
+  min-height: 9rem;
+  place-items: center;
+}
+
+.app-loading-fallback {
+  display: flex;
+  height: 2.5rem;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.app-loading-fallback span {
+  width: 0.5rem;
+  height: 1.75rem;
+  border-radius: 0.25rem;
+  background: #67e8f9;
+  animation: app-loading-fallback 900ms ease-in-out infinite alternate;
+}
+
+.app-loading-fallback span:nth-child(2) {
+  height: 2.5rem;
+  background: #34d399;
+  animation-delay: 120ms;
+}
+
+.app-loading-fallback span:nth-child(3) {
+  background: #60a5fa;
+  animation-delay: 240ms;
+}
+
+.crm-auth-screen {
+  position: relative;
+  isolation: isolate;
+  background: #0b0f12;
+}
+
+.crm-auth-screen::before {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    linear-gradient(115deg, rgba(103, 232, 249, 0.04) 0 1px, transparent 1px 22px),
+    linear-gradient(205deg, rgba(52, 211, 153, 0.035) 0 1px, transparent 1px 28px),
+    #0b0f12;
+  content: "";
+}
+
+.crm-auth-card {
+  min-height: min(720px, calc(100svh - 2rem));
+  background: #14181b;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.42);
+}
+
+.crm-auth-panel {
+  --crm-auth-glow-x: 50%;
+  --crm-auth-glow-y: 36%;
+  background:
+    radial-gradient(260px circle at var(--crm-auth-glow-x) var(--crm-auth-glow-y), rgba(99, 121, 188, 0.34), transparent 70%),
+    linear-gradient(140deg, #20242d 0%, #181c21 52%, #14191c 100%);
+}
+
+.crm-auth-panel::after {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.035) 48%, transparent 100%);
+  content: "";
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.crm-auth-brand > div > div:first-child {
+  border-color: rgba(165, 243, 252, 0.34);
+  background: linear-gradient(135deg, #10213a, #154d68);
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.28);
+}
+
+.crm-auth-field {
+  --crm-auth-field-x: 50%;
   position: relative;
 }
 
-.crm-loading-card,
-.crm-login-panel,
-.crm-login-preview {
-  animation: crm-panel-enter 0.45s ease-out both;
+.crm-auth-field::before,
+.crm-auth-field::after {
+  position: absolute;
+  z-index: 20;
+  right: 1px;
+  left: 1px;
+  height: 1px;
+  border-radius: 999px;
+  background: radial-gradient(48px circle at var(--crm-auth-field-x) 0, rgba(241, 245, 249, 0.95), rgba(165, 243, 252, 0.4) 28%, transparent 72%);
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease;
 }
 
-.crm-login-preview {
-  animation-delay: 0.12s;
+.crm-auth-field::before {
+  top: 29px;
 }
 
-.crm-loading-screen::before {
+.crm-auth-field::after {
+  bottom: 0;
+  transform: rotate(180deg);
+}
+
+.crm-auth-field:hover::before,
+.crm-auth-field:hover::after,
+.crm-auth-field:focus-within::before,
+.crm-auth-field:focus-within::after {
+  opacity: 1;
+}
+
+.crm-auth-icon-button {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: #94a3b8;
+  transition: background-color 160ms ease, color 160ms ease;
+}
+
+.crm-auth-icon-button:hover {
+  background: rgba(148, 163, 184, 0.12);
+  color: #e2e8f0;
+}
+
+.crm-auth-submit {
+  position: relative;
+  overflow: hidden;
+  background: #24465e;
+  box-shadow: 0 14px 32px rgba(13, 34, 48, 0.32);
+}
+
+.crm-auth-submit::before {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 18%, rgba(255, 255, 255, 0.16) 49%, transparent 76%);
+  content: "";
+  transform: translateX(-115%);
+  transition: transform 520ms ease;
+}
+
+.crm-auth-submit:hover:not(:disabled) {
+  background: #2b5875;
+}
+
+.crm-auth-submit:hover:not(:disabled)::before {
+  transform: translateX(115%);
+}
+
+.crm-auth-submit > * {
+  position: relative;
+  z-index: 1;
+}
+
+.crm-auth-media {
+  background: #0b0f12;
+}
+
+.crm-auth-media::after {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(115deg, rgba(34, 211, 238, 0.12) 0 1px, transparent 1px 18px),
-    linear-gradient(205deg, rgba(16, 185, 129, 0.1) 0 1px, transparent 1px 22px),
-    linear-gradient(145deg, #02040a 0%, #041d40 44%, #06356c 100%);
-  background-size: auto, auto, auto;
+    linear-gradient(90deg, rgba(17, 24, 27, 0.55) 0%, rgba(17, 24, 27, 0.16) 28%, rgba(2, 6, 10, 0.36) 100%),
+    linear-gradient(180deg, rgba(2, 6, 10, 0.08), rgba(2, 6, 10, 0.54));
   content: "";
 }
 
-.crm-loading-screen::after {
-  position: absolute;
-  inset: 0;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 34%),
-    linear-gradient(90deg, transparent, rgba(103, 232, 249, 0.16), transparent);
-  content: "";
-  opacity: 0.55;
+.crm-auth-media img {
+  animation: crm-auth-media-enter 0.65s ease-out both;
+  filter: saturate(0.76) contrast(1.06);
 }
 
-.crm-loader-grid {
-  display: grid;
-  width: 74px;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-}
-
-.crm-loader-grid span {
-  height: 14px;
-  border-radius: 5px;
-  background: linear-gradient(135deg, #22d3ee, #16c786);
-  animation: crm-loader-tile 1.05s ease-in-out infinite;
-}
-
-.crm-loading-progress {
-  animation: crm-loading-progress 1.35s ease-in-out infinite;
-  transform-origin: left;
-}
-
-.crm-login-pulse {
-  animation: crm-login-pulse 1.4s ease-in-out infinite;
-}
-
-@keyframes crm-loader-tile {
-  0%,
-  100% {
-    opacity: 0.35;
-    transform: scale(0.72);
+@keyframes app-loading-fallback {
+  from {
+    opacity: 0.45;
+    transform: scaleY(0.62);
   }
-  50% {
+  to {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+}
+
+@keyframes crm-auth-media-enter {
+  from {
+    opacity: 0;
+    transform: scale(1.035);
+  }
+  to {
     opacity: 1;
     transform: scale(1);
   }
 }
 
-@keyframes crm-loading-progress {
-  0% {
-    transform: translateX(-100%) scaleX(0.35);
+@media (prefers-reduced-motion: reduce) {
+  .app-loading-overlay {
+    transition: none;
   }
-  50% {
-    transform: translateX(12%) scaleX(0.72);
-  }
-  100% {
-    transform: translateX(110%) scaleX(0.35);
+
+  .app-loading-fallback span,
+  .crm-auth-media img,
+  .crm-auth-submit::before {
+    animation: none;
+    transition: none;
   }
 }
 
-@keyframes crm-login-pulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.28);
-    transform: scale(1);
-  }
-  50% {
-    box-shadow: 0 0 0 18px rgba(52, 211, 153, 0);
-    transform: scale(1.04);
-  }
-}
-
-@keyframes crm-panel-enter {
-  0% {
-    opacity: 0.01;
-    transform: translateY(14px) scale(0.98);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0) scale(1);
+@media (max-width: 1023px) {
+  .crm-auth-card {
+    min-height: calc(100svh - 2rem);
   }
 }
 

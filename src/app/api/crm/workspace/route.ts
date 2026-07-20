@@ -15,6 +15,7 @@ import type {
 import { getCrmWorkspaceRepository } from "@/infrastructure/crm-workspace-provider";
 import { SupabaseCrmSnapshotRepository } from "@/infrastructure/supabase/supabase-crm-snapshot-repository";
 import { CRM_SESSION_COOKIE, readSessionToken } from "@/lib/crm-auth";
+import { invalidateCrmSnapshotCache } from "@/lib/crm-snapshot-cache";
 
 type WorkspaceAction =
   | { action: "create_contact"; record: Omit<CrmContactRecord, "id"> }
@@ -109,47 +110,47 @@ export async function POST(request: Request) {
 
     switch (command.action) {
       case "create_contact":
-        return Response.json(
+        return changedResponse(
           await repository.createContact(command.record),
-          { status: 201 },
+          201,
         );
       case "create_manual_customer":
-        return Response.json(
+        return changedResponse(
           await repository.createManualCustomer(command.customer),
-          { status: 201 },
+          201,
         );
       case "create_manual_alert":
-        return Response.json(
+        return changedResponse(
           await repository.createManualAlert(command.alert),
-          { status: 201 },
+          201,
         );
       case "update_customer_contact":
-        return Response.json(
+        return changedResponse(
           await repository.updateCustomerContact(command.contact),
         );
       case "update_alert":
-        return Response.json(
+        return changedResponse(
           await repository.updateAlertStatus(command.id, command.status),
         );
       case "create_agenda":
-        return Response.json(
+        return changedResponse(
           await repository.createAgendaEvent(command.event),
-          { status: 201 },
+          201,
         );
       case "update_agenda":
-        return Response.json(
+        return changedResponse(
           await repository.updateAgendaEvent(command.id, command.event),
         );
       case "delete_agenda":
         await repository.deleteAgendaEvent(command.id);
-        return Response.json({ ok: true });
+        return changedResponse({ ok: true });
       case "create_opportunity":
-        return Response.json(
+        return changedResponse(
           await repository.createOpportunity(command.opportunity),
-          { status: 201 },
+          201,
         );
       case "update_opportunity":
-        return Response.json(
+        return changedResponse(
           await repository.updateOpportunity(
             command.id,
             command.opportunity,
@@ -157,7 +158,7 @@ export async function POST(request: Request) {
         );
       case "delete_opportunity":
         await repository.deleteOpportunity(command.id);
-        return Response.json({ ok: true });
+        return changedResponse({ ok: true });
       default:
         return Response.json({ error: "Ação inválida." }, { status: 400 });
     }
@@ -167,6 +168,11 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
+}
+
+function changedResponse<T>(value: T, status = 200) {
+  invalidateCrmSnapshotCache();
+  return Response.json(value, { status });
 }
 
 async function requireUser(): Promise<CrmSessionUser | Response> {

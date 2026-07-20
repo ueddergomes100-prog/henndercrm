@@ -8,6 +8,7 @@ import {
   Bot,
   CalendarDays,
   CheckCircle2,
+  ChevronLeft,
   ChevronRight,
   CircleDollarSign,
   ClipboardList,
@@ -15,10 +16,14 @@ import {
   Database,
   Filter,
   Download,
+  Eye,
+  EyeOff,
   FileText,
   LineChart,
+  LockKeyhole,
   LogIn,
   LogOut,
+  Mail,
   Menu,
   MessageCircle,
   Moon,
@@ -56,7 +61,13 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import Image from "next/image";
+import {
+  AppInlineLoading,
+  AppLoadingScreen,
+  useAppLoading,
+} from "@/components/ui/app-loading";
 import { normalizeBrazilianWhatsAppNumber } from "@/domain/crm/rules";
 import type {
   CrmAgendaEvent,
@@ -116,6 +127,7 @@ type SaleItemRow = CrmSaleItem;
 type ProductRow = CrmProduct;
 type SellerRow = CrmSeller;
 type QuickAction = "manual-alert" | "manual-customer" | "opportunity" | "agenda" | "contact";
+const LIST_PAGE_SIZE = 20;
 const OPPORTUNITY_PAGE_SIZE = 20;
 type ChatMessage = {
   id: string;
@@ -327,6 +339,7 @@ const sellerAllowedViews: View[] = [
 ];
 const supervisorBlockedViews: View[] = ["configuracoes"];
 export default function Home() {
+  const { runWithLoading } = useAppLoading();
   const [user, setUser] = useState<CrmSessionUser | null>(null);
   const [authChecking, setAuthChecking] = useState(true);
   const [snapshotChecking, setSnapshotChecking] = useState(true);
@@ -343,7 +356,6 @@ export default function Home() {
   const [manualAlerts, setManualAlerts] = useState<AlertRow[]>([]);
   const [customerContactUpdates, setCustomerContactUpdates] = useState<Record<string, CustomerContactUpdate>>({});
   const [quickAction, setQuickAction] = useState<QuickAction | null>(null);
-  const [isSigningOut, setIsSigningOut] = useState(false);
   const [dismissedNotificationIds, setDismissedNotificationIds] = useState<string[]>([]);
 
   useEffect(() => {
@@ -437,31 +449,36 @@ export default function Home() {
       });
   }, [snapshotChecking, user]);
 
-  if (authChecking || (user && snapshotChecking)) {
-    return <SystemLoadingScreen label="Carregando sessao comercial" detail="Preparando dashboard, alertas e carteira de clientes." />;
+  if (authChecking) {
+    return <AppLoadingScreen label="Carregando sessão comercial" />;
   }
 
 
   if (!user) {
     return (
       <LoginScreen
-        onLogin={async (email, password) => {
-          const response = await fetch("/api/auth/session", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ email, password }),
-          });
-          const result = (await response.json()) as {
-            user?: CrmSessionUser;
-            error?: string;
-          };
-          if (!response.ok || !result.user) {
-            throw new Error(result.error ?? "Não foi possível entrar.");
-          }
-          setTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
-          setDismissedNotificationIds(readDismissedNotificationIds(result.user.id, crmReferenceDate));
-          setUser(result.user);
-        }}
+        onLogin={(email, password) =>
+          runWithLoading(
+            async () => {
+              const response = await fetch("/api/auth/session", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ email, password }),
+              });
+              const result = (await response.json()) as {
+                user?: CrmSessionUser;
+                error?: string;
+              };
+              if (!response.ok || !result.user) {
+                throw new Error(result.error ?? "Não foi possível entrar.");
+              }
+              setTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
+              setDismissedNotificationIds(readDismissedNotificationIds(result.user.id, crmReferenceDate));
+              setUser(result.user);
+            },
+            { label: "Validando acesso" },
+          )
+        }
       />
     );
   }
@@ -489,8 +506,38 @@ export default function Home() {
   const notifications = generatedNotifications.filter((notification) => !dismissedNotifications.has(notification.id));
 
   if (!safeSelectedCustomer) {
+    if (snapshotChecking) {
+      return (
+        <AuthenticatedLoadingShell
+          activeView={activeView}
+          mobileOpen={mobileOpen}
+          setActiveView={setActiveView}
+          setMobileOpen={setMobileOpen}
+          theme={theme}
+          user={user}
+          onThemeChange={(nextTheme) => {
+            setTheme(nextTheme);
+            document.documentElement.dataset.theme = nextTheme;
+            localStorage.setItem("henndercrm-theme", nextTheme);
+            localStorage.removeItem("agrocrm-theme");
+          }}
+          onLogout={() =>
+            runWithLoading(
+              async () => {
+                await fetch("/api/auth/session", { method: "DELETE" });
+                setDismissedNotificationIds([]);
+                setUser(null);
+                setActiveView("dashboard");
+              },
+              { label: "Encerrando sessão" },
+            )
+          }
+        />
+      );
+    }
+
     return (
-      <SystemLoadingScreen
+      <SystemEmptyScreen
         label="CRM sem dados sincronizados"
         detail="Rode o Hennder Sync para carregar as vendas reais do Uniplus no Supabase."
       />
@@ -683,15 +730,17 @@ export default function Home() {
             onOpenView={(view) => setActiveView(view)}
             onClearNotifications={clearNotifications}
             onQuickAction={setQuickAction}
-            onLogout={async () => {
-              setIsSigningOut(true);
-              await new Promise((resolve) => window.setTimeout(resolve, 650));
-              await fetch("/api/auth/session", { method: "DELETE" });
-              setDismissedNotificationIds([]);
-              setUser(null);
-              setActiveView("dashboard");
-              setIsSigningOut(false);
-            }}
+            onLogout={() =>
+              runWithLoading(
+                async () => {
+                  await fetch("/api/auth/session", { method: "DELETE" });
+                  setDismissedNotificationIds([]);
+                  setUser(null);
+                  setActiveView("dashboard");
+                },
+                { label: "Encerrando sessão" },
+              )
+            }
           />
           <motion.div
             key={visibleView}
@@ -882,7 +931,6 @@ export default function Home() {
         onCreateOpportunity={saveOpportunity}
         onCreateContact={registerContact}
       />
-      {isSigningOut && <SystemExitOverlay />}
     </main>
   );
 }
@@ -1174,7 +1222,74 @@ async function mutateWorkspace<T = unknown>(command: unknown): Promise<T> {
   return result;
 }
 
-function SystemLoadingScreen({
+function AuthenticatedLoadingShell({
+  activeView,
+  mobileOpen,
+  setActiveView,
+  setMobileOpen,
+  theme,
+  user,
+  onThemeChange,
+  onLogout,
+}: {
+  activeView: View;
+  mobileOpen: boolean;
+  setActiveView: (view: View) => void;
+  setMobileOpen: (open: boolean) => void;
+  theme: Theme;
+  user: CrmSessionUser;
+  onThemeChange: (theme: Theme) => void;
+  onLogout: () => Promise<void>;
+}) {
+  return (
+    <main className="crm-app min-h-screen bg-[#eaf3fb] text-slate-950">
+      <div className="flex min-h-screen">
+        <Sidebar
+          activeView={activeView}
+          setActiveView={setActiveView}
+          mobileOpen={mobileOpen}
+          setMobileOpen={setMobileOpen}
+          user={user}
+        />
+        <section className="crm-content min-w-0 flex-1 bg-[linear-gradient(135deg,#edf7ff_0%,#f5f9ff_48%,#eaf3fb_100%)]">
+          <Topbar
+            onMenu={() => setMobileOpen(true)}
+            theme={theme}
+            onThemeChange={onThemeChange}
+            user={user}
+            customers={[]}
+            notifications={[]}
+            onOpenCustomer={() => undefined}
+            onOpenView={setActiveView}
+            onClearNotifications={() => undefined}
+            onQuickAction={() => undefined}
+            onLogout={onLogout}
+          />
+          <div className="mx-auto w-full max-w-[1560px] px-3 py-4 sm:px-5 lg:px-6">
+            <PageTitle
+              eyebrow="Visão executiva"
+              title="Dashboard comercial inteligente"
+              description="Preparando os indicadores prioritários da operação."
+            />
+            <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              {Array.from({ length: 4 }).map((_, index) => (
+                <div
+                  key={index}
+                  className="h-28 animate-pulse rounded-lg border border-blue-100 bg-white/80"
+                />
+              ))}
+            </div>
+            <div className="mt-5 min-h-56 border-y border-blue-100 bg-white/55">
+              <AppInlineLoading label="Carregando os dados prioritários do dashboard" />
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  );
+}
+
+function SystemEmptyScreen({
   label,
   detail,
 }: {
@@ -1182,72 +1297,15 @@ function SystemLoadingScreen({
   detail: string;
 }) {
   return (
-    <main className="crm-loading-screen flex min-h-screen items-center justify-center overflow-hidden bg-[#02040a] px-6 text-white">
-      <div className="crm-loading-card relative z-10 w-full max-w-md rounded-3xl border border-cyan-300/18 bg-[#061324]/86 p-8 text-center shadow-2xl shadow-cyan-950/30 backdrop-blur-xl">
+    <main className="flex min-h-screen items-center justify-center bg-[#02070c] px-6 text-white">
+      <div className="w-full max-w-md text-center">
         <div className="flex justify-center">
           <LogoMark />
         </div>
-        <div className="crm-loader-grid mx-auto mt-8">
-          {Array.from({ length: 9 }).map((_, index) => (
-            <span key={index} style={{ animationDelay: `${index * 0.08}s` }} />
-          ))}
-        </div>
         <h1 className="mt-8 text-2xl font-bold">{label}</h1>
         <p className="mt-3 text-sm leading-6 text-slate-300">{detail}</p>
-        <div className="mt-6 h-1.5 overflow-hidden rounded-full bg-white/10">
-          <div className="crm-loading-progress h-full rounded-full bg-gradient-to-r from-cyan-300 via-emerald-300 to-blue-400" />
-        </div>
       </div>
     </main>
-  );
-}
-
-function SystemExitOverlay() {
-  return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/86 px-6 text-white backdrop-blur-md"
-    >
-      <motion.div
-        initial={{ y: 16, scale: 0.96 }}
-        animate={{ y: 0, scale: 1 }}
-        className="rounded-3xl border border-cyan-300/20 bg-white/8 p-8 text-center shadow-2xl"
-      >
-        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-cyan-400 text-[#06356c]">
-          <LogOut size={24} />
-        </div>
-        <p className="mt-5 text-lg font-bold">Encerrando sessao</p>
-        <p className="mt-2 text-sm text-slate-300">Salvando contexto comercial e fechando acesso com seguranca.</p>
-        <div className="mx-auto mt-6 h-1.5 w-64 overflow-hidden rounded-full bg-white/10">
-          <div className="crm-loading-progress h-full rounded-full bg-gradient-to-r from-cyan-300 to-emerald-300" />
-        </div>
-      </motion.div>
-    </motion.div>
-  );
-}
-
-function LoginLoadingOverlay() {
-  return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/62 px-6 backdrop-blur-sm"
-    >
-      <motion.div
-        initial={{ y: 16, scale: 0.96 }}
-        animate={{ y: 0, scale: 1 }}
-        className="rounded-3xl border border-emerald-300/20 bg-white/10 p-7 text-center shadow-2xl"
-      >
-        <div className="crm-login-pulse mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-300 text-emerald-950">
-          <ShieldCheck size={27} />
-        </div>
-        <p className="mt-5 text-lg font-bold text-white">Validando acesso</p>
-        <p className="mt-2 max-w-xs text-sm leading-6 text-emerald-50/75">
-          Carregando permissoes, carteira comercial e operacao do dia.
-        </p>
-      </motion.div>
-    </motion.div>
   );
 }
 
@@ -1634,22 +1692,42 @@ function LoginScreen({
   const [password, setPassword] = useState(isProduction ? "" : "Admin@123");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [passwordVisible, setPasswordVisible] = useState(false);
+  const [glowPosition, setGlowPosition] = useState({ x: 50, y: 36 });
+  const panelStyle = {
+    "--crm-auth-glow-x": `${glowPosition.x}%`,
+    "--crm-auth-glow-y": `${glowPosition.y}%`,
+  } as CSSProperties;
 
   return (
-    <main className="min-h-screen overflow-hidden bg-[#0d1211] text-white">
-      {submitting && <LoginLoadingOverlay />}
-      <div className="grid min-h-screen lg:grid-cols-[0.9fr_1.1fr]">
-        <section className="flex items-center px-6 py-10 sm:px-10 lg:px-16">
-          <div className="crm-login-panel w-full max-w-md">
-            <LogoMark />
-            <h1 className="mt-10 text-4xl font-semibold leading-tight sm:text-5xl">
-              Hennder CRM
-            </h1>
-            <p className="mt-4 text-lg leading-8 text-emerald-50/72">
-              Inteligência Comercial e Recompra
-            </p>
+    <main className="crm-auth-screen flex min-h-svh items-center overflow-x-hidden p-4 text-white sm:p-6">
+      <div className="crm-auth-card mx-auto grid w-full max-w-6xl overflow-hidden rounded-lg border border-white/10 shadow-2xl lg:grid-cols-[minmax(0,0.96fr)_minmax(0,1.04fr)]">
+        <section
+          className="crm-auth-panel relative flex min-h-[calc(100svh-2rem)] items-center overflow-hidden px-6 py-10 sm:px-10 lg:min-h-[620px] lg:px-14 xl:px-16"
+          style={panelStyle}
+          onPointerMove={(event) => {
+            const bounds = event.currentTarget.getBoundingClientRect();
+            setGlowPosition({
+              x: ((event.clientX - bounds.left) / bounds.width) * 100,
+              y: ((event.clientY - bounds.top) / bounds.height) * 100,
+            });
+          }}
+        >
+          <div className="relative z-10 mx-auto w-full max-w-[370px]">
+            <div className="crm-auth-brand">
+              <LogoMark />
+              <p className="mt-9 text-xs font-semibold uppercase tracking-[0.18em] text-cyan-100/68">
+                Acesso ao painel comercial
+              </p>
+              <h1 className="mt-3 text-4xl font-semibold leading-tight text-[#edf2f7] sm:text-[2.7rem]">
+                Hennder CRM
+              </h1>
+              <p className="mt-3 max-w-sm text-[15px] leading-6 text-slate-300">
+                Inteligência comercial para transformar relacionamento em novas vendas.
+              </p>
+            </div>
             <form
-              className="mt-10 space-y-4"
+              className="mt-9 space-y-4"
               onSubmit={async (event) => {
                 event.preventDefault();
                 setSubmitting(true);
@@ -1667,74 +1745,143 @@ function LoginScreen({
                 }
               }}
             >
-              <label className="block">
-                <span className="text-sm font-medium text-emerald-50/80">Email</span>
-                <input
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  type="email"
-                  required
-                  className="mt-2 h-12 w-full rounded-lg border border-white/12 bg-white/8 px-4 text-sm text-white outline-none transition focus:border-emerald-300/70 focus:bg-white/12"
-                />
-              </label>
-              <label className="block">
-                <span className="text-sm font-medium text-emerald-50/80">Senha</span>
-                <input
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  type="password"
-                  required
-                  className="mt-2 h-12 w-full rounded-lg border border-white/12 bg-white/8 px-4 text-sm text-white outline-none transition focus:border-emerald-300/70 focus:bg-white/12"
-                />
-              </label>
+              <LoginInput
+                id="login-email"
+                label="E-mail"
+                value={email}
+                type="email"
+                autoComplete="email"
+                placeholder="nome@empresa.com"
+                icon={<Mail size={18} aria-hidden="true" />}
+                hasError={Boolean(error)}
+                onChange={(value) => {
+                  setEmail(value);
+                  setError("");
+                }}
+              />
+              <LoginInput
+                id="login-password"
+                label="Senha"
+                value={password}
+                type={passwordVisible ? "text" : "password"}
+                autoComplete="current-password"
+                placeholder="Digite sua senha"
+                icon={<LockKeyhole size={18} aria-hidden="true" />}
+                hasError={Boolean(error)}
+                trailing={
+                  <button
+                    type="button"
+                    onClick={() => setPasswordVisible((visible) => !visible)}
+                    className="crm-auth-icon-button"
+                    aria-label={passwordVisible ? "Ocultar senha" : "Mostrar senha"}
+                    title={passwordVisible ? "Ocultar senha" : "Mostrar senha"}
+                  >
+                    {passwordVisible ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                }
+                onChange={(value) => {
+                  setPassword(value);
+                  setError("");
+                }}
+              />
               <button
                 type="submit"
                 disabled={submitting}
-                className="group flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-emerald-400 text-sm font-semibold text-emerald-950 shadow-[0_24px_60px_rgba(52,211,153,0.24)] transition hover:bg-emerald-300"
+                className="crm-auth-submit group flex h-12 w-full items-center justify-center gap-2 rounded-lg px-5 text-sm font-semibold text-white transition disabled:cursor-wait disabled:opacity-70"
               >
-                {submitting ? (
-                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-emerald-950/25 border-t-emerald-950" />
-                ) : (
-                  <LogIn size={18} />
-                )}
+                <LogIn size={18} />
                 {submitting ? "Entrando..." : "Entrar"}
                 <ChevronRight size={17} className="transition group-hover:translate-x-0.5" />
               </button>
               {error && (
-                <p className="rounded-lg border border-red-300/25 bg-red-400/10 px-3 py-2 text-sm text-red-100">
+                <p id="login-error" role="alert" className="rounded-lg border border-red-300/25 bg-red-400/10 px-3 py-2 text-sm text-red-100">
                   {error}
                 </p>
               )}
             </form>
             {!isProduction && (
-            <div className="mt-5 rounded-lg border border-white/10 bg-white/5 p-3 text-xs leading-5 text-slate-300">
-              <p className="font-semibold text-white">Acessos locais de desenvolvimento</p>
-              <p>Administrador: admin@henndercrm.local / Admin@123</p>
-              <p>Supervisor: supervisor@henndercrm.local / Supervisor@123</p>
-              <p>Vendedor: vendedor@henndercrm.local / Vendedor@123</p>
-            </div>
+              <div className="mt-5 hidden border-l border-cyan-200/30 pl-3 text-xs leading-5 text-slate-400 sm:block">
+                <p className="font-semibold text-slate-200">Acessos locais de desenvolvimento</p>
+                <p>Administrador: admin@henndercrm.local / Admin@123</p>
+                <p>Supervisor: supervisor@henndercrm.local / Supervisor@123</p>
+                <p>Vendedor: vendedor@henndercrm.local / Vendedor@123</p>
+              </div>
             )}
           </div>
         </section>
-        <section className="relative hidden items-center justify-center p-10 lg:flex">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_42%_32%,rgba(16,185,129,0.28),transparent_32%),radial-gradient(circle_at_80%_70%,rgba(59,130,246,0.18),transparent_28%)]" />
-          <div className="crm-login-preview relative w-full max-w-3xl rounded-2xl border border-white/14 bg-white/10 p-4 shadow-2xl backdrop-blur-xl">
-            <div className="rounded-xl bg-slate-950/92 p-5">
-              <div className="mb-5 flex items-center justify-between">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.3em] text-emerald-300">Live CRM</p>
-                  <h2 className="mt-2 text-2xl font-semibold">Painel executivo</h2>
-                </div>
-                <div className="rounded-full border border-emerald-300/30 bg-emerald-300/10 px-3 py-1 text-xs text-emerald-200">
-                  IA ativa
-                </div>
-              </div>
-              <DashboardPreview />
-            </div>
-          </div>
+        <section className="crm-auth-media relative hidden min-h-[620px] overflow-hidden lg:block" aria-hidden="true">
+          <Image
+            src="/assets/login-circuitry.png"
+            alt=""
+            fill
+            sizes="(min-width: 1024px) 52vw, 0vw"
+            priority
+            className="h-full w-full object-cover"
+          />
         </section>
       </div>
     </main>
+  );
+}
+
+function LoginInput({
+  id,
+  label,
+  value,
+  type,
+  autoComplete,
+  placeholder,
+  icon,
+  trailing,
+  hasError,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  type: "email" | "password" | "text";
+  autoComplete: string;
+  placeholder: string;
+  icon: ReactNode;
+  trailing?: ReactNode;
+  hasError: boolean;
+  onChange: (value: string) => void;
+}) {
+  const [pointerX, setPointerX] = useState(50);
+  const fieldStyle = { "--crm-auth-field-x": `${pointerX}%` } as CSSProperties;
+
+  return (
+    <label
+      className="crm-auth-field block"
+      style={fieldStyle}
+      onPointerMove={(event) => {
+        const bounds = event.currentTarget.getBoundingClientRect();
+        setPointerX(((event.clientX - bounds.left) / bounds.width) * 100);
+      }}
+    >
+      <span className="mb-2 block text-sm font-medium text-slate-200">{label}</span>
+      <span className="relative block">
+        <span className="pointer-events-none absolute left-4 top-1/2 z-10 -translate-y-1/2 text-slate-500">
+          {icon}
+        </span>
+        <input
+          id={id}
+          name={id}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          type={type}
+          autoComplete={autoComplete}
+          placeholder={placeholder}
+          aria-invalid={hasError}
+          aria-describedby={hasError ? "login-error" : undefined}
+          required
+          className={`h-12 w-full rounded-[7px] border bg-[#111519] py-3 pl-11 text-sm text-slate-100 outline-none transition placeholder:text-slate-600 focus:bg-[#141a1f] ${
+            trailing ? "pr-12" : "pr-4"
+          } ${hasError ? "border-red-300/55" : "border-[#2e3740] focus:border-cyan-200/70"}`}
+        />
+        {trailing && <span className="absolute right-1.5 top-1/2 z-10 -translate-y-1/2">{trailing}</span>}
+      </span>
+    </label>
   );
 }
 
@@ -2703,8 +2850,15 @@ function ProductsModule({
   sales: SaleRow[];
   saleItems: SaleItemRow[];
 }) {
+  const [page, setPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(products.length / LIST_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const visibleProducts = products.slice(
+    (currentPage - 1) * LIST_PAGE_SIZE,
+    currentPage * LIST_PAGE_SIZE,
+  );
   const salesById = new Map(sales.map((sale) => [sale.id, sale]));
-  const productStats = products.map((product) => {
+  const productStats = visibleProducts.map((product) => {
     const productItems = saleItems.filter((item) => item.productId === product.id);
     const buyerIds = new Set(productItems.flatMap((item) => {
       const sale = salesById.get(item.saleId);
@@ -2730,7 +2884,11 @@ function ProductsModule({
         <MetricCard label="Recompra ativa" value={`${products.filter((product) => product.repurchaseActive).length}`} />
         <MetricCard label="Com alertas" value={`${new Set(alerts.map((alert) => alert.product)).size}`} />
       </div>
-      <Panel title="Catálogo comercial" icon={ClipboardList} action={`${productStats.length} produtos`}>
+      <Panel
+        title="Catálogo comercial"
+        icon={ClipboardList}
+        action={`${productStats.length} de ${products.length} produtos`}
+      >
         <div className="overflow-x-auto">
           <table className="min-w-full text-left text-sm">
             <thead className="text-xs uppercase tracking-wide text-slate-400">
@@ -2760,6 +2918,12 @@ function ProductsModule({
           </table>
           {!productStats.length && <EmptyState text="Nenhum produto importado no momento." />}
         </div>
+        <PaginationControls
+          page={currentPage}
+          totalItems={products.length}
+          itemLabel="produtos"
+          onPageChange={setPage}
+        />
       </Panel>
     </div>
   );
@@ -2822,6 +2986,13 @@ function ActivitiesModule({
   contactRecords: ContactRecord[];
   user: CrmSessionUser;
 }) {
+  const [page, setPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(contactRecords.length / LIST_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const visibleContactRecords = contactRecords.slice(
+    (currentPage - 1) * LIST_PAGE_SIZE,
+    currentPage * LIST_PAGE_SIZE,
+  );
   const outcomes = contactRecords.reduce<Record<string, number>>((acc, record) => {
     acc[record.outcome] = (acc[record.outcome] ?? 0) + 1;
     return acc;
@@ -2870,7 +3041,11 @@ function ActivitiesModule({
           </div>
         </Panel>
       )}
-      <Panel title="Histórico de contatos" icon={Phone}>
+      <Panel
+        title="Histórico de contatos"
+        icon={Phone}
+        action={`${visibleContactRecords.length} de ${contactRecords.length} atividades`}
+      >
         <div className="overflow-x-auto">
           <table className="min-w-full text-left text-sm">
             <thead className="text-xs uppercase tracking-wide text-slate-400">
@@ -2884,7 +3059,7 @@ function ActivitiesModule({
               </tr>
             </thead>
             <tbody className="divide-y divide-blue-50">
-              {contactRecords.map((record) => (
+              {visibleContactRecords.map((record) => (
                 <tr key={record.id} className="hover:bg-cyan-50/60">
                   <td className="px-3 py-3 font-semibold text-[#123252]">{record.customerName}</td>
                   <td className="px-3 py-3">{record.channel}</td>
@@ -2898,6 +3073,12 @@ function ActivitiesModule({
           </table>
           {!contactRecords.length && <EmptyState text="Nenhuma atividade registrada ainda." />}
         </div>
+        <PaginationControls
+          page={currentPage}
+          totalItems={contactRecords.length}
+          itemLabel="atividades"
+          onPageChange={setPage}
+        />
       </Panel>
     </div>
   );
@@ -3047,6 +3228,7 @@ function RepurchaseEngineModule({ alerts, user }: { alerts: AlertRow[]; user: Cr
   const departments = [...new Set(activeProducts.map((product) => product.department || "Sem departamento"))];
   const manualRules = alerts.filter((alert) => alert.origin === "manual");
   const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
   const [daysByProduct, setDaysByProduct] = useState<Record<string, string>>({});
   const [savingProductId, setSavingProductId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
@@ -3090,6 +3272,12 @@ function RepurchaseEngineModule({ alerts, user }: { alerts: AlertRow[]; user: Cr
     const normalized = query.trim().toLowerCase();
     return !normalized || product.name.toLowerCase().includes(normalized) || product.code.toLowerCase().includes(normalized);
   });
+  const totalPages = Math.max(1, Math.ceil(filteredProducts.length / LIST_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const visibleProducts = filteredProducts.slice(
+    (currentPage - 1) * LIST_PAGE_SIZE,
+    currentPage * LIST_PAGE_SIZE,
+  );
 
   return (
     <div className="space-y-5">
@@ -3101,19 +3289,26 @@ function RepurchaseEngineModule({ alerts, user }: { alerts: AlertRow[]; user: Cr
         <MetricCard label="Alertas gerados" value={String(alerts.length)} />
       </div>
       <div className="grid gap-5 xl:grid-cols-[1.25fr_0.75fr]">
-        <Panel title="Dias por produto" icon={SlidersHorizontal} action={filteredProducts.length + " produtos"}>
+        <Panel
+          title="Dias por produto"
+          icon={SlidersHorizontal}
+          action={visibleProducts.length + " de " + filteredProducts.length + " produtos"}
+        >
           <div className="mb-4 flex h-11 items-center gap-2 rounded-lg border border-blue-100 bg-[#f8fbff] px-3 focus-within:border-cyan-400">
             <Search size={17} className="text-slate-400" />
             <input
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setPage(1);
+              }}
               placeholder="Buscar produto ou codigo"
               className="w-full bg-transparent text-sm outline-none"
             />
           </div>
           {message && <p className="mb-4 rounded-lg border border-cyan-100 bg-cyan-50 px-3 py-2 text-sm font-semibold text-cyan-800">{message}</p>}
           <div className="space-y-3">
-            {filteredProducts.slice(0, 80).map((product) => {
+            {visibleProducts.map((product) => {
               const automaticDays = inferAutomaticRepurchaseDays(product);
               const configuredValue = daysByProduct[product.id] ?? (product.defaultRepurchaseDays ? String(product.defaultRepurchaseDays) : "");
               const configuredDays = configuredValue ? Number(configuredValue) : undefined;
@@ -3167,6 +3362,12 @@ function RepurchaseEngineModule({ alerts, user }: { alerts: AlertRow[]; user: Cr
             })}
             {!filteredProducts.length && <EmptyState text="Nenhum produto recorrente encontrado." />}
           </div>
+          <PaginationControls
+            page={currentPage}
+            totalItems={filteredProducts.length}
+            itemLabel="produtos"
+            onPageChange={setPage}
+          />
         </Panel>
         <Panel title="Regras complementares" icon={Database}>
           <SimpleRows
@@ -3238,11 +3439,24 @@ function SyncModule() {
   const latestSale = logs?.sales?.latest;
   const todayLatestSale = logs?.sales?.todayLatest;
 
+  if (loading) {
+    return (
+      <div className="space-y-5">
+        <PageTitle
+          eyebrow="Sistema"
+          title="Logs e Sincronização"
+          description="Rotina automática do Hennder Sync, resumo do dia, erros e vendas ignoradas."
+        />
+        <AppInlineLoading label="Carregando logs de sincronização" />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-5">
       <PageTitle eyebrow="Sistema" title="Logs e Sincronização" description="Rotina automática do Hennder Sync, resumo do dia, erros e vendas ignoradas." />
       <div className="grid gap-4 md:grid-cols-4">
-        <MetricCard label="Status do dia" value={loading ? "..." : statusLabel} />
+        <MetricCard label="Status do dia" value={statusLabel} />
         <MetricCard label="Vendas de hoje" value={`${logs?.sales?.todayImported ?? 0}`} />
         <MetricCard label="Último lote" value={`${logs?.summary.imported ?? 0}`} />
         <MetricCard label="Erros" value={`${logs?.errors.length ?? 0}`} />
@@ -3287,9 +3501,7 @@ function SyncModule() {
       </div>
 
       <Panel title="Histórico recente do Sync" icon={Clock3}>
-        {loading ? (
-          <p className="text-sm text-slate-500">Carregando execuções...</p>
-        ) : logs?.recentRuns?.length ? (
+        {logs?.recentRuns?.length ? (
           <div className="overflow-x-auto">
             <table className="min-w-full text-left text-sm">
               <thead className="text-xs uppercase tracking-wide text-slate-400">
@@ -3322,9 +3534,7 @@ function SyncModule() {
       </Panel>
 
       <Panel title="Erros e vendas ignoradas do dia" icon={AlertTriangle}>
-        {loading ? (
-          <p className="text-sm text-slate-500">Carregando logs...</p>
-        ) : logs?.errors.length ? (
+        {logs?.errors.length ? (
           <div className="space-y-3">
             {logs.errors.map((item) => (
               <div key={item.id} className="rounded-xl border border-red-100 bg-red-50/70 p-4">
@@ -3671,8 +3881,10 @@ function UserManagementPanel({
       <Panel title="Usuarios ativos" icon={ShieldCheck} action={loadingUsers ? "Carregando" : `${managedUsers.length} usuários`}>
         {user.role !== "administrador" ? (
           <EmptyState text="Lista disponivel apenas para administradores." />
+        ) : loadingUsers ? (
+          <AppInlineLoading label="Carregando usuários" />
         ) : managedUsers.length === 0 ? (
-          <EmptyState text={loadingUsers ? "Carregando usuários..." : "Nenhum usuário cadastrado."} />
+          <EmptyState text="Nenhum usuário cadastrado." />
         ) : (
           <div className="space-y-2">
             {managedUsers.map((managedUser) => {
@@ -4113,11 +4325,28 @@ function RecoveryCustomers({
 }) {
   const [contactCustomer, setContactCustomer] = useState<CustomerRow | null>(null);
   const [activeFilter, setActiveFilter] = useState<RecoveryFilter>("todos");
+  const [page, setPage] = useState(1);
+  const [contactHistoryPage, setContactHistoryPage] = useState(1);
   const inactiveCustomers = [...customers]
     .filter((customer) => customer.activityStatus !== "ativo")
     .sort((a, b) => b.days - a.days);
   const filteredInactiveCustomers = inactiveCustomers.filter((customer) =>
     matchesRecoveryFilter(customer, activeFilter, contactRecords),
+  );
+  const totalPages = Math.max(1, Math.ceil(filteredInactiveCustomers.length / LIST_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const visibleInactiveCustomers = filteredInactiveCustomers.slice(
+    (currentPage - 1) * LIST_PAGE_SIZE,
+    currentPage * LIST_PAGE_SIZE,
+  );
+  const contactHistoryTotalPages = Math.max(
+    1,
+    Math.ceil(contactRecords.length / LIST_PAGE_SIZE),
+  );
+  const currentContactHistoryPage = Math.min(contactHistoryPage, contactHistoryTotalPages);
+  const visibleContactHistory = contactRecords.slice(
+    (currentContactHistoryPage - 1) * LIST_PAGE_SIZE,
+    currentContactHistoryPage * LIST_PAGE_SIZE,
   );
 
   return (
@@ -4149,7 +4378,10 @@ function RecoveryCustomers({
             <button
               key={filter.id}
               type="button"
-              onClick={() => setActiveFilter(filter.id)}
+              onClick={() => {
+                setActiveFilter(filter.id);
+                setPage(1);
+              }}
               className={`rounded-lg px-3 py-2 text-sm font-medium ${
                 activeFilter === filter.id
                   ? "bg-orange-600 text-white"
@@ -4162,7 +4394,7 @@ function RecoveryCustomers({
         </div>
 
         <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
-          {filteredInactiveCustomers.map((customer) => {
+          {visibleInactiveCustomers.map((customer) => {
             const latestContact = contactRecords.find((record) => record.customerId === customer.id);
 
             return (
@@ -4241,6 +4473,12 @@ function RecoveryCustomers({
           })}
         </div>
         {!filteredInactiveCustomers.length && <EmptyState text="Nenhum cliente encontrado para este filtro." />}
+        <PaginationControls
+          page={currentPage}
+          totalItems={filteredInactiveCustomers.length}
+          itemLabel="clientes"
+          onPageChange={setPage}
+        />
       </Panel>
 
       <Panel title="Histórico de contatos" icon={MessageCircle} action={`${contactRecords.length} registros`}>
@@ -4251,7 +4489,7 @@ function RecoveryCustomers({
           </div>
         ) : (
           <div className="grid gap-2">
-            {contactRecords.map((record) => (
+            {visibleContactHistory.map((record) => (
               <div
                 key={record.id}
                 className="grid gap-2 rounded-lg border border-blue-100 bg-[#f8fbff] px-4 py-3 md:grid-cols-[1.2fr_1fr_0.8fr_1.5fr]"
@@ -4267,6 +4505,12 @@ function RecoveryCustomers({
             ))}
           </div>
         )}
+        <PaginationControls
+          page={currentContactHistoryPage}
+          totalItems={contactRecords.length}
+          itemLabel="contatos"
+          onPageChange={setContactHistoryPage}
+        />
       </Panel>
 
       {contactCustomer && (
@@ -4301,6 +4545,7 @@ function Customers({
   const [sellerFilter, setSellerFilter] = useState("todos");
   const [cityFilter, setCityFilter] = useState("todas");
   const [qualityFilter, setQualityFilter] = useState("todas");
+  const [page, setPage] = useState(1);
   const cities = [...new Set(customers.map((customer) => customer.city))].sort();
   const sellerNames = [...new Set(customers.map((customer) => customer.preferredSeller))].sort();
   const canSwitchSeller = user.role === "administrador";
@@ -4318,6 +4563,12 @@ function Customers({
     const matchesQuality = qualityFilter === "todas" || customer.qualityStatus === qualityFilter;
     return matchesQuery && matchesStatus && matchesSeller && matchesCity && matchesQuality;
   });
+  const totalPages = Math.max(1, Math.ceil(filtered.length / LIST_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const visibleCustomers = filtered.slice(
+    (currentPage - 1) * LIST_PAGE_SIZE,
+    currentPage * LIST_PAGE_SIZE,
+  );
 
   return (
     <div className="space-y-5">
@@ -4326,9 +4577,24 @@ function Customers({
         <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-[1.2fr_repeat(4,0.7fr)]">
           <div className="flex h-11 items-center gap-2 rounded-lg border border-blue-100 bg-[#f8fbff] px-3 focus-within:border-cyan-400">
             <Search size={17} className="text-slate-400" />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nome ou cidade" className="w-full bg-transparent text-sm outline-none" />
+            <input
+              value={query}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setPage(1);
+              }}
+              placeholder="Nome ou cidade"
+              className="w-full bg-transparent text-sm outline-none"
+            />
           </div>
-          <FilterSelect label="Status" value={statusFilter} onChange={setStatusFilter}>
+          <FilterSelect
+            label="Status"
+            value={statusFilter}
+            onChange={(value) => {
+              setStatusFilter(value);
+              setPage(1);
+            }}
+          >
             <option value="todos">Todos os status</option>
             <option value="ativo">Ativos</option>
             <option value="atencao">Atenção</option>
@@ -4338,7 +4604,14 @@ function Customers({
           <FilterSelect
             label="Vendedor"
             value={canSwitchSeller ? sellerFilter : lockedSellerLabel}
-            onChange={canSwitchSeller ? setSellerFilter : () => undefined}
+            onChange={
+              canSwitchSeller
+                ? (value) => {
+                    setSellerFilter(value);
+                    setPage(1);
+                  }
+                : () => undefined
+            }
             disabled={!canSwitchSeller}
           >
             {canSwitchSeller ? (
@@ -4350,11 +4623,25 @@ function Customers({
               <option value={lockedSellerLabel}>{lockedSellerLabel}</option>
             )}
           </FilterSelect>
-          <FilterSelect label="Cidade" value={cityFilter} onChange={setCityFilter}>
+          <FilterSelect
+            label="Cidade"
+            value={cityFilter}
+            onChange={(value) => {
+              setCityFilter(value);
+              setPage(1);
+            }}
+          >
             <option value="todas">Todas as cidades</option>
             {cities.map((city) => <option key={city} value={city}>{city}</option>)}
           </FilterSelect>
-          <FilterSelect label="Qualidade" value={qualityFilter} onChange={setQualityFilter}>
+          <FilterSelect
+            label="Qualidade"
+            value={qualityFilter}
+            onChange={(value) => {
+              setQualityFilter(value);
+              setPage(1);
+            }}
+          >
             <option value="todas">Toda qualidade</option>
             <option value="excelente">Excelente</option>
             <option value="bom">Bom</option>
@@ -4372,8 +4659,8 @@ function Customers({
               </tr>
             </thead>
             <tbody>
-              {filtered.map((customer) => (
-                <tr key={customer.name} className="bg-[#f8fbff] shadow-sm transition hover:bg-white hover:shadow-md">
+              {visibleCustomers.map((customer) => (
+                <tr key={customer.id} className="bg-[#f8fbff] shadow-sm transition hover:bg-white hover:shadow-md">
                   <td className="rounded-l-lg px-3 py-4">
                     <p className="font-semibold text-slate-950">{customer.name}</p>
                     <p className="text-xs text-slate-500">{customer.city} · {customer.category}</p>
@@ -4413,6 +4700,12 @@ function Customers({
             </tbody>
           </table>
         </div>
+        <PaginationControls
+          page={currentPage}
+          totalItems={filtered.length}
+          itemLabel="clientes"
+          onPageChange={setPage}
+        />
       </Panel>
     </div>
   );
@@ -6645,91 +6938,6 @@ function escapeReportHtml(value: string) {
     .replaceAll("'", "&#039;");
 }
 
-function DashboardPreview() {
-  const previewValues = [
-    `${dashboard.activeCustomers}`,
-    `${alerts.length}`,
-    formatCurrency(dashboard.potentialLost),
-  ];
-  const previewBars = [38, 52, 48, 66, 78, 92, 84, 100];
-  const priorities = [
-    ["Alta", "12 clientes em risco"],
-    ["Hoje", "5 retornos agendados"],
-    ["IA", "3 ofertas sugeridas"],
-  ];
-  const agendaPreview = [
-    ["09:30", "Ligação pos-venda"],
-    ["14:00", "Recompra de racao"],
-    ["16:20", "Visita comercial"],
-  ];
-
-  return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-3 gap-3">
-        {["Clientes ativos", "Recompra", "Receita"].map((item, index) => (
-          <div key={item} className="rounded-lg border border-white/10 bg-white/6 p-3">
-            <div className="mb-3 h-2 w-16 rounded-full bg-white/15" />
-            <p className="text-xl font-semibold">{previewValues[index]}</p>
-            <p className="text-xs text-slate-400">{item}</p>
-          </div>
-        ))}
-      </div>
-      <div className="rounded-lg border border-white/10 bg-white/6 p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-200/80">Recuperacao</p>
-            <p className="mt-1 text-sm text-slate-300">Previsão de recompra por semana</p>
-          </div>
-          <span className="rounded-full bg-emerald-300/10 px-2 py-1 text-xs font-bold text-emerald-200">+18%</span>
-        </div>
-        <div className="flex h-32 items-end gap-3">
-          {previewBars.map((height, index) => (
-            <div key={index} className="flex flex-1 flex-col items-center gap-2">
-              <div className="flex h-28 w-full items-end">
-                <div
-                  className="w-full rounded-t-md bg-emerald-300/80 shadow-[0_0_24px_rgba(52,211,153,0.18)]"
-                  style={{ height: `${height}%` }}
-                />
-              </div>
-              <span className="text-[10px] font-semibold text-slate-500">{index + 1}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div className="rounded-lg border border-white/10 bg-white/6 p-3">
-          <div className="mb-3 flex items-center justify-between">
-            <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Prioridades</p>
-            <AlertTriangle size={15} className="text-amber-300" />
-          </div>
-          <div className="space-y-2">
-            {priorities.map(([label, text]) => (
-              <div key={text} className="flex items-center justify-between gap-2 rounded-md bg-white/6 px-2 py-1.5">
-                <span className="rounded-full bg-white/8 px-2 py-0.5 text-[10px] font-bold text-emerald-200">{label}</span>
-                <span className="truncate text-xs text-slate-300">{text}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="rounded-lg border border-white/10 bg-white/6 p-3">
-          <div className="mb-3 flex items-center justify-between">
-            <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Agenda IA</p>
-            <CalendarDays size={15} className="text-cyan-300" />
-          </div>
-          <div className="space-y-2">
-            {agendaPreview.map(([time, text]) => (
-              <div key={`${time}-${text}`} className="flex items-center gap-2 rounded-md bg-white/6 px-2 py-1.5">
-                <span className="w-11 rounded bg-cyan-300/10 px-1.5 py-1 text-center text-[10px] font-bold text-cyan-200">{time}</span>
-                <span className="truncate text-xs text-slate-300">{text}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function MeasuredChart({
   children,
 }: {
@@ -6776,6 +6984,60 @@ function getChartColors(theme: Theme) {
       color: dark ? "#f8fafc" : "#0f172a",
     },
   };
+}
+
+function PaginationControls({
+  page,
+  pageSize = LIST_PAGE_SIZE,
+  totalItems,
+  itemLabel,
+  onPageChange,
+}: {
+  page: number;
+  pageSize?: number;
+  totalItems: number;
+  itemLabel: string;
+  onPageChange: (page: number) => void;
+}) {
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  if (totalItems <= pageSize) return null;
+
+  const firstItem = (currentPage - 1) * pageSize + 1;
+  const lastItem = Math.min(currentPage * pageSize, totalItems);
+
+  return (
+    <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-blue-100 pt-4">
+      <p className="text-sm text-slate-500">
+        Exibindo {firstItem} a {lastItem} de {totalItems} {itemLabel}
+      </p>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          disabled={currentPage === 1}
+          onClick={() => onPageChange(currentPage - 1)}
+          aria-label="Página anterior"
+          title="Página anterior"
+          className="grid size-10 place-items-center rounded-lg border border-blue-100 bg-white text-slate-600 transition hover:border-cyan-300 hover:text-[#0753a6] disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <ChevronLeft size={18} />
+        </button>
+        <span className="min-w-28 text-center text-sm font-semibold text-slate-700" aria-live="polite">
+          Página {currentPage} de {totalPages}
+        </span>
+        <button
+          type="button"
+          disabled={currentPage === totalPages}
+          onClick={() => onPageChange(currentPage + 1)}
+          aria-label="Próxima página"
+          title="Próxima página"
+          className="grid size-10 place-items-center rounded-lg border border-blue-100 bg-white text-slate-600 transition hover:border-cyan-300 hover:text-[#0753a6] disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <ChevronRight size={18} />
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function PageTitle({ eyebrow, title, description }: { eyebrow: string; title: string; description: string }) {

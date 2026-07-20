@@ -1,13 +1,13 @@
 import { cookies } from "next/headers";
 import type { CrmCustomer, CrmDashboard, CrmSessionUser, CrmSnapshot } from "@/domain/crm/types";
-import { SupabaseCrmSnapshotRepository } from "@/infrastructure/supabase/supabase-crm-snapshot-repository";
 import { CRM_SESSION_COOKIE, readSessionToken } from "@/lib/crm-auth";
+import { getCachedCrmSnapshot } from "@/lib/crm-snapshot-cache";
 
 export async function GET() {
   try {
     const user = await requireUser();
     if (user instanceof Response) return user;
-    const snapshot = await new SupabaseCrmSnapshotRepository().getSnapshot();
+    const snapshot = await getCachedCrmSnapshot();
     return Response.json(scopeSnapshotForUser(snapshot, user));
   } catch (error) {
     return Response.json(

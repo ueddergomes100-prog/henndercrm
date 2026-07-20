@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { SupabaseRestClient } from "@/infrastructure/supabase/supabase-rest-client";
 import { CRM_SESSION_COOKIE, readSessionToken } from "@/lib/crm-auth";
+import { invalidateCrmSnapshotCache } from "@/lib/crm-snapshot-cache";
 
 type ProductConfigBody = {
   id?: string;
@@ -33,6 +34,7 @@ export async function PATCH(request: Request) {
       dias_recompra_padrao: normalizedDays,
       recompra_ativa: true,
     });
+    invalidateCrmSnapshotCache();
 
     return Response.json({
       id: product.id,

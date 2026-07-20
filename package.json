@@ -22,6 +22,7 @@
     "sync:uniplus:auto": "node scripts/hennder-sync.mjs --apply"
   },
   "dependencies": {
+    "@lottiefiles/dotlottie-web": "^0.78.0",
     "@radix-ui/react-avatar": "^1.1.11",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-progress": "^1.1.8",

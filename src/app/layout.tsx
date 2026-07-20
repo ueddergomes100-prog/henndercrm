@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { AppLoadingProvider } from "@/components/ui/app-loading";
 import { PwaRegister } from "./pwa-register";
 import "./globals.css";
 
@@ -63,6 +64,12 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <head>
+        <link
+          rel="preload"
+          href="/lottie/loading.lottie"
+          as="fetch"
+          type="application/octet-stream"
+        />
         <script
           dangerouslySetInnerHTML={{
             __html:
@@ -72,7 +79,7 @@ export default function RootLayout({
       </head>
       <body className="min-h-full flex flex-col">
         <PwaRegister />
-        {children}
+        <AppLoadingProvider>{children}</AppLoadingProvider>
       </body>
     </html>
   );

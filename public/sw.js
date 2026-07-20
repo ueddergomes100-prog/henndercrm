@@ -1,4 +1,4 @@
-const CACHE_NAME = "hennder-crm-static-v2";
+const CACHE_NAME = "hennder-crm-static-v3";
 const STATIC_ASSETS = [
   "/manifest.webmanifest",
   "/apple-touch-icon.png",
@@ -41,14 +41,18 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith("/api/")) return;
 
-  if (isStaticRequest(url)) {
+  if (url.pathname.startsWith("/_next/static/")) {
+    event.respondWith(networkFirst(request));
+    return;
+  }
+
+  if (isAppAsset(url)) {
     event.respondWith(cacheFirst(request));
   }
 });
 
-function isStaticRequest(url) {
+function isAppAsset(url) {
   return (
-    url.pathname.startsWith("/_next/static/") ||
     url.pathname.startsWith("/icons/") ||
     url.pathname === "/manifest.webmanifest" ||
     url.pathname === "/apple-touch-icon.png" ||
@@ -66,4 +70,19 @@ async function cacheFirst(request) {
     cache.put(request, response.clone());
   }
   return response;
+}
+
+async function networkFirst(request) {
+  try {
+    const response = await fetch(request);
+    if (response && response.ok) {
+      const cache = await caches.open(CACHE_NAME);
+      cache.put(request, response.clone());
+    }
+    return response;
+  } catch (error) {
+    const cached = await caches.match(request);
+    if (cached) return cached;
+    throw error;
+  }
 }
