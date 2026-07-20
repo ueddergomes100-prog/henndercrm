@@ -183,7 +183,9 @@ export class SupabaseCrmSnapshotRepository implements ICrmSnapshotRepository {
     const sales = mapSales(saleRows);
     const saleItems = mapSaleItems(itemRows);
     const products = mapProducts(productRows);
-    const customers = mapCustomers(clientRows, saleRows, sellerRows, referenceDate);
+    const saleClientIds = new Set(saleRows.map((sale) => sale.cliente_id));
+    const syncedClientRows = clientRows.filter((client) => saleClientIds.has(client.id));
+    const customers = mapCustomers(syncedClientRows, saleRows, sellerRows, referenceDate);
     const customersById = new Map(customers.map((customer) => [customer.id, customer]));
     const sellersById = new Map(sellers.map((seller) => [seller.id, seller]));
     const productsById = new Map(products.map((product) => [product.id, product]));
@@ -196,7 +198,13 @@ export class SupabaseCrmSnapshotRepository implements ICrmSnapshotRepository {
     );
     const operationalOpportunityRows = opportunityRows.length
       ? opportunityRows
-      : await this.ensureDerivedOpportunities(clientRows, saleRows, itemRows, productRows, referenceDate);
+      : await this.ensureDerivedOpportunities(
+          syncedClientRows,
+          saleRows,
+          itemRows,
+          productRows,
+          referenceDate,
+        );
     const lonaOpportunityRows = operationalOpportunityRows.filter(isLonaOpportunityRow);
     const mappedAlerts = operationalAlertRows.flatMap((row) =>
       mapAlert(row, customersById, sellersById, productsById),
@@ -216,7 +224,9 @@ export class SupabaseCrmSnapshotRepository implements ICrmSnapshotRepository {
       saleItems,
       alerts: mappedAlerts,
       opportunities: mappedOpportunities,
-      agenda: agendaRows.map(mapAgenda),
+      agenda: agendaRows
+        .filter((row) => !row.cliente_id || saleClientIds.has(row.cliente_id))
+        .map(mapAgenda),
     };
   }
 
