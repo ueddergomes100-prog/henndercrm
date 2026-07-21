@@ -5,6 +5,7 @@ import type {
   ContactOutcome,
   CrmAgendaEvent,
   CrmContactRecord,
+  CrmContactSaveResult,
   CrmOpportunity,
   CrmRepurchaseAlert,
   CrmWorkspace,
@@ -42,6 +43,11 @@ type SaleForAlertRow = {
   id: string;
   vendedor_id: string | null;
   data_venda: string;
+};
+type SaleForFollowUpRow = {
+  cliente_id: string;
+  data_venda: string;
+  aprovado: boolean;
 };
 type SaleItemForAlertRow = {
   id: string;
@@ -83,6 +89,8 @@ type AgendaRow = {
   hora_evento: string;
   cliente_id: string | null;
   vendedor_id: string | null;
+  concluido: boolean;
+  observacao: string | null;
 };
 type OpportunityRow = {
   id: string;
@@ -99,7 +107,7 @@ export class SupabaseCrmWorkspaceRepository implements ICrmWorkspaceRepository {
   constructor(private readonly client = new SupabaseRestClient()) {}
 
   async getWorkspace(): Promise<CrmWorkspace> {
-    const [clients, sellers, products, contacts, alerts, agenda, opportunities] =
+    const [clients, sellers, products, contacts, alerts, agenda, opportunities, sales] =
       await Promise.all([
         this.client.select<ClientRow>("crm_clientes", {
           select: "id,uniplus_id,nome",
@@ -120,7 +128,7 @@ export class SupabaseCrmWorkspaceRepository implements ICrmWorkspaceRepository {
         }),
         this.client.select<AgendaRow>("crm_agenda_eventos", {
           select:
-            "id,titulo,tipo,data_evento,hora_evento,cliente_id,vendedor_id",
+            "id,titulo,tipo,data_evento,hora_evento,cliente_id,vendedor_id,concluido,observacao",
           order: "data_evento.asc,hora_evento.asc",
         }),
         this.client.select<OpportunityRow>("crm_oportunidades", {
@@ -128,11 +136,17 @@ export class SupabaseCrmWorkspaceRepository implements ICrmWorkspaceRepository {
             "id,cliente_id,produto_origem_id,produto_sugerido_nome,motivo,confianca,status,vendedor_responsavel_id",
           order: "created_at.desc",
         }),
+        this.client.select<SaleForFollowUpRow>("crm_vendas", {
+          select: "cliente_id,data_venda,aprovado",
+          aprovado: "eq.true",
+          order: "data_venda.desc",
+        }),
       ]);
 
     const clientById = new Map(clients.map((row) => [row.id, row]));
     const sellerById = new Map(sellers.map((row) => [row.id, row]));
     const productById = new Map(products.map((row) => [row.id, row]));
+    const activeAgenda = await this.removePurchasedFollowUps(agenda, contacts, sales);
 
     return {
       contacts: contacts.flatMap((row) => {
@@ -151,22 +165,15 @@ export class SupabaseCrmWorkspaceRepository implements ICrmWorkspaceRepository {
             row.responsavel_nome ??
             (row.vendedor_id ? sellerById.get(row.vendedor_id)?.nome : undefined) ??
             "Hennder CRM",
+          sellerId: row.vendedor_id ?? undefined,
         }];
       }),
       alertStatuses: Object.fromEntries(
         alerts.map((row) => [row.id, row.status]),
       ),
-      agenda: agenda
+      agenda: activeAgenda
         .filter((row) => !row.cliente_id || clientById.has(row.cliente_id))
-        .map((row) => ({
-          id: row.id,
-          date: row.data_evento,
-          time: row.hora_evento.slice(0, 5),
-          title: row.titulo,
-          type: row.tipo,
-          customerId: row.cliente_id ?? undefined,
-          sellerId: row.vendedor_id ?? undefined,
-        })),
+        .map(mapAgendaRow),
       opportunities: opportunities.flatMap((row) => {
         const customer = clientById.get(row.cliente_id);
         if (!customer) return [];
@@ -191,16 +198,23 @@ export class SupabaseCrmWorkspaceRepository implements ICrmWorkspaceRepository {
     };
   }
 
-  async createContact(input: Omit<CrmContactRecord, "id">) {
+  async createContact(
+    input: Omit<CrmContactRecord, "id">,
+  ): Promise<CrmContactSaveResult> {
     const customer = await this.resolveCustomer(input.customerId);
-    const sellerId = await this.resolvePreferredSellerId(input.customerId);
+    const requestedSeller = input.sellerId
+      ? await this.resolveSeller(input.sellerId)
+      : undefined;
+    const sellerId = requestedSeller?.id ?? await this.resolvePreferredSellerId(input.customerId);
+    const responsible = requestedSeller?.nome ?? input.responsible;
     const channel = toDatabaseChannel(input.channel);
-    const existingAutomaticContact = isAutomaticContactNote(input.note)
+    const automaticContact = isAutomaticContactNote(input.note);
+    const existingAutomaticContact = automaticContact
       ? await this.findAutomaticContactToday(customer.id, channel)
       : undefined;
 
     if (existingAutomaticContact) {
-      return {
+      const contact = {
         ...input,
         id: existingAutomaticContact.id,
         outcome: fromDatabaseOutcome(existingAutomaticContact.resultado),
@@ -208,8 +222,10 @@ export class SupabaseCrmWorkspaceRepository implements ICrmWorkspaceRepository {
         nextContact: existingAutomaticContact.proximo_contato ?? "",
         contactedAt: formatContactDate(existingAutomaticContact.data_contato),
         channel: fromDatabaseChannel(existingAutomaticContact.tipo_contato),
-        responsible: existingAutomaticContact.responsavel_nome ?? input.responsible,
+        responsible: existingAutomaticContact.responsavel_nome ?? responsible,
+        sellerId: existingAutomaticContact.vendedor_id ?? sellerId ?? undefined,
       };
+      return { contact, removedFollowUpIds: [] };
     }
 
     const [row] = await this.client.insert<{ id: string }>(
@@ -222,10 +238,56 @@ export class SupabaseCrmWorkspaceRepository implements ICrmWorkspaceRepository {
         resultado: toDatabaseOutcome(input.outcome),
         observacao: input.note || null,
         proximo_contato: input.nextContact || null,
-        responsavel_nome: input.responsible,
+        responsavel_nome: responsible,
       }],
     );
-    return { ...input, id: row.id };
+    const contact: CrmContactRecord = {
+      ...input,
+      id: row.id,
+      responsible,
+      sellerId: sellerId ?? undefined,
+    };
+
+    if (automaticContact || !sellerId) {
+      return { contact, removedFollowUpIds: [] };
+    }
+
+    const existingFollowUps = await this.findOpenFollowUps(customer.id, sellerId);
+    const removedFollowUpIds = existingFollowUps.map((event) => event.id);
+    let followUp: CrmAgendaEvent | undefined;
+
+    if (input.nextContact) {
+      const values = {
+        titulo: `Retorno: ${customer.nome}`,
+        tipo: "Retorno" as const,
+        data_evento: input.nextContact,
+        hora_evento: "09:00",
+        cliente_id: customer.id,
+        vendedor_id: sellerId,
+        concluido: false,
+        observacao: followUpNote(row.id),
+      };
+      const savedRows = existingFollowUps[0]
+        ? await this.client.update<AgendaRow>(
+            "crm_agenda_eventos",
+            { id: existingFollowUps[0].id },
+            values,
+          )
+        : await this.client.insert<AgendaRow>("crm_agenda_eventos", [values]);
+      const savedRow = savedRows[0];
+      if (!savedRow) throw new Error("Nao foi possivel agendar o retorno.");
+      followUp = mapAgendaRow(savedRow);
+
+      for (const duplicate of existingFollowUps.slice(1)) {
+        await this.client.delete("crm_agenda_eventos", { id: duplicate.id });
+      }
+    } else {
+      for (const event of existingFollowUps) {
+        await this.client.delete("crm_agenda_eventos", { id: event.id });
+      }
+    }
+
+    return { contact, followUp, removedFollowUpIds };
   }
 
   async createManualCustomer(input: ManualCustomerInput): Promise<ManualCustomerResult> {
@@ -368,15 +430,7 @@ export class SupabaseCrmWorkspaceRepository implements ICrmWorkspaceRepository {
     );
     const row = rows[0];
     if (!row) throw new Error("Evento de agenda nao encontrado.");
-    return {
-      id: row.id,
-      date: row.data_evento,
-      time: row.hora_evento.slice(0, 5),
-      title: row.titulo,
-      type: row.tipo,
-      customerId: values.customerId,
-      sellerId: values.sellerId,
-    };
+    return mapAgendaRow(row);
   }
 
   async deleteAgendaEvent(id: string) {
@@ -423,6 +477,51 @@ export class SupabaseCrmWorkspaceRepository implements ICrmWorkspaceRepository {
     });
 
     return rows.find((row) => isAutomaticContactNote(row.observacao ?? ""));
+  }
+
+  private async findOpenFollowUps(customerId: string, sellerId: string) {
+    const rows = await this.client.select<AgendaRow>("crm_agenda_eventos", {
+      select:
+        "id,titulo,tipo,data_evento,hora_evento,cliente_id,vendedor_id,concluido,observacao",
+      cliente_id: `eq.${customerId}`,
+      vendedor_id: `eq.${sellerId}`,
+      tipo: "eq.Retorno",
+      concluido: "eq.false",
+      order: "data_evento.asc,hora_evento.asc",
+    });
+    return rows.filter((row) => Boolean(contactIdFromFollowUpNote(row.observacao)));
+  }
+
+  private async removePurchasedFollowUps(
+    agenda: AgendaRow[],
+    contacts: ContactRow[],
+    sales: SaleForFollowUpRow[],
+  ) {
+    const latestSaleByCustomer = new Map<string, string>();
+    for (const sale of sales) {
+      if (!sale.aprovado) continue;
+      const soldAt = dateOnly(sale.data_venda);
+      const current = latestSaleByCustomer.get(sale.cliente_id);
+      if (!current || soldAt > current) latestSaleByCustomer.set(sale.cliente_id, soldAt);
+    }
+    const contactsById = new Map(contacts.map((contact) => [contact.id, contact]));
+    const staleIds = new Set(
+      agenda.flatMap((event) => {
+        const contactId = contactIdFromFollowUpNote(event.observacao);
+        if (!contactId || !event.cliente_id) return [];
+        const contact = contactsById.get(contactId);
+        const latestSale = latestSaleByCustomer.get(event.cliente_id);
+        if (!contact || (latestSale && latestSale >= dateOnly(contact.data_contato))) {
+          return [event.id];
+        }
+        return [];
+      }),
+    );
+
+    for (const id of staleIds) {
+      await this.client.delete("crm_agenda_eventos", { id });
+    }
+    return agenda.filter((event) => !staleIds.has(event.id));
   }
 
   private async resolveProductByName(name: string) {
@@ -525,6 +624,8 @@ export class SupabaseCrmWorkspaceRepository implements ICrmWorkspaceRepository {
               : null,
           }
         : {}),
+      ...(values.completed !== undefined ? { concluido: values.completed } : {}),
+      ...(values.note !== undefined ? { observacao: values.note || null } : {}),
     };
   }
 
@@ -568,6 +669,38 @@ function todayStartIso() {
 
 function isAutomaticContactNote(note: string) {
   return note.trim().toLowerCase().startsWith("registro autom");
+}
+
+const FOLLOW_UP_NOTE_PREFIX = "crm_follow_up_contact:";
+
+function followUpNote(contactId: string) {
+  return `${FOLLOW_UP_NOTE_PREFIX}${contactId}`;
+}
+
+function contactIdFromFollowUpNote(note: string | null | undefined) {
+  const value = note?.trim() ?? "";
+  return value.startsWith(FOLLOW_UP_NOTE_PREFIX)
+    ? value.slice(FOLLOW_UP_NOTE_PREFIX.length) || undefined
+    : undefined;
+}
+
+function mapAgendaRow(row: AgendaRow): CrmAgendaEvent {
+  return {
+    id: row.id,
+    date: row.data_evento,
+    time: row.hora_evento.slice(0, 5),
+    title: row.titulo,
+    type: row.tipo,
+    customerId: row.cliente_id ?? undefined,
+    sellerId: row.vendedor_id ?? undefined,
+    completed: row.concluido,
+    note: row.observacao ?? undefined,
+    contactId: contactIdFromFollowUpNote(row.observacao),
+  };
+}
+
+function dateOnly(value: string) {
+  return value.slice(0, 10);
 }
 
 function toDatabaseChannel(channel: ContactChannel) {

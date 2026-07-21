@@ -1,6 +1,7 @@
 import type {
   CrmAgendaEvent,
   CrmContactRecord,
+  CrmContactSaveResult,
   CrmOpportunity,
   CrmRepurchaseAlert,
   CrmWorkspace,
@@ -54,7 +55,7 @@ export type CustomerContactUpdateResult = CustomerContactUpdateInput & {
 
 export interface ICrmWorkspaceRepository {
   getWorkspace(): Promise<CrmWorkspace>;
-  createContact(input: Omit<CrmContactRecord, "id">): Promise<CrmContactRecord>;
+  createContact(input: Omit<CrmContactRecord, "id">): Promise<CrmContactSaveResult>;
   createManualCustomer(input: ManualCustomerInput): Promise<ManualCustomerResult>;
   createManualAlert(input: ManualRepurchaseAlertInput): Promise<CrmRepurchaseAlert>;
   updateCustomerContact(

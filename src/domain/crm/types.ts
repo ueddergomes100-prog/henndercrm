@@ -252,6 +252,9 @@ export interface CrmAgendaEvent {
   type: "Ligacao" | "Visita" | "Retorno" | "Recompra";
   customerId?: string;
   sellerId?: string;
+  completed?: boolean;
+  note?: string;
+  contactId?: string;
 }
 
 export interface CrmContactRecord {
@@ -264,6 +267,13 @@ export interface CrmContactRecord {
   contactedAt: string;
   channel: ContactChannel;
   responsible: string;
+  sellerId?: string;
+}
+
+export interface CrmContactSaveResult {
+  contact: CrmContactRecord;
+  followUp?: CrmAgendaEvent;
+  removedFollowUpIds: string[];
 }
 
 export interface CrmWorkspace {
@@ -284,6 +294,11 @@ export interface CrmDashboard {
   averageRegistrationQuality: number;
 }
 
+export interface CrmDashboardInsights {
+  repurchaseTrend: Array<{ mes: string; recompra: number; recuperados: number }>;
+  categoryData: Array<{ name: string; value: number; color: string }>;
+}
+
 export interface CrmSnapshot {
   referenceDate: string;
   dashboard: CrmDashboard;
@@ -295,6 +310,7 @@ export interface CrmSnapshot {
   alerts: CrmRepurchaseAlert[];
   opportunities: CrmOpportunity[];
   agenda: CrmAgendaEvent[];
+  dashboardInsights?: CrmDashboardInsights;
 }
 
 export interface IgnoredSale {

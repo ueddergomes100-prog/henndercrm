@@ -131,10 +131,75 @@ type AgendaRow = {
   hora_evento: string;
   cliente_id: string | null;
   vendedor_id: string | null;
+  concluido: boolean;
+  observacao: string | null;
 };
 
 export class SupabaseCrmSnapshotRepository implements ICrmSnapshotRepository {
   constructor(private readonly client = new SupabaseRestClient()) {}
+
+  async getDashboardSnapshot(): Promise<CrmSnapshot> {
+    const referenceDate = new Date().toISOString().slice(0, 10);
+    const [clientRows, sellerRows, productRows, saleRows, alertRows, agendaRows] =
+      await Promise.all([
+        this.client.select<ClientRow>("crm_clientes", {
+          select:
+            "id,uniplus_id,codigo,nome,razao_social,cpf_cnpj,telefone,celular,whatsapp,email,endereco,bairro,cidade_id,estado_id,cep,data_cadastro,data_ultima_compra,inativo,ciclo_compras,qualidade_cadastro_score,qualidade_cadastro_status",
+          order: "nome.asc",
+        }),
+        this.client.select<SellerRow>("crm_vendedores", {
+          select: "id,uniplus_id,nome,email,celular,whatsapp,supervisor,inativo",
+          order: "nome.asc",
+        }),
+        this.client.select<ProductRow>("crm_produtos", {
+          select:
+            "id,uniplus_id,codigo,nome,tipo,departamento,fornecedor,preco,utiliza_crm,recompra_ativa,dias_recompra_padrao",
+          order: "nome.asc",
+        }),
+        this.client.select<SaleRow>("crm_vendas", {
+          select:
+            "id,uniplus_id,cliente_id,vendedor_id,data_venda,updated_at,valor_total,valor_desconto,status,aprovado",
+          order: "data_venda.desc",
+        }),
+        this.client.select<AlertRow>("crm_alertas_recompra", {
+          select:
+            "id,cliente_id,produto_id,venda_id,item_venda_id,vendedor_responsavel_id,data_compra,data_prevista_recompra,dias_recompra,status,prioridade,origem,observacao",
+          order: "data_prevista_recompra.asc",
+        }),
+        this.client.select<AgendaRow>("crm_agenda_eventos", {
+          select: "id,titulo,tipo,data_evento,hora_evento,cliente_id,vendedor_id,concluido,observacao",
+          order: "data_evento.asc,hora_evento.asc",
+        }),
+      ]);
+
+    const sellers = mapSellers(sellerRows);
+    const products = mapProducts(productRows);
+    const sales = mapSales(saleRows);
+    const saleClientIds = new Set(saleRows.map((sale) => sale.cliente_id));
+    const syncedClientRows = clientRows.filter((client) => saleClientIds.has(client.id));
+    const customers = mapCustomers(syncedClientRows, saleRows, sellerRows, referenceDate);
+    const customersById = new Map(customers.map((customer) => [customer.id, customer]));
+    const sellersById = new Map(sellers.map((seller) => [seller.id, seller]));
+    const productsById = new Map(products.map((product) => [product.id, product]));
+    const mappedAlerts = currentRepurchaseAlerts(alertRows, saleRows).flatMap((row) =>
+      mapAlert(row, customersById, sellersById, productsById),
+    );
+
+    return {
+      referenceDate,
+      dashboard: buildDashboard(customers, mappedAlerts, referenceDate),
+      customers,
+      sellers: buildSellerMetrics(sellers, customers, mappedAlerts),
+      products,
+      sales,
+      saleItems: [],
+      alerts: mappedAlerts,
+      opportunities: [],
+      agenda: agendaRows
+        .filter((row) => !row.cliente_id || saleClientIds.has(row.cliente_id))
+        .map(mapAgenda),
+    };
+  }
 
   async getSnapshot(): Promise<CrmSnapshot> {
     const referenceDate = new Date().toISOString().slice(0, 10);
@@ -174,7 +239,7 @@ export class SupabaseCrmSnapshotRepository implements ICrmSnapshotRepository {
           order: "created_at.desc",
         }),
         this.client.select<AgendaRow>("crm_agenda_eventos", {
-          select: "id,titulo,tipo,data_evento,hora_evento,cliente_id,vendedor_id",
+          select: "id,titulo,tipo,data_evento,hora_evento,cliente_id,vendedor_id,concluido,observacao",
           order: "data_evento.asc,hora_evento.asc",
         }),
       ]);
@@ -237,15 +302,23 @@ export class SupabaseCrmSnapshotRepository implements ICrmSnapshotRepository {
     referenceDate: string,
     existingAlerts: AlertRow[],
   ) {
+    const retainedAlerts = currentRepurchaseAlerts(existingAlerts, sales);
+    const retainedIds = new Set(retainedAlerts.map((alert) => alert.id));
+    const staleAlerts = existingAlerts.filter((alert) => !retainedIds.has(alert.id));
+    await this.client.deleteMany(
+      "crm_alertas_recompra",
+      "id",
+      staleAlerts.map((alert) => alert.id),
+    );
     const rows = buildDerivedRepurchaseAlertRows(sales, items, products, referenceDate);
-    const existingKeys = new Set(existingAlerts.map(alertUniqueKey));
+    const existingKeys = new Set(retainedAlerts.map(alertUniqueKey));
     const missingRows = rows.filter((row) => !existingKeys.has(alertUniqueKey(row)));
-    if (!missingRows.length) return existingAlerts;
+    if (!missingRows.length) return retainedAlerts;
     return this.client.upsert<AlertRow>(
       "crm_alertas_recompra",
       missingRows,
       "cliente_id,produto_id,venda_id,item_venda_id",
-    ).then((insertedRows) => [...existingAlerts, ...insertedRows]);
+    ).then((insertedRows) => [...retainedAlerts, ...insertedRows]);
   }
 
   private async ensureDerivedOpportunities(
@@ -329,18 +402,31 @@ function mapCustomers(
   sellers: SellerRow[],
   referenceDate: string,
 ): CrmCustomer[] {
-  const sourceSales = sales.map((sale): UniplusSale => ({
-    id: sale.uniplus_id,
-    soldAt: dateOnly(sale.data_venda),
-    includedAt: dateOnly(sale.data_venda),
-    changedAt: dateOnly(sale.data_venda),
-    clientId: clients.find((client) => client.id === sale.cliente_id)?.uniplus_id ?? undefined,
-    sellerId: sellers.find((seller) => seller.id === sale.vendedor_id)?.uniplus_id,
-    totalValue: Number(sale.valor_total ?? 0),
-    discountValue: Number(sale.valor_desconto ?? 0),
-    status: sale.status ?? "",
-    approved: Boolean(sale.aprovado),
-  }));
+  const clientUniplusIdById = new Map(clients.map((client) => [client.id, client.uniplus_id]));
+  const sellerUniplusIdById = new Map(sellers.map((seller) => [seller.id, seller.uniplus_id]));
+  const salesByClientId = new Map<string, SaleRow[]>();
+  const sourceSalesByClientId = new Map<string, UniplusSale[]>();
+
+  for (const sale of sales) {
+    const clientSales = salesByClientId.get(sale.cliente_id) ?? [];
+    clientSales.push(sale);
+    salesByClientId.set(sale.cliente_id, clientSales);
+
+    const sourceSales = sourceSalesByClientId.get(sale.cliente_id) ?? [];
+    sourceSales.push({
+      id: sale.uniplus_id,
+      soldAt: dateOnly(sale.data_venda),
+      includedAt: dateOnly(sale.data_venda),
+      changedAt: dateOnly(sale.data_venda),
+      clientId: clientUniplusIdById.get(sale.cliente_id) ?? undefined,
+      sellerId: sale.vendedor_id ? sellerUniplusIdById.get(sale.vendedor_id) : undefined,
+      totalValue: Number(sale.valor_total ?? 0),
+      discountValue: Number(sale.valor_desconto ?? 0),
+      status: sale.status ?? "",
+      approved: Boolean(sale.aprovado),
+    });
+    sourceSalesByClientId.set(sale.cliente_id, sourceSales);
+  }
   const sourceSellers = sellers.map((seller): UniplusSeller => ({
     id: seller.uniplus_id,
     name: seller.nome,
@@ -352,8 +438,7 @@ function mapCustomers(
   }));
 
   return clients.map((client) => {
-    const clientSales = sales
-      .filter((sale) => sale.cliente_id === client.id)
+    const clientSales = (salesByClientId.get(client.id) ?? [])
       .sort((a, b) => b.data_venda.localeCompare(a.data_venda));
     const lastPurchaseAt = dateOnly(
       clientSales[0]?.data_venda ??
@@ -397,7 +482,11 @@ function mapCustomers(
       activityStatus,
       daysWithoutPurchase,
       preferredSeller: client.uniplus_id
-        ? calculatePreferredSeller(client.uniplus_id, sourceSales, sourceSellers)
+        ? calculatePreferredSeller(
+            client.uniplus_id,
+            sourceSalesByClientId.get(client.id) ?? [],
+            sourceSellers,
+          )
         : undefined,
       totalPurchases: clientSales.length,
       totalPurchased,
@@ -431,6 +520,21 @@ function buildSellerMetrics(
       ),
       conversionRate: Math.min(96, 58 + assignedCustomers.length * 7),
     };
+  });
+}
+
+function currentRepurchaseAlerts(alerts: AlertRow[], sales: SaleRow[]) {
+  const latestSaleByCustomer = new Map<string, string>();
+  for (const sale of sales) {
+    if (!sale.aprovado) continue;
+    const soldAt = dateOnly(sale.data_venda);
+    const current = latestSaleByCustomer.get(sale.cliente_id);
+    if (!current || soldAt > current) latestSaleByCustomer.set(sale.cliente_id, soldAt);
+  }
+
+  return alerts.filter((alert) => {
+    const latestSale = latestSaleByCustomer.get(alert.cliente_id);
+    return !latestSale || latestSale <= dateOnly(alert.data_compra);
   });
 }
 
@@ -501,6 +605,13 @@ function buildDerivedRepurchaseAlertRows(
 ) {
   const salesById = new Map(sales.map((sale) => [sale.id, sale]));
   const productsById = new Map(products.map((product) => [product.id, product]));
+  const latestSaleDateByCustomer = new Map<string, string>();
+  for (const sale of sales) {
+    if (!sale.aprovado) continue;
+    const soldAt = dateOnly(sale.data_venda);
+    const current = latestSaleDateByCustomer.get(sale.cliente_id);
+    if (!current || soldAt > current) latestSaleDateByCustomer.set(sale.cliente_id, soldAt);
+  }
   const latestByCustomerProduct = new Map<string, { sale: SaleRow; item: SaleItemRow; product: ProductRow }>();
   const horizonDate = addDays(referenceDate, 15);
 
@@ -509,6 +620,7 @@ function buildDerivedRepurchaseAlertRows(
     const sale = salesById.get(item.venda_id);
     const product = productsById.get(item.produto_id);
     if (!sale || !product || !sale.aprovado) continue;
+    if (dateOnly(sale.data_venda) !== latestSaleDateByCustomer.get(sale.cliente_id)) continue;
     if (!product.recompra_ativa && !product.utiliza_crm) continue;
 
     const key = `${sale.cliente_id}:${item.produto_id}`;
@@ -653,6 +765,7 @@ function alertUniqueKey(row: {
 }
 
 function mapAgenda(row: AgendaRow): CrmAgendaEvent {
+  const contactId = contactIdFromFollowUpNote(row.observacao);
   return {
     id: row.id,
     date: row.data_evento,
@@ -661,7 +774,16 @@ function mapAgenda(row: AgendaRow): CrmAgendaEvent {
     type: row.tipo,
     customerId: row.cliente_id ?? undefined,
     sellerId: row.vendedor_id ?? undefined,
+    completed: row.concluido,
+    note: row.observacao ?? undefined,
+    contactId,
   };
+}
+
+function contactIdFromFollowUpNote(note: string | null) {
+  const prefix = "crm_follow_up_contact:";
+  const value = note?.trim() ?? "";
+  return value.startsWith(prefix) ? value.slice(prefix.length) || undefined : undefined;
 }
 
 function buildDashboard(

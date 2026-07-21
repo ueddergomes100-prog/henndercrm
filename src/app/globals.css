@@ -387,6 +387,19 @@ textarea:focus-visible {
   width: 5rem;
 }
 
+.app-loading-animation--icon {
+  width: 2rem;
+}
+
+.app-loading-mark {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 2rem;
+  place-items: center;
+  overflow: hidden;
+}
+
 .app-inline-loading {
   display: grid;
   min-height: 9rem;

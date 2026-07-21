@@ -15,7 +15,7 @@ import type {
 import { getCrmWorkspaceRepository } from "@/infrastructure/crm-workspace-provider";
 import { SupabaseCrmSnapshotRepository } from "@/infrastructure/supabase/supabase-crm-snapshot-repository";
 import { CRM_SESSION_COOKIE, readSessionToken } from "@/lib/crm-auth";
-import { invalidateCrmSnapshotCache } from "@/lib/crm-snapshot-cache";
+import { getCachedCrmSnapshot, invalidateCrmSnapshotCache } from "@/lib/crm-snapshot-cache";
 
 type WorkspaceAction =
   | { action: "create_contact"; record: Omit<CrmContactRecord, "id"> }
@@ -58,7 +58,11 @@ export async function GET() {
   );
 
   return Response.json({
-    contacts: workspace.contacts.filter((contact) => customerIds.has(contact.customerId)),
+    contacts: workspace.contacts.filter(
+      (contact) =>
+        contact.sellerId === allowedSellerId &&
+        customerIds.has(contact.customerId),
+    ),
     alertStatuses: Object.fromEntries(
       Object.entries(workspace.alertStatuses).filter(([id]) => alertIds.has(id)),
     ),
@@ -111,7 +115,9 @@ export async function POST(request: Request) {
     switch (command.action) {
       case "create_contact":
         return changedResponse(
-          await repository.createContact(command.record),
+          await repository.createContact(
+            await assignContactOwner(user, command.record),
+          ),
           201,
         );
       case "create_manual_customer":
@@ -179,6 +185,25 @@ async function requireUser(): Promise<CrmSessionUser | Response> {
   const cookieStore = await cookies();
   const user = readSessionToken(cookieStore.get(CRM_SESSION_COOKIE)?.value);
   return user ?? Response.json({ error: "Sessão expirada." }, { status: 401 });
+}
+
+async function assignContactOwner(
+  user: CrmSessionUser,
+  record: Omit<CrmContactRecord, "id">,
+) {
+  const snapshot = await getCachedCrmSnapshot();
+  const sellerId = user.role === "administrador"
+    ? record.sellerId
+    : resolveSnapshotSellerId(user.sellerId ?? "", snapshot);
+  const seller = sellerId
+    ? snapshot.sellers.find((item) => item.id === sellerId)
+    : undefined;
+
+  return {
+    ...record,
+    sellerId: seller?.id ?? record.sellerId,
+    responsible: seller?.name ?? record.responsible,
+  };
 }
 
 async function denyUnauthorizedChange(

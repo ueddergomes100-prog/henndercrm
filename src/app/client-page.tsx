@@ -42,6 +42,7 @@ import {
   Sparkles,
   Sun,
   Target,
+  Trophy,
   Trash2,
   UserRound,
   UsersRound,
@@ -65,9 +66,15 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 
 import Image from "next/image";
 import {
   AppInlineLoading,
+  AppLoadingMark,
   AppLoadingScreen,
   useAppLoading,
 } from "@/components/ui/app-loading";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Badge as UiBadge } from "@/components/ui/badge";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { normalizeBrazilianWhatsAppNumber } from "@/domain/crm/rules";
 import type {
   CrmAgendaEvent,
@@ -75,7 +82,9 @@ import type {
   ContactChannel,
   ContactOutcome,
   CrmContactRecord,
+  CrmContactSaveResult,
   CrmOpportunity,
+  CrmDashboardInsights,
   CrmProduct,
   CrmRepurchaseAlert,
   CrmSale,
@@ -129,6 +138,22 @@ type SellerRow = CrmSeller;
 type QuickAction = "manual-alert" | "manual-customer" | "opportunity" | "agenda" | "contact";
 const LIST_PAGE_SIZE = 20;
 const OPPORTUNITY_PAGE_SIZE = 20;
+const crmResultsVisualTokens = {
+  "--background": "Canvas",
+  "--foreground": "CanvasText",
+  "--card": "color-mix(in srgb, Canvas 98%, CanvasText 2%)",
+  "--muted": "color-mix(in srgb, CanvasText 5%, Canvas)",
+  "--muted-foreground": "color-mix(in srgb, CanvasText 58%, Canvas)",
+  "--border": "color-mix(in srgb, CanvasText 12%, Canvas)",
+  "--popover": "Canvas",
+  "--primary": "light-dark(var(--color-blue-700), var(--color-cyan-400))",
+  "--primary-foreground": "light-dark(var(--color-white), var(--color-neutral-950))",
+  "--secondary": "light-dark(var(--color-emerald-700), var(--color-emerald-400))",
+  "--accent": "light-dark(var(--color-cyan-700), var(--color-blue-400))",
+  "--destructive": "light-dark(var(--color-red-700), var(--color-red-400))",
+  "--ring": "var(--primary)",
+} as CSSProperties & Record<`--${string}`, string>;
+const crmResultsMixColors = ["var(--primary)", "var(--accent)", "var(--secondary)"] as const;
 type ChatMessage = {
   id: string;
   role: "user" | "ai";
@@ -343,6 +368,9 @@ export default function Home() {
   const [user, setUser] = useState<CrmSessionUser | null>(null);
   const [authChecking, setAuthChecking] = useState(true);
   const [snapshotChecking, setSnapshotChecking] = useState(true);
+  const [fullSnapshotChecking, setFullSnapshotChecking] = useState(false);
+  const [fullSnapshotReady, setFullSnapshotReady] = useState(false);
+  const [dashboardInsights, setDashboardInsights] = useState<CrmDashboardInsights>();
   const [, refreshRuntimeViewModel] = useState(0);
   const [activeView, setActiveView] = useState<View>("dashboard");
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerRow | undefined>(undefined);
@@ -357,6 +385,9 @@ export default function Home() {
   const [customerContactUpdates, setCustomerContactUpdates] = useState<Record<string, CustomerContactUpdate>>({});
   const [quickAction, setQuickAction] = useState<QuickAction | null>(null);
   const [dismissedNotificationIds, setDismissedNotificationIds] = useState<string[]>([]);
+  const [resultsRefreshing, setResultsRefreshing] = useState(false);
+  const [resultsUpdatedAt, setResultsUpdatedAt] = useState<string | null>(null);
+  const [resultsRefreshError, setResultsRefreshError] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -407,12 +438,15 @@ export default function Home() {
 
     async function loadSnapshot() {
       setSnapshotChecking(true);
-      const response = await fetch("/api/crm/snapshot", { cache: "no-store" });
+      setFullSnapshotReady(false);
+      setDashboardInsights(undefined);
+      const response = await fetch("/api/crm/snapshot?mode=dashboard", { cache: "no-store" });
       const result = (await response.json()) as CrmSnapshot & { error?: string };
       if (!response.ok) throw new Error(result.error ?? "Não foi possível carregar o snapshot.");
       if (!active) return;
       const nextViewModel = crmViewService.getViewModel(result);
       setRuntimeViewModel(nextViewModel);
+      setDashboardInsights(result.dashboardInsights);
       setDismissedNotificationIds(readDismissedNotificationIds(sessionUser.id, nextViewModel.snapshot.referenceDate));
       setAgendaItems(nextViewModel.snapshot.agenda);
       setOpportunityItems(nextViewModel.snapshot.opportunities);
@@ -429,6 +463,54 @@ export default function Home() {
       active = false;
     };
   }, [user]);
+
+  useEffect(() => {
+    if (!user || snapshotChecking || fullSnapshotReady) return;
+    const sessionUser = user;
+    let active = true;
+    const controller = new AbortController();
+    const delay = activeView === "dashboard" ? 700 : 0;
+    const timer = window.setTimeout(async () => {
+      setFullSnapshotChecking(true);
+      try {
+        const response = await fetch("/api/crm/snapshot", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const result = (await response.json()) as CrmSnapshot & { error?: string };
+        if (!response.ok) {
+          throw new Error(result.error ?? "NÃ£o foi possÃ­vel carregar os dados completos.");
+        }
+        if (!active) return;
+        const nextViewModel = crmViewService.getViewModel(result);
+        setRuntimeViewModel(nextViewModel);
+        setDashboardInsights(undefined);
+        setDismissedNotificationIds(
+          readDismissedNotificationIds(sessionUser.id, nextViewModel.snapshot.referenceDate),
+        );
+        setAgendaItems(nextViewModel.snapshot.agenda);
+        setOpportunityItems(nextViewModel.snapshot.opportunities);
+        setSelectedCustomer((current) =>
+          nextViewModel.customers.find((customer) => customer.id === current?.id) ??
+          nextViewModel.customers[0],
+        );
+        refreshRuntimeViewModel((version) => version + 1);
+        setFullSnapshotReady(true);
+      } catch (error) {
+        if (active && !(error instanceof DOMException && error.name === "AbortError")) {
+          setFullSnapshotReady(false);
+        }
+      } finally {
+        if (active) setFullSnapshotChecking(false);
+      }
+    }, delay);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [activeView, fullSnapshotReady, snapshotChecking, user]);
 
   useEffect(() => {
     if (!user || snapshotChecking) return;
@@ -448,6 +530,56 @@ export default function Home() {
         setAlertStatuses({});
       });
   }, [snapshotChecking, user]);
+
+  async function refreshResultsData() {
+    if (!user || resultsRefreshing) return;
+    setResultsRefreshing(true);
+    setResultsRefreshError("");
+
+    try {
+      await runWithLoading(
+        async () => {
+          const [snapshotResponse, workspaceResponse] = await Promise.all([
+            fetch(`/api/crm/snapshot?refresh=1&t=${Date.now()}`, { cache: "no-store" }),
+            fetch(`/api/crm/workspace?t=${Date.now()}`, { cache: "no-store" }),
+          ]);
+          const snapshotResult = (await snapshotResponse.json()) as CrmSnapshot & { error?: string };
+          const workspaceResult = (await workspaceResponse.json()) as CrmWorkspace & { error?: string };
+          if (!snapshotResponse.ok) {
+            throw new Error(snapshotResult.error ?? "Não foi possível atualizar os resultados.");
+          }
+          if (!workspaceResponse.ok) {
+            throw new Error(workspaceResult.error ?? "Não foi possível atualizar os contatos.");
+          }
+
+          const nextViewModel = crmViewService.getViewModel(snapshotResult);
+          setRuntimeViewModel(nextViewModel);
+          setDashboardInsights(undefined);
+          setFullSnapshotReady(true);
+          setDismissedNotificationIds(
+            readDismissedNotificationIds(user.id, nextViewModel.snapshot.referenceDate),
+          );
+          setContactRecords(workspaceResult.contacts);
+          setAlertStatuses(workspaceResult.alertStatuses);
+          setAgendaItems(workspaceResult.agenda);
+          setOpportunityItems(workspaceResult.opportunities);
+          setSelectedCustomer((current) =>
+            nextViewModel.customers.find((customer) => customer.id === current?.id) ??
+            nextViewModel.customers[0],
+          );
+          refreshRuntimeViewModel((version) => version + 1);
+        },
+        { label: "Atualizando resultados do CRM" },
+      );
+      setResultsUpdatedAt(new Date().toISOString());
+    } catch (error) {
+      setResultsRefreshError(
+        error instanceof Error ? error.message : "Não foi possível atualizar os resultados.",
+      );
+    } finally {
+      setResultsRefreshing(false);
+    }
+  }
 
   if (authChecking) {
     return <AppLoadingScreen label="Carregando sessão comercial" />;
@@ -493,13 +625,17 @@ export default function Home() {
     applyCustomerListContactUpdates(customers, customerContactUpdates),
     scopedData.sales,
   );
-  const appAlerts = scopedData.alerts;
+  const appAlerts = scopedData.alerts.map((alert) => ({
+    ...alert,
+    status: alertStatuses[alert.id] ?? alert.status,
+  }));
   const appContactRecords = filterContactRecordsForData(contactRecords, appCustomers);
   const safeSelectedCustomer =
     appCustomers.find((customer) => customer.id === selectedCustomer?.id) ??
     appCustomers[0] ??
     selectedCustomer;
   const visibleView = canAccessView(user, activeView) ? activeView : "dashboard";
+  const fullDataViewLoading = visibleView !== "dashboard" && !fullSnapshotReady;
   const notificationContacts = filterNotificationContactRecordsForUser(user, appContactRecords);
   const generatedNotifications = buildTopbarNotifications(appCustomers, appAlerts, notificationContacts, scopedData.agenda);
   const dismissedNotifications = new Set(dismissedNotificationIds);
@@ -551,15 +687,32 @@ export default function Home() {
   };
 
   const registerContact = async (record: Omit<ContactRecord, "id">) => {
-    const saved = await mutateWorkspace<ContactRecord>({
+    const customer = appCustomers.find((item) => item.id === record.customerId);
+    const loggedSeller = user.sellerId ? resolveSellerForUser(user.sellerId) : undefined;
+    const sellerId = loggedSeller?.id ?? record.sellerId ?? customer?.preferredSellerId;
+    const seller = sellerId ? sellers.find((item) => item.id === sellerId) : undefined;
+    const result = await mutateWorkspace<CrmContactSaveResult>({
       action: "create_contact",
-      record,
+      record: {
+        ...record,
+        sellerId,
+        responsible: seller?.name ?? record.responsible,
+      },
     });
+    const saved = result.contact;
     setContactRecords((current) =>
       current.some((item) => String(item.id) === String(saved.id))
         ? current
         : [saved, ...current],
     );
+    setAgendaItems((current) => {
+      const removedIds = new Set(result.removedFollowUpIds);
+      const next = current.filter(
+        (event) => !removedIds.has(event.id) && event.id !== result.followUp?.id,
+      );
+      if (result.followUp) next.push(result.followUp);
+      return next.sort(compareAgendaEvents);
+    });
   };
 
   const createManualCustomer = async (customer: CustomerRow) => {
@@ -749,17 +902,23 @@ export default function Home() {
             transition={{ duration: 0.32 }}
             className="mx-auto w-full max-w-[1560px] px-3 py-4 sm:px-5 lg:px-6"
           >
+            {fullDataViewLoading ? (
+              <DeferredDataLoading activeView={visibleView} loading={fullSnapshotChecking} />
+            ) : (
+              <>
             {visibleView === "dashboard" && (
               <Dashboard
                 customers={appCustomers}
                 openProfile={openProfile}
                 contactRecords={appContactRecords}
+                agenda={scopedData.agenda}
                 openRecovery={() => setActiveView("recuperacao")}
                 theme={theme}
                 sales={scopedData.sales}
                 saleItems={scopedData.saleItems}
                 products={scopedData.products}
-                sellers={scopedData.sellers}
+                insights={dashboardInsights}
+                detailsLoading={!fullSnapshotReady}
                 user={user}
                 onUpdateContact={updateCustomerContact}
                 onRegisterContact={registerContact}
@@ -772,6 +931,10 @@ export default function Home() {
                 contactRecords={appContactRecords}
                 sales={scopedData.sales}
                 sellers={scopedData.sellers}
+                refreshing={resultsRefreshing}
+                refreshedAt={resultsUpdatedAt}
+                refreshError={resultsRefreshError}
+                onRefresh={refreshResultsData}
               />
             )}
             {visibleView === "clientes" && (
@@ -804,6 +967,7 @@ export default function Home() {
                 customers={appCustomers}
                 openProfile={openProfile}
                 contactRecords={appContactRecords}
+                agenda={scopedData.agenda}
                 onRegisterContact={registerContact}
                 user={user}
                 onUpdateContact={updateCustomerContact}
@@ -911,6 +1075,8 @@ export default function Home() {
                 contactRecords={appContactRecords}
                 products={scopedData.products}
               />
+            )}
+              </>
             )}
           </motion.div>
         </section>
@@ -1031,11 +1197,7 @@ function buildScopedCrmData(
     products: scopedProducts,
     sellers: seller ? [seller] : [],
     opportunities: scopedOpportunities.filter((opportunity) => customerIds.has(opportunity.customerId)),
-    agenda: agendaItems.filter(
-      (event) =>
-            event.sellerId === scopedSellerId ||
-        (event.customerId ? customerIds.has(event.customerId) : false),
-    ),
+    agenda: agendaItems.filter((event) => event.sellerId === scopedSellerId),
   };
 }
 
@@ -1128,18 +1290,34 @@ function buildTopbarNotifications(
       customerId: customer.id,
     }));
   const todayAgenda = scopedAgenda
-    .filter((event) => event.date === crmReferenceDate)
-    .slice(0, 2)
+    .filter((event) => !event.completed && event.date === crmReferenceDate)
+    .slice(0, 4)
     .map((event) => ({
       id: `agenda-${event.id}`,
       title: `${event.time} - ${event.title}`,
       description: `Compromisso de ${event.type.toLowerCase()} na agenda comercial.`,
-      tone: "emerald" as const,
+      tone: event.contactId ? "amber" as const : "emerald" as const,
+      customerId: event.customerId,
+      view: "agenda" as View,
+    }));
+  const overdueFollowUps = scopedAgenda
+    .filter(
+      (event) =>
+        isOpenAutomaticFollowUp(event) &&
+        event.date < crmReferenceDate,
+    )
+    .sort(compareAgendaEvents)
+    .slice(0, 4)
+    .map((event) => ({
+      id: `overdue-follow-up-${event.id}`,
+      title: `Retorno atrasado: ${event.title.replace(/^Retorno:\s*/u, "")}`,
+      description: `O contato estava agendado para ${formatContactDate(event.date)}.`,
+      tone: "red" as const,
       customerId: event.customerId,
       view: "agenda" as View,
     }));
 
-  return [...overdueAlerts, ...todayAlerts, ...todayAgenda, ...weakRegistration];
+  return [...overdueFollowUps, ...overdueAlerts, ...todayAlerts, ...todayAgenda, ...weakRegistration];
 }
 
 function filterNotificationContactRecordsForUser(user: CrmSessionUser, records: ContactRecord[]) {
@@ -1289,6 +1467,30 @@ function AuthenticatedLoadingShell({
   );
 }
 
+function DeferredDataLoading({
+  activeView,
+  loading,
+}: {
+  activeView: View;
+  loading: boolean;
+}) {
+  const item = navGroups.flatMap((group) => group.items).find((candidate) => candidate.id === activeView);
+  return (
+    <div className="space-y-5">
+      <PageTitle
+        eyebrow="Dados comerciais"
+        title={item?.label ?? "Carregando mÃ³dulo"}
+        description="A Dashboard jÃ¡ estÃ¡ pronta. Finalizando os dados detalhados desta tela."
+      />
+      <div className="min-h-64 rounded-xl border border-blue-100 bg-white/70">
+        <AppInlineLoading
+          label={loading ? "Carregando dados detalhados" : "Preparando dados detalhados"}
+        />
+      </div>
+    </div>
+  );
+}
+
 function SystemEmptyScreen({
   label,
   detail,
@@ -1402,6 +1604,7 @@ function QuickActionModals({
   return (
     <QuickContactModal
       customers={customers}
+      user={user}
       onClose={onClose}
       onSave={async (record) => {
         await onCreateContact(record);
@@ -1656,10 +1859,12 @@ function ManualAlertModal({
 
 function QuickContactModal({
   customers,
+  user,
   onClose,
   onSave,
 }: {
   customers: CustomerRow[];
+  user: CrmSessionUser;
   onClose: () => void;
   onSave: (record: Omit<ContactRecord, "id">) => Promise<void>;
 }) {
@@ -1671,6 +1876,7 @@ function QuickContactModal({
   return (
     <ContactOutcomeModal
       customer={customer}
+      defaultResponsible={resolveWhatsAppResponsibleName(user, customer)}
       onClose={onClose}
       onSave={onSave}
       header={
@@ -2362,12 +2568,20 @@ function CrmResults({
   contactRecords,
   sales,
   sellers,
+  refreshing,
+  refreshedAt,
+  refreshError,
+  onRefresh,
 }: {
   customers: CustomerRow[];
   alerts: AlertRow[];
   contactRecords: ContactRecord[];
   sales: SaleRow[];
   sellers: SellerRow[];
+  refreshing: boolean;
+  refreshedAt: string | null;
+  refreshError: string;
+  onRefresh: () => Promise<void>;
 }) {
   const attribution = buildCrmAttributionSummary({ customers, sales, contactRecords });
   const convertedAlerts = alerts.filter((alert) => alert.status === "convertido");
@@ -2379,116 +2593,372 @@ function CrmResults({
   const attributionTrend = buildAttributionTrend(attribution.attributedSales);
   const sellerResultRows = buildSellerResultRows(attribution.attributedSales, sellers);
   const sellerRecoveryRanking = sellerResultRows.slice(0, 5);
+  const attributionMixData = attribution.windowRows.map((row, index) => ({
+    ...row,
+    color: crmResultsMixColors[index] ?? "var(--primary)",
+  }));
+  const attributionMixTotal = attributionMixData.reduce((total, row) => total + row.weightedValue, 0);
+  const directAttributionShare = attributionMixTotal > 0
+    ? Math.round((((attributionMixData[0]?.weightedValue) ?? 0) / attributionMixTotal) * 100)
+    : 0;
+  const recoveredShare = attribution.totalAttributedRevenue > 0
+    ? (attribution.recoveredRevenue / attribution.totalAttributedRevenue) * 100
+    : 0;
+  const influencedShare = attribution.totalAttributedRevenue > 0
+    ? (attribution.influencedRevenue / attribution.totalAttributedRevenue) * 100
+    : 0;
+  const convertedAlertShare = alerts.length > 0 ? (convertedAlerts.length / alerts.length) * 100 : 0;
 
   return (
-    <div className="space-y-5">
-      <PageTitle eyebrow="Resultados" title="Resultados do CRM" description="Ganhos reais atribuídos a contatos e ações comerciais antes da compra." />
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Faturamento recuperado" value={formatCurrency(attribution.recoveredRevenue)} />
-        <MetricCard label="Faturamento influenciado" value={formatCurrency(attribution.influencedRevenue)} />
-        <MetricCard label="Total atribuído" value={formatCurrency(attribution.totalAttributedRevenue)} />
-        <MetricCard label="Clientes convertidos" value={`${attribution.convertedCustomers}`} />
-        <MetricCard label="ROI estimado" value={`${roi}x`} />
-        <MetricCard label="Alertas convertidos" value={`${convertedAlerts.length}`} />
-        <MetricCard label="Taxa de conversão" value={`${attribution.conversionRate}%`} />
-        <MetricCard label="Ticket recuperado" value={formatCurrency(attribution.averageRecoveredTicket)} />
+    <div
+      className="space-y-5 text-[var(--foreground)]"
+      style={crmResultsVisualTokens}
+    >
+      <header className="flex flex-col gap-5 px-1 py-1 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--primary)]">
+            Resultados de performance
+          </p>
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">Dashboard CRM</h1>
+          <p className="mt-1 max-w-xl text-sm text-[var(--muted-foreground)]">
+            Ganhos reais atribuídos a contatos e ações comerciais antes do ciclo de compra.
+          </p>
+        </div>
+        <ResultsRefreshControl
+          refreshing={refreshing}
+          refreshedAt={refreshedAt}
+          error={refreshError}
+          onRefresh={onRefresh}
+        />
+      </header>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <CrmResultsMetricCard
+          label="Faturamento recuperado"
+          value={formatCurrency(attribution.recoveredRevenue)}
+          detail={`${Math.round(recoveredShare)}% do total atribuído`}
+          progress={recoveredShare}
+          tone="secondary"
+        />
+        <CrmResultsMetricCard
+          label="Faturamento influenciado"
+          value={formatCurrency(attribution.influencedRevenue)}
+          detail={`${Math.round(influencedShare)}% do total atribuído`}
+          progress={influencedShare}
+        />
+        <CrmResultsMetricCard
+          label="Total atribuído"
+          value={formatCurrency(attribution.totalAttributedRevenue)}
+          detail={`${attribution.attributedSales.length} venda(s) atribuída(s)`}
+          progress={attribution.totalAttributedRevenue > 0 ? 100 : 0}
+        />
+        <CrmResultsMetricCard
+          label="Clientes convertidos"
+          value={`${attribution.convertedCustomers}`}
+          detail={`${attribution.conversionRate}% de conversão`}
+          progress={attribution.conversionRate}
+        />
+        <CrmResultsMetricCard
+          label="ROI estimado"
+          value={`${roi}x`}
+          detail="Retorno sobre a operação comercial"
+          progress={Math.min(roi * 10, 100)}
+          tone="accent"
+        />
+        <CrmResultsMetricCard
+          label="Alertas convertidos"
+          value={`${convertedAlerts.length}`}
+          detail={`${alerts.length} alerta(s) monitorado(s)`}
+          progress={convertedAlertShare}
+          tone="secondary"
+        />
+        <CrmResultsMetricCard
+          label="Taxa de conversão"
+          value={`${attribution.conversionRate}%`}
+          detail={`${attribution.convertedCustomers} cliente(s) convertido(s)`}
+          progress={attribution.conversionRate}
+        />
+        <CrmResultsMetricCard
+          label="Ticket recuperado"
+          value={formatCurrency(attribution.averageRecoveredTicket)}
+          detail="Média por venda recuperada"
+          progress={recoveredShare}
+          tone="accent"
+        />
       </div>
-      <Panel title="Regra de atribuição do CRM" icon={ShieldCheck} action="Janela 10/20/30 dias">
-        <div className="grid gap-3 lg:grid-cols-3">
-          {attribution.windowRows.map((row) => (
-            <div key={row.id} className="rounded-lg border border-blue-100 bg-[#f8fbff] p-4">
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-sm font-black text-[#123252]">{row.label}</p>
-                <span className={`rounded-full px-3 py-1 text-xs font-bold ${
-                  row.kind === "recovered" ? "bg-emerald-100 text-emerald-700" : "bg-cyan-100 text-cyan-700"
-                }`}>
-                  {Math.round(row.weight * 100)}%
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <Card className="overflow-hidden lg:col-span-2">
+          <CardHeader className="flex-col justify-between sm:flex-row sm:items-center">
+            <div className="min-w-0 space-y-1">
+              <CardTitle>Faturamento atribuído por mês</CardTitle>
+              <CardDescription>Comparativo dos últimos seis meses</CardDescription>
+            </div>
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[var(--muted)] text-[var(--primary)]">
+              <BarChart3 size={18} role="img" aria-label="Faturamento atribuído por mês" />
+            </span>
+          </CardHeader>
+          <CardContent>
+            <div className="mb-5 flex flex-wrap gap-x-8 gap-y-3">
+              <span className="inline-flex items-center gap-2.5">
+                <span className="size-2.5 rounded-full bg-[var(--secondary)]" />
+                <span>
+                  <span className="block text-xs text-[var(--muted-foreground)]">Recuperado · até 10 dias</span>
+                  <strong className="mt-0.5 block text-sm font-semibold text-[var(--foreground)]">
+                    {formatCurrency(attribution.recoveredRevenue)}
+                  </strong>
+                </span>
+              </span>
+              <span className="inline-flex items-center gap-2.5">
+                <span className="size-2.5 rounded-full bg-[var(--primary)]" />
+                <span>
+                  <span className="block text-xs text-[var(--muted-foreground)]">Influenciado · 11 a 30 dias</span>
+                  <strong className="mt-0.5 block text-sm font-semibold text-[var(--foreground)]">
+                    {formatCurrency(attribution.influencedRevenue)}
+                  </strong>
+                </span>
+              </span>
+            </div>
+            <div className="h-72 sm:h-80">
+              <MeasuredChart>
+                {({ width, height }) => (
+                  <BarChart
+                    width={width}
+                    height={height}
+                    data={attributionTrend}
+                    margin={{ top: 8, right: 4, bottom: 0, left: 4 }}
+                    barGap={5}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                    <XAxis
+                      dataKey="mes"
+                      tickLine={false}
+                      axisLine={false}
+                      tickMargin={10}
+                      tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
+                    />
+                    <YAxis
+                      tickLine={false}
+                      axisLine={false}
+                      width={66}
+                      tickFormatter={formatResultsAxisValue}
+                      tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
+                    />
+                    <Tooltip
+                      content={<CrmResultsChartTooltip />}
+                      cursor={{ fill: "var(--muted)", opacity: 0.55 }}
+                    />
+                    <Bar
+                      dataKey="recuperado"
+                      fill="var(--secondary)"
+                      radius={[6, 6, 2, 2]}
+                      maxBarSize={34}
+                    />
+                    <Bar
+                      dataKey="influenciado"
+                      fill="var(--primary)"
+                      radius={[6, 6, 2, 2]}
+                      maxBarSize={34}
+                    />
+                  </BarChart>
+                )}
+              </MeasuredChart>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="overflow-hidden lg:col-span-1">
+          <CardHeader className="items-center justify-between">
+            <div className="min-w-0 space-y-1">
+              <CardTitle>Mix de atribuição</CardTitle>
+              <CardDescription>Distribuição pela janela temporal</CardDescription>
+            </div>
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[var(--muted)] text-[var(--primary)]">
+              <PieChart size={18} role="img" aria-label="Mix de atribuição" />
+            </span>
+          </CardHeader>
+          <CardContent>
+            <div className="relative mx-auto h-56 max-w-72">
+              <MeasuredChart>
+                {({ width, height }) => (
+                  <RePieChart width={width} height={height}>
+                    <Pie
+                      data={attributionMixData}
+                      dataKey="weightedValue"
+                      nameKey="label"
+                      innerRadius="62%"
+                      outerRadius="82%"
+                      paddingAngle={attributionMixData.filter((row) => row.weightedValue > 0).length > 1 ? 3 : 0}
+                      stroke="var(--card)"
+                      strokeWidth={2}
+                    >
+                      {attributionMixData.map((row) => (
+                        <Cell key={row.id} fill={row.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip content={<CrmResultsMixTooltip />} />
+                  </RePieChart>
+                )}
+              </MeasuredChart>
+              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                <strong className="text-2xl font-semibold">{directAttributionShare}%</strong>
+                <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
+                  Direto
                 </span>
               </div>
-              <p className="mt-2 min-h-10 text-xs leading-5 text-slate-500">{row.description}</p>
-              <div className="mt-4 grid grid-cols-3 gap-2 text-center">
-                <div className="rounded-lg bg-white px-2 py-3">
-                  <p className="text-lg font-black text-[#0753a6]">{row.sales}</p>
-                  <p className="text-[10px] font-bold uppercase text-slate-400">Vendas</p>
-                </div>
-                <div className="rounded-lg bg-white px-2 py-3">
-                  <p className="text-lg font-black text-[#0753a6]">{row.customers}</p>
-                  <p className="text-[10px] font-bold uppercase text-slate-400">Clientes</p>
-                </div>
-                <div className="rounded-lg bg-white px-2 py-3">
-                  <p className="text-lg font-black text-[#0753a6]">{formatCurrency(row.weightedValue)}</p>
-                  <p className="text-[10px] font-bold uppercase text-slate-400">Valor</p>
-                </div>
-              </div>
             </div>
-          ))}
-        </div>
-      </Panel>
-
-      <Panel title="Resultado por vendedor" icon={UsersRound} action={`${sellerResultRows.length} vendedor(es)`}>
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-left text-sm">
-            <thead className="text-xs uppercase tracking-wide text-slate-400">
-              <tr>
-                <th className="px-3 py-2">Vendedor</th>
-                <th className="px-3 py-2">Recuperado</th>
-                <th className="px-3 py-2">Influenciado</th>
-                <th className="px-3 py-2">Total atribuído</th>
-                <th className="px-3 py-2">Clientes</th>
-                <th className="px-3 py-2">Vendas</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-blue-50">
-              {sellerResultRows.map((row) => (
-                <tr key={row.name} className="hover:bg-cyan-50/60">
-                  <td className="px-3 py-3 font-semibold text-[#123252]">{row.name}</td>
-                  <td className="px-3 py-3 font-bold text-emerald-700">{formatCurrency(row.recoveredRevenue)}</td>
-                  <td className="px-3 py-3 font-bold text-[#0753a6]">{formatCurrency(row.influencedRevenue)}</td>
-                  <td className="px-3 py-3 font-black text-[#123252]">{formatCurrency(row.totalRevenue)}</td>
-                  <td className="px-3 py-3">{row.customers}</td>
-                  <td className="px-3 py-3">{row.sales}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {!sellerResultRows.length && <EmptyState text="Nenhuma venda atribuída por vendedor ainda." />}
-        </div>
-      </Panel>
-
-      <div className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
-        <Panel title="Evolução mensal atribuída" icon={LineChart}>
-          <div className="h-80">
-            <MeasuredChart>
-              {({ width, height }) => (
-                <AreaChart width={width} height={height} data={attributionTrend}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="mes" tickLine={false} axisLine={false} />
-                  <YAxis tickLine={false} axisLine={false} />
-                  <Tooltip />
-                  <Area type="monotone" dataKey="recuperado" stroke="#059669" fill="#bbf7d0" strokeWidth={3} />
-                  <Area type="monotone" dataKey="influenciado" stroke="#0753a6" fill="#bfdbfe" strokeWidth={3} />
-                </AreaChart>
-              )}
-            </MeasuredChart>
-          </div>
-        </Panel>
-        <Panel title="Ranking por recuperação" icon={UsersRound} action={`${sellerRecoveryRanking.length} vendedor(es)`}>
-          <div className="space-y-3">
-            {sellerRecoveryRanking.map((seller, index) => (
-              <div key={seller.name} className="flex items-center justify-between rounded-lg border border-blue-50 bg-[#f8fbff] p-3">
-                <div>
-                  <p className="font-bold text-[#123252]">{index + 1}. {seller.name}</p>
-                  <p className="text-xs text-slate-500">
-                    {seller.sales} venda(s) · {seller.customers} cliente(s) · {formatCurrency(seller.recoveredRevenue)} recuperado · {formatCurrency(seller.influencedRevenue)} influenciado
-                  </p>
+            <div className="mt-2 space-y-3">
+              {attributionMixData.map((row) => (
+                <div key={row.id} className="flex items-center gap-3 text-xs">
+                  <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: row.color }} />
+                  <span className="min-w-0 flex-1 truncate text-[var(--muted-foreground)]">
+                    {row.label} · {Math.round(row.weight * 100)}%
+                  </span>
+                  <span className="shrink-0 font-medium">{formatCurrency(row.weightedValue)}</span>
                 </div>
-                <span className="font-black text-[#0753a6]">{formatCurrency(seller.totalRevenue)}</span>
-              </div>
-            ))}
-            {!sellerRecoveryRanking.length && <EmptyState text="Nenhuma venda atribuída ao CRM ainda." />}
-          </div>
-        </Panel>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       </div>
+
+        <Card className="overflow-hidden">
+          <CardHeader className="flex-col justify-between sm:flex-row sm:items-center">
+            <div className="min-w-0 space-y-1">
+              <CardTitle>Resultado por vendedor</CardTitle>
+              <CardDescription>
+                Receita recuperada e influenciada pelas ações comerciais de cada vendedor.
+              </CardDescription>
+            </div>
+            <div className="flex shrink-0 items-center gap-3">
+              <UiBadge>{sellerResultRows.length} vendedor(es)</UiBadge>
+              <span className="flex size-10 items-center justify-center rounded-lg bg-[var(--muted)] text-[var(--primary)]">
+                <UsersRound size={19} role="img" aria-label="Resultado por vendedor" />
+              </span>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            <Table aria-label="Resultado por vendedor">
+              <TableHeader>
+                <TableRow className="hover:bg-[var(--muted)]">
+                  <TableHead className="w-[62%] sm:w-[46%] lg:w-[34%]">Vendedor</TableHead>
+                  <TableHead className="hidden md:table-cell">Recuperado</TableHead>
+                  <TableHead className="hidden lg:table-cell">Influenciado</TableHead>
+                  <TableHead className="text-right">Total atribuído</TableHead>
+                  <TableHead className="hidden text-center xl:table-cell">Clientes</TableHead>
+                  <TableHead className="hidden text-center xl:table-cell">Vendas</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {sellerResultRows.map((row) => {
+                  const sellerProfile = sellers.find((seller) => seller.name === row.name);
+                  const sellerRole = sellerProfile?.supervisor ? "Supervisor" : "Vendedor";
+
+                  return (
+                    <TableRow key={row.name}>
+                      <TableCell>
+                        <div className="flex min-w-0 items-center gap-3">
+                          <Avatar>
+                            <AvatarFallback>{getNameInitials(row.name)}</AvatarFallback>
+                          </Avatar>
+                          <div className="min-w-0">
+                            <p className="truncate font-medium">{row.name}</p>
+                            <p className="truncate text-xs text-[var(--muted-foreground)]">
+                              {sellerProfile?.email ? `${sellerRole} · ${sellerProfile.email}` : sellerRole}
+                            </p>
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell className="hidden md:table-cell">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="whitespace-nowrap font-semibold text-[var(--secondary)]">
+                            {formatCurrency(row.recoveredRevenue)}
+                          </span>
+                          <UiBadge variant="secondary">Direto</UiBadge>
+                        </div>
+                      </TableCell>
+                      <TableCell className="hidden lg:table-cell">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="whitespace-nowrap font-semibold text-[var(--primary)]">
+                            {formatCurrency(row.influencedRevenue)}
+                          </span>
+                          <UiBadge variant="primary">Influência</UiBadge>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <p className="whitespace-nowrap font-semibold">{formatCurrency(row.totalRevenue)}</p>
+                        <p className="mt-1 text-xs text-[var(--muted-foreground)] md:hidden">
+                          {formatCurrency(row.recoveredRevenue)} recuperado
+                        </p>
+                      </TableCell>
+                      <TableCell className="hidden text-center xl:table-cell">{row.customers}</TableCell>
+                      <TableCell className="hidden text-center xl:table-cell">{row.sales}</TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+            {!sellerResultRows.length && (
+              <div className="m-5 rounded-xl border border-dashed border-[var(--border)] bg-[var(--muted)] p-5 text-center text-sm text-[var(--muted-foreground)]">
+                Nenhuma venda atribuída por vendedor ainda.
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+      <Card className="overflow-hidden">
+        <CardHeader className="items-center justify-between">
+          <div className="min-w-0 space-y-1">
+            <CardTitle>Ranking por recuperação</CardTitle>
+            <CardDescription>{sellerRecoveryRanking.length} vendedor(es) com receita atribuída.</CardDescription>
+          </div>
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-[var(--muted)] text-[var(--primary)]">
+            <Trophy size={19} role="img" aria-label="Ranking por recuperação" />
+          </span>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-4 lg:grid-cols-2">
+            {sellerRecoveryRanking.map((seller, index) => {
+              const leaderValue = sellerRecoveryRanking[0]?.totalRevenue ?? 0;
+              const relativeValue = leaderValue > 0 ? (seller.totalRevenue / leaderValue) * 100 : 0;
+
+              return (
+                <div key={seller.name} className="space-y-2.5 rounded-lg bg-[var(--muted)] p-3">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <span
+                      className={`flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${
+                        index === 0
+                          ? "bg-[color-mix(in_srgb,var(--primary)_12%,transparent)] text-[var(--primary)]"
+                          : "bg-[var(--card)] text-[var(--foreground)]"
+                      }`}
+                    >
+                      {index + 1}
+                    </span>
+                    <Avatar className="size-9">
+                      <AvatarFallback>{getNameInitials(seller.name)}</AvatarFallback>
+                    </Avatar>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">{seller.name}</p>
+                      <p className="text-xs text-[var(--muted-foreground)]">
+                        {seller.sales} venda(s) · {seller.customers} cliente(s)
+                      </p>
+                    </div>
+                    <p className="shrink-0 text-sm font-semibold text-[var(--primary)]">
+                      {formatCurrency(seller.totalRevenue)}
+                    </p>
+                  </div>
+                  <Progress value={relativeValue} aria-label={`${seller.name}: ${Math.round(relativeValue)}% do líder`} />
+                </div>
+              );
+            })}
+            {!sellerRecoveryRanking.length && (
+              <div className="rounded-xl border border-dashed border-[var(--border)] bg-[var(--muted)] p-5 text-center text-sm text-[var(--muted-foreground)] lg:col-span-2">
+                Nenhuma venda atribuída ao CRM ainda.
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
       <div className="grid gap-5 xl:grid-cols-2">
         <Panel title="Top clientes com venda atribuída" icon={CheckCircle2}>
           <SimpleRows
@@ -2515,31 +2985,211 @@ function CrmResults({
   );
 }
 
+function CrmResultsMetricCard({
+  label,
+  value,
+  detail,
+  progress,
+  tone = "primary",
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  progress: number;
+  tone?: "primary" | "secondary" | "accent";
+}) {
+  const toneClass = tone === "secondary"
+    ? "bg-[var(--secondary)]"
+    : tone === "accent"
+      ? "bg-[var(--accent)]"
+      : "bg-[var(--primary)]";
+
+  return (
+    <Card className="min-h-32 overflow-hidden">
+      <CardContent className="flex h-full flex-col p-4">
+        <div className="flex items-start justify-between gap-3">
+          <p className="text-xs font-medium text-[var(--muted-foreground)]">{label}</p>
+          <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-[var(--muted)] text-[var(--muted-foreground)]">
+            <BarChart3 size={14} aria-hidden="true" />
+          </span>
+        </div>
+        <p className="mt-3 text-xl font-semibold tracking-tight sm:text-2xl">{value}</p>
+        <p className="mt-1 min-h-8 text-[11px] leading-4 text-[var(--muted-foreground)]">{detail}</p>
+        <Progress
+          value={progress}
+          indicatorClassName={toneClass}
+          aria-label={`${label}: ${Math.round(progress)}%`}
+          className="mt-auto"
+        />
+      </CardContent>
+    </Card>
+  );
+}
+
+function getNameInitials(name: string) {
+  return name
+    .trim()
+    .split(/\s+/u)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part.charAt(0))
+    .join("")
+    .toUpperCase();
+}
+
+function CrmResultsChartTooltip({
+  active,
+  label,
+  payload,
+}: {
+  active?: boolean;
+  label?: string | number;
+  payload?: ReadonlyArray<{
+    color?: string;
+    dataKey?: string | number;
+    name?: string | number;
+    value?: string | number;
+  }>;
+}) {
+  if (!active || !payload?.length) return null;
+
+  return (
+    <div className="min-w-44 rounded-lg border border-[var(--border)] bg-[var(--popover)] p-3 text-[var(--foreground)] shadow-md">
+      <p className="mb-2 text-xs font-medium text-[var(--muted-foreground)]">{label}</p>
+      <div className="space-y-1.5">
+        {payload.map((item) => {
+          const itemKey = String(item.dataKey ?? item.name ?? "valor");
+          const itemLabel = itemKey === "recuperado" ? "Recuperado" : "Influenciado";
+
+          return (
+            <div key={itemKey} className="flex items-center justify-between gap-4 text-xs">
+              <span className="inline-flex items-center gap-2 text-[var(--muted-foreground)]">
+                <span className="size-2 rounded-full" style={{ backgroundColor: item.color }} />
+                {itemLabel}
+              </span>
+              <span className="font-medium">{formatCurrency(Number(item.value ?? 0))}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function formatResultsAxisValue(value: number) {
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(value);
+}
+
+function CrmResultsMixTooltip({
+  active,
+  payload,
+}: {
+  active?: boolean;
+  payload?: ReadonlyArray<{
+    name?: string | number;
+    value?: string | number;
+    payload?: {
+      sales?: number;
+      customers?: number;
+      weight?: number;
+    };
+  }>;
+}) {
+  const item = payload?.[0];
+  if (!active || !item) return null;
+
+  return (
+    <div className="min-w-40 rounded-lg border border-[var(--border)] bg-[var(--popover)] p-3 text-[var(--foreground)] shadow-md">
+      <p className="text-xs font-medium">{item.name}</p>
+      <p className="mt-1 text-sm font-semibold">{formatCurrency(Number(item.value ?? 0))}</p>
+      <p className="mt-1 text-[11px] text-[var(--muted-foreground)]">
+        {item.payload?.sales ?? 0} venda(s) · {item.payload?.customers ?? 0} cliente(s)
+      </p>
+    </div>
+  );
+}
+
+function ResultsRefreshControl({
+  refreshing,
+  refreshedAt,
+  error,
+  onRefresh,
+}: {
+  refreshing: boolean;
+  refreshedAt: string | null;
+  error: string;
+  onRefresh: () => Promise<void>;
+}) {
+  const status = error
+    ? "Falha ao atualizar"
+    : refreshedAt
+      ? `Atualizado às ${new Intl.DateTimeFormat("pt-BR", {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        }).format(new Date(refreshedAt))}`
+      : "Dados sincronizados";
+
+  return (
+    <div className="flex max-w-full flex-wrap items-center gap-2 sm:justify-end">
+      <div
+        className={`hidden items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--muted)] px-3 py-2 text-xs font-medium sm:flex ${
+          error ? "text-[var(--destructive)]" : "text-[var(--muted-foreground)]"
+        }`}
+      >
+        <span className={`size-2 rounded-full ${error ? "bg-[var(--destructive)]" : "bg-[var(--secondary)]"}`} />
+        {status}
+      </div>
+      <button
+        type="button"
+        onClick={() => void onRefresh()}
+        disabled={refreshing}
+        aria-label="Atualizar resultados do CRM"
+        title="Atualizar resultados do CRM"
+        className="flex h-10 items-center gap-2 rounded-lg bg-[var(--primary)] px-4 text-sm font-semibold text-[var(--primary-foreground)] shadow-sm transition hover:bg-[color-mix(in_srgb,var(--primary)_88%,CanvasText_12%)] disabled:cursor-wait disabled:opacity-70"
+      >
+        {refreshing ? <AppLoadingMark active /> : <RefreshCcw size={18} />}
+        <span>{refreshing ? "Atualizando" : "Atualizar"}</span>
+      </button>
+    </div>
+  );
+}
+
 function buildAttributionTrend(attributedSales: CrmAttributedSale[]) {
   const labels = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
-  const rows = new Map<string, { mes: string; recoveredMonth: string; recuperado: number; influenciado: number }>();
+  const referenceMatch = crmReferenceDate.match(/^(\d{4})-(\d{2})/u);
+  const referenceYear = Number(referenceMatch?.[1] ?? new Date().getFullYear());
+  const referenceMonth = Number(referenceMatch?.[2] ?? new Date().getMonth() + 1) - 1;
+  const rows = new Map<string, { mes: string; recuperado: number; influenciado: number }>();
+
+  for (let offset = 5; offset >= 0; offset -= 1) {
+    const date = new Date(Date.UTC(referenceYear, referenceMonth - offset, 1));
+    const month = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+    rows.set(month, {
+      mes: labels[date.getUTCMonth()],
+      recuperado: 0,
+      influenciado: 0,
+    });
+  }
 
   for (const item of attributedSales) {
     const month = item.sale.soldAt.slice(0, 7);
-    const monthIndex = Number(item.sale.soldAt.slice(5, 7)) - 1;
-    const current = rows.get(month) ?? {
-      mes: labels[monthIndex] ?? month,
-      recoveredMonth: month,
-      recuperado: 0,
-      influenciado: 0,
-    };
+    const current = rows.get(month);
+    if (!current) continue;
 
     if (item.window.kind === "recovered") {
       current.recuperado += item.weightedValue;
     } else {
       current.influenciado += item.weightedValue;
     }
-    rows.set(month, current);
   }
 
   return [...rows.values()]
-    .sort((left, right) => left.recoveredMonth.localeCompare(right.recoveredMonth))
-    .slice(-6)
     .map((row) => ({
       mes: row.mes,
       recuperado: Math.round(row.recuperado),
@@ -3002,7 +3652,7 @@ function ActivitiesModule({
 
   return (
     <div className="space-y-5">
-      <PageTitle eyebrow="Inteligência" title="Atividades" description="Histórico de contatos, retornos, observações e ações feitas pela equipe." />
+      <PageTitle eyebrow="Inteligência" title="Atividades" description="Histórico de contatos, retornos e ações feitas pela equipe." />
       <div className="grid gap-4 md:grid-cols-4">
         <MetricCard label="Atividades" value={`${contactRecords.length}`} />
         <MetricCard label="Interessados" value={`${outcomes.interested ?? 0}`} />
@@ -3048,15 +3698,14 @@ function ActivitiesModule({
         action={`${visibleContactRecords.length} de ${contactRecords.length} atividades`}
       >
         <div className="overflow-x-auto">
-          <table className="min-w-full text-left text-sm">
+          <table className="min-w-[720px] w-full table-fixed text-left text-sm">
             <thead className="text-xs uppercase tracking-wide text-slate-400">
               <tr>
-                <th className="px-3 py-2">Cliente</th>
-                <th className="px-3 py-2">Canal</th>
-                <th className="px-3 py-2">Resultado</th>
-                <th className="px-3 py-2">Responsável</th>
-                <th className="px-3 py-2">Data</th>
-                <th className="px-3 py-2">Observação</th>
+                <th className="w-[28%] px-3 py-2">Cliente</th>
+                <th className="w-[14%] px-3 py-2">Canal</th>
+                <th className="w-[18%] px-3 py-2">Resultado</th>
+                <th className="w-[24%] px-3 py-2">Responsável</th>
+                <th className="w-[16%] px-3 py-2">Data</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-blue-50">
@@ -3067,7 +3716,6 @@ function ActivitiesModule({
                   <td className="px-3 py-3">{contactOutcomeLabels[record.outcome]}</td>
                   <td className="px-3 py-3">{record.responsible}</td>
                   <td className="px-3 py-3">{formatContactDate(record.contactedAt)}</td>
-                  <td className="px-3 py-3">{record.note || "-"}</td>
                 </tr>
               ))}
             </tbody>
@@ -4053,12 +4701,14 @@ function Dashboard({
   customers,
   openProfile,
   contactRecords,
+  agenda,
   openRecovery,
   theme,
   sales,
   saleItems,
   products,
-  sellers,
+  insights,
+  detailsLoading,
   user,
   onUpdateContact,
   onRegisterContact,
@@ -4066,23 +4716,32 @@ function Dashboard({
   customers: CustomerRow[];
   openProfile: (customer: CustomerRow) => void;
   contactRecords: ContactRecord[];
+  agenda: CrmAgendaEvent[];
   openRecovery: () => void;
   theme: Theme;
   sales: SaleRow[];
   saleItems: SaleItemRow[];
   products: ProductRow[];
-  sellers: SellerRow[];
+  insights?: CrmDashboardInsights;
+  detailsLoading: boolean;
   user: CrmSessionUser;
   onUpdateContact: (customer: CustomerRow, phone: string) => Promise<void>;
   onRegisterContact: (record: Omit<ContactRecord, "id">) => Promise<void>;
 }) {
   const chartColors = getChartColors(theme);
+  const actionableCustomers = customers.filter(
+    (customer) => !hasFutureFollowUp(customer.id, agenda, crmReferenceDate),
+  );
   const inactiveCustomers = [...customers]
-    .filter((customer) => customer.activityStatus !== "ativo")
+    .filter(
+      (customer) =>
+        customer.activityStatus !== "ativo" &&
+        !hasFutureFollowUp(customer.id, agenda, crmReferenceDate),
+    )
     .sort((a, b) => b.days - a.days);
   const dashboardKpis = buildDashboardKpis(customers);
-  const scopedTrend = buildRepurchaseTrendForSales(sales);
-  const scopedCategoryData = buildCategoryDataForItems(saleItems, products);
+  const scopedTrend = insights?.repurchaseTrend ?? buildRepurchaseTrendForSales(sales);
+  const scopedCategoryData = insights?.categoryData ?? buildCategoryDataForItems(saleItems, products);
 
   return (
     <div className="space-y-5">
@@ -4201,33 +4860,41 @@ function Dashboard({
           </div>
         </Panel>
         <Panel title="Categorias recorrentes" icon={PieChart}>
-          <div className="h-80">
-            <MeasuredChart>
-              {({ width, height }) => (
-                <RePieChart width={width} height={height}>
-                  <Pie data={scopedCategoryData} dataKey="value" nameKey="name" innerRadius={62} outerRadius={96} paddingAngle={4}>
-                    {scopedCategoryData.map((entry) => (
-                      <Cell key={entry.name} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip contentStyle={chartColors.tooltip} />
-                </RePieChart>
-              )}
-            </MeasuredChart>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            {scopedCategoryData.map((item) => (
-              <div key={item.name} className="flex items-center gap-2 text-sm text-slate-600">
-                <span className="h-2.5 w-2.5 rounded-full" style={{ background: item.color }} />
-                {item.name}
+          {detailsLoading && !scopedCategoryData.length ? (
+            <div className="min-h-80">
+              <AppInlineLoading label="Finalizando categorias recorrentes" />
+            </div>
+          ) : (
+            <>
+              <div className="h-80">
+                <MeasuredChart>
+                  {({ width, height }) => (
+                    <RePieChart width={width} height={height}>
+                      <Pie data={scopedCategoryData} dataKey="value" nameKey="name" innerRadius={62} outerRadius={96} paddingAngle={4}>
+                        {scopedCategoryData.map((entry) => (
+                          <Cell key={entry.name} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip contentStyle={chartColors.tooltip} />
+                    </RePieChart>
+                  )}
+                </MeasuredChart>
               </div>
-            ))}
-          </div>
+              <div className="grid grid-cols-2 gap-2">
+                {scopedCategoryData.map((item) => (
+                  <div key={item.name} className="flex items-center gap-2 text-sm text-slate-600">
+                    <span className="h-2.5 w-2.5 rounded-full" style={{ background: item.color }} />
+                    {item.name}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </Panel>
       </div>
       <Panel title="Clientes para contatar hoje" icon={Phone} action="Ranking de prioridade">
         <div className="grid gap-3">
-          {customers.slice(0, 4).map((customer, index) => (
+          {actionableCustomers.slice(0, 4).map((customer, index) => (
             <div
               key={customer.name}
               className="grid gap-3 rounded-lg border border-blue-100 bg-[#f7fbff] p-4 text-left transition hover:border-cyan-400 hover:bg-white hover:shadow-md md:grid-cols-[42px_1.3fr_1fr_1fr_1fr_auto]"
@@ -4264,25 +4931,29 @@ function Dashboard({
           ))}
         </div>
       </Panel>
-      <Panel title="Ranking de vendedores" icon={UsersRound} action="Por potencial da carteira">
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          {sellers.map((seller, index) => (
-            <div key={seller.id} className="rounded-xl border border-blue-100 bg-[#f8fbff] p-4">
-              <div className="flex items-center justify-between">
-                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#0753a6] text-sm font-bold text-white">
-                  {index + 1}
-                </span>
-                <span className="text-xs font-semibold text-emerald-700">{seller.conversionRate}% conversão</span>
-              </div>
-              <p className="mt-4 font-bold text-slate-900">{seller.name}</p>
-              <p className="mt-1 text-xs text-slate-500">{seller.customerCount} clientes · {seller.openAlertCount} alertas</p>
-              <p className="mt-3 text-lg font-bold text-orange-700">{formatCurrency(seller.potentialValue)}</p>
-            </div>
-          ))}
-        </div>
-      </Panel>
     </div>
   );
+}
+
+function isOpenAutomaticFollowUp(event: CrmAgendaEvent) {
+  return event.type === "Retorno" && Boolean(event.contactId) && !event.completed;
+}
+
+function hasFutureFollowUp(
+  customerId: string,
+  agenda: CrmAgendaEvent[],
+  referenceDate: string,
+) {
+  return agenda.some(
+    (event) =>
+      isOpenAutomaticFollowUp(event) &&
+      event.customerId === customerId &&
+      event.date > referenceDate,
+  );
+}
+
+function compareAgendaEvents(left: CrmAgendaEvent, right: CrmAgendaEvent) {
+  return left.date.localeCompare(right.date) || left.time.localeCompare(right.time);
 }
 
 type RecoveryFilter = "todos" | "30-60" | "60-90" | "90-plus" | "sem-retorno";
@@ -4313,6 +4984,7 @@ function RecoveryCustomers({
   customers,
   openProfile,
   contactRecords,
+  agenda,
   onRegisterContact,
   user,
   onUpdateContact,
@@ -4320,6 +4992,7 @@ function RecoveryCustomers({
   customers: CustomerRow[];
   openProfile: (customer: CustomerRow) => void;
   contactRecords: ContactRecord[];
+  agenda: CrmAgendaEvent[];
   onRegisterContact: (record: Omit<ContactRecord, "id">) => Promise<void>;
   user: CrmSessionUser;
   onUpdateContact: (customer: CustomerRow, phone: string) => Promise<void>;
@@ -4329,7 +5002,11 @@ function RecoveryCustomers({
   const [page, setPage] = useState(1);
   const [contactHistoryPage, setContactHistoryPage] = useState(1);
   const inactiveCustomers = [...customers]
-    .filter((customer) => customer.activityStatus !== "ativo")
+    .filter(
+      (customer) =>
+        customer.activityStatus !== "ativo" &&
+        !hasFutureFollowUp(customer.id, agenda, crmReferenceDate),
+    )
     .sort((a, b) => b.days - a.days);
   const filteredInactiveCustomers = inactiveCustomers.filter((customer) =>
     matchesRecoveryFilter(customer, activeFilter, contactRecords),
@@ -4367,7 +5044,7 @@ function RecoveryCustomers({
         />
         <RecoveryMetric value={`${contactRecords.length}`} label="Contatos registrados" tone="blue" />
         <RecoveryMetric
-          value={`${contactRecords.filter((record) => record.nextContact).length}`}
+          value={`${agenda.filter(isOpenAutomaticFollowUp).length}`}
           label="Retornos agendados"
           tone="amber"
         />
@@ -4517,6 +5194,7 @@ function RecoveryCustomers({
       {contactCustomer && (
         <ContactOutcomeModal
           customer={contactCustomer}
+          defaultResponsible={resolveWhatsAppResponsibleName(user, contactCustomer)}
           onClose={() => setContactCustomer(null)}
           onSave={async (record) => {
             await onRegisterContact(record);
@@ -4958,7 +5636,10 @@ function RepurchaseAlerts({
   const [contactAlert, setContactAlert] = useState<AlertRow | null>(null);
   const pageSize = 20;
   const nextSevenDays = addIsoDays(crmReferenceDate, 7);
-  const filteredAlerts = alerts.filter((alert) => {
+  const pendingAlerts = alerts.filter(
+    (alert) => (alertStatuses[alert.id] ?? alert.status) === "pendente",
+  );
+  const filteredAlerts = pendingAlerts.filter((alert) => {
     if (filter === "hoje") return alert.recommendedIso === crmReferenceDate;
     if (filter === "7dias") {
       return alert.recommendedIso >= crmReferenceDate && alert.recommendedIso <= nextSevenDays;
@@ -6262,9 +6943,19 @@ function Agenda({
   onDelete: (id: string) => Promise<void>;
 }) {
   const [editing, setEditing] = useState<CrmAgendaEvent | "new" | null>(null);
+  const [followUpFilter, setFollowUpFilter] = useState<"today" | "upcoming" | "overdue">("upcoming");
   const days = buildWorkWeek(crmReferenceDate);
   const canManage = (event?: CrmAgendaEvent) =>
-    user.role !== "vendedor" || !event || event.sellerId === (resolveSellerForUser(user.sellerId)?.id ?? user.sellerId);
+    !event?.contactId &&
+    (user.role !== "vendedor" || !event || event.sellerId === (resolveSellerForUser(user.sellerId)?.id ?? user.sellerId));
+  const customerById = new Map(customers.map((customer) => [customer.id, customer]));
+  const sellerById = new Map(sellers.map((seller) => [seller.id, seller]));
+  const followUps = items.filter(isOpenAutomaticFollowUp).sort(compareAgendaEvents);
+  const visibleFollowUps = followUps.filter((event) => {
+    if (followUpFilter === "today") return event.date === crmReferenceDate;
+    if (followUpFilter === "overdue") return event.date < crmReferenceDate;
+    return event.date > crmReferenceDate;
+  });
 
   return (
     <div className="space-y-5">
@@ -6275,6 +6966,74 @@ function Agenda({
           Novo compromisso
         </button>
       </div>
+      <Panel
+        title="Retornos agendados"
+        icon={Clock3}
+        action={`${followUps.length} pendente${followUps.length === 1 ? "" : "s"}`}
+      >
+        <div className="mb-4 flex w-full rounded-lg border border-blue-100 bg-[#f8fbff] p-1 sm:w-auto sm:max-w-md">
+          {[
+            ["today", "Hoje"],
+            ["upcoming", "Próximos"],
+            ["overdue", "Atrasados"],
+          ].map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setFollowUpFilter(value as "today" | "upcoming" | "overdue")}
+              className={`h-10 flex-1 rounded-md px-3 text-sm font-bold transition ${
+                followUpFilter === value
+                  ? "bg-[#0753a6] text-white shadow-sm"
+                  : "text-slate-500 hover:bg-white"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="divide-y divide-blue-50 overflow-hidden rounded-lg border border-blue-100">
+          {visibleFollowUps.slice(0, 20).map((event) => {
+            const customer = event.customerId ? customerById.get(event.customerId) : undefined;
+            const seller = event.sellerId ? sellerById.get(event.sellerId) : undefined;
+            const overdue = event.date < crmReferenceDate;
+            return (
+              <div
+                key={event.id}
+                className="grid gap-3 bg-white px-4 py-3 sm:grid-cols-[1fr_auto] sm:items-center"
+              >
+                <div className="min-w-0">
+                  <p className="truncate font-bold text-[#123252]">
+                    {customer?.name ?? event.title.replace(/^Retorno:\s*/u, "")}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {seller?.name ?? "Vendedor não identificado"} · WhatsApp ou telefone
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 sm:justify-end">
+                  <span className={`rounded-full px-3 py-1.5 text-xs font-bold ${
+                    overdue
+                      ? "bg-red-100 text-red-700"
+                      : event.date === crmReferenceDate
+                        ? "bg-amber-100 text-amber-800"
+                        : "bg-cyan-50 text-cyan-800"
+                  }`}>
+                    {overdue
+                      ? `Atrasado desde ${formatContactDate(event.date)}`
+                      : event.date === crmReferenceDate
+                        ? `Hoje, ${event.time}`
+                        : `${formatContactDate(event.date)}, ${event.time}`}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+          {!visibleFollowUps.length && (
+            <div className="bg-[#f8fbff] px-4 py-8 text-center text-sm text-slate-500">
+              Nenhum retorno nesta faixa.
+            </div>
+          )}
+        </div>
+      </Panel>
       <Panel title="Semana atual" icon={CalendarDays} action="Agenda operacional">
         <div className="grid gap-3 lg:grid-cols-5">
           {days.map(([day, date]) => (
@@ -7041,7 +7800,17 @@ function PaginationControls({
   );
 }
 
-function PageTitle({ eyebrow, title, description }: { eyebrow: string; title: string; description: string }) {
+function PageTitle({
+  eyebrow,
+  title,
+  description,
+  action,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+  action?: ReactNode;
+}) {
   return (
     <div className="flex flex-col justify-between gap-3 rounded-xl border border-blue-100 bg-white/72 px-4 py-3 shadow-sm backdrop-blur sm:flex-row sm:items-center">
       <div className="min-w-0">
@@ -7049,10 +7818,12 @@ function PageTitle({ eyebrow, title, description }: { eyebrow: string; title: st
         <h1 className="mt-1 break-words text-2xl font-bold tracking-tight text-[#123252] sm:text-3xl">{title}</h1>
         <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">{description}</p>
       </div>
-      <div className="flex w-fit max-w-full items-center gap-2 rounded-lg border border-blue-100 bg-[#f5faff] px-3 py-2 text-sm font-medium text-[#0753a6]">
-        <Activity size={16} className="text-cyan-600" />
-        Dados sincronizados
-      </div>
+      {action ?? (
+        <div className="flex w-fit max-w-full items-center gap-2 rounded-lg border border-blue-100 bg-[#f5faff] px-3 py-2 text-sm font-medium text-[#0753a6]">
+          <Activity size={16} className="text-cyan-600" />
+          Dados sincronizados
+        </div>
+      )}
     </div>
   );
 }
@@ -7069,7 +7840,7 @@ function Panel({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-xl border border-blue-100 bg-white p-4 shadow-[0_6px_18px_rgba(30,83,135,0.07)] sm:p-5">
+    <section className="min-w-0 rounded-xl border border-blue-100 bg-white p-4 shadow-[0_6px_18px_rgba(30,83,135,0.07)] sm:p-5">
       <div className="mb-4 flex flex-col gap-3 border-b border-blue-50 pb-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center gap-3">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#e7f4ff] text-[#0753a6]">
@@ -7374,7 +8145,7 @@ function ContactOutcomeModal({
   const [note, setNote] = useState("");
   const [nextContact, setNextContact] = useState("");
   const [channel, setChannel] = useState<ContactChannel>("WhatsApp");
-  const [responsible, setResponsible] = useState(defaultResponsible);
+  const [responsible] = useState(defaultResponsible);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -7469,11 +8240,34 @@ function ContactOutcomeModal({
             <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Responsável</span>
             <input
               value={responsible}
-              onChange={(event) => setResponsible(event.target.value)}
+              readOnly
               required
-              className="mt-2 h-11 w-full rounded-lg border border-blue-100 bg-[#f8fbff] px-3 text-sm outline-none focus:border-cyan-400"
+              className="mt-2 h-11 w-full cursor-not-allowed rounded-lg border border-blue-100 bg-slate-100 px-3 text-sm text-slate-600 outline-none"
             />
           </label>
+        </div>
+
+        <div className="mt-4">
+          <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Atalhos de retorno</span>
+          <div className="mt-2 grid grid-cols-5 gap-2">
+            {[5, 7, 10, 15, 20].map((days) => {
+              const date = addIsoDays(crmReferenceDate, days);
+              return (
+                <button
+                  key={days}
+                  type="button"
+                  onClick={() => setNextContact(date)}
+                  className={`h-10 rounded-lg border text-xs font-bold transition ${
+                    nextContact === date
+                      ? "border-[#0753a6] bg-[#0753a6] text-white"
+                      : "border-blue-100 bg-[#f8fbff] text-[#0753a6] hover:border-cyan-400 hover:bg-cyan-50"
+                  }`}
+                >
+                  +{days} dias
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         <label className="mt-4 block">
@@ -7483,10 +8277,11 @@ function ContactOutcomeModal({
             value={nextContact}
             onChange={(event) => setNextContact(event.target.value)}
             required={outcome === "follow_up"}
+            min={crmReferenceDate}
             className="mt-2 h-11 w-full rounded-lg border border-blue-100 bg-[#f8fbff] px-3 text-sm outline-none focus:border-cyan-400"
           />
           <span className="mt-1 block text-xs text-slate-400">
-            Obrigatório quando o cliente pedir contato em outro momento.
+            Obrigatório quando o cliente pedir contato em outro momento; opcional para tentativas sem resposta.
           </span>
         </label>
 
@@ -7614,12 +8409,20 @@ function buildRepurchaseTrendForSales(scopedSales: SaleRow[]) {
     ["06", "Jun"],
   ] as const;
 
+  const saleCountByCustomer = new Map<string, number>();
+  for (const sale of scopedSales) {
+    saleCountByCustomer.set(
+      sale.customerId,
+      (saleCountByCustomer.get(sale.customerId) ?? 0) + 1,
+    );
+  }
+
   return months.map(([month, label]) => {
     const monthSales = scopedSales.filter((sale) => sale.soldAt.slice(5, 7) === month);
     const recurringCustomers = new Set(
       monthSales
         .map((sale) => sale.customerId)
-        .filter((customerId) => scopedSales.filter((sale) => sale.customerId === customerId).length > 1),
+        .filter((customerId) => (saleCountByCustomer.get(customerId) ?? 0) > 1),
     );
 
     return {

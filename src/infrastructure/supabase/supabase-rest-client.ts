@@ -2,6 +2,9 @@ import "server-only";
 
 type QueryValue = string | number | boolean;
 
+const DEFAULT_PAGE_SIZE = 1000;
+const MAX_PARALLEL_PAGE_REQUESTS = 6;
+
 export class SupabaseRestClient {
   constructor(
     private readonly baseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -23,15 +26,44 @@ export class SupabaseRestClient {
       return this.request<T[]>(table, { query });
     }
 
-    const pageSize = 1000;
-    const rows: T[] = [];
-    for (let offset = 0; ; offset += pageSize) {
-      const page = await this.request<T[]>(table, {
-        query: { ...query, limit: pageSize, offset },
-      });
-      rows.push(...page);
-      if (page.length < pageSize) return rows;
+    const firstPage = await this.requestWithMetadata<T[]>(table, {
+      query: { ...query, limit: DEFAULT_PAGE_SIZE, offset: 0 },
+      prefer: "count=exact",
+    });
+    const totalRows = readContentRangeTotal(firstPage.headers.get("content-range"));
+
+    if (totalRows === undefined) {
+      const rows = [...firstPage.data];
+      for (let offset = DEFAULT_PAGE_SIZE; firstPage.data.length === DEFAULT_PAGE_SIZE; offset += DEFAULT_PAGE_SIZE) {
+        const page = await this.request<T[]>(table, {
+          query: { ...query, limit: DEFAULT_PAGE_SIZE, offset },
+        });
+        rows.push(...page);
+        if (page.length < DEFAULT_PAGE_SIZE) break;
+      }
+      return rows;
     }
+
+    const offsets = Array.from(
+      { length: Math.max(0, Math.ceil(totalRows / DEFAULT_PAGE_SIZE) - 1) },
+      (_, index) => (index + 1) * DEFAULT_PAGE_SIZE,
+    );
+    const pages: T[][] = [];
+
+    for (let index = 0; index < offsets.length; index += MAX_PARALLEL_PAGE_REQUESTS) {
+      const batch = offsets.slice(index, index + MAX_PARALLEL_PAGE_REQUESTS);
+      pages.push(
+        ...(await Promise.all(
+          batch.map((offset) =>
+            this.request<T[]>(table, {
+              query: { ...query, limit: DEFAULT_PAGE_SIZE, offset },
+            }),
+          ),
+        )),
+      );
+    }
+
+    return [firstPage.data, ...pages].flat();
   }
 
   async insert<T>(table: string, rows: unknown[], returnRepresentation = true): Promise<T[]> {
@@ -74,6 +106,27 @@ export class SupabaseRestClient {
     });
   }
 
+  async deleteMany(
+    table: string,
+    column: string,
+    values: Array<string | number>,
+  ): Promise<void> {
+    const batchSize = 100;
+    const batches = Array.from(
+      { length: Math.ceil(values.length / batchSize) },
+      (_, index) => values.slice(index * batchSize, (index + 1) * batchSize),
+    );
+    await Promise.all(
+      batches.map((batch) =>
+        this.request<unknown[]>(table, {
+          method: "DELETE",
+          query: { [column]: `in.(${batch.join(",")})` },
+          prefer: "return=minimal",
+        }),
+      ),
+    );
+  }
+
   private async request<T>(
     table: string,
     options: {
@@ -83,6 +136,18 @@ export class SupabaseRestClient {
       prefer?: string;
     } = {},
   ): Promise<T> {
+    return (await this.requestWithMetadata<T>(table, options)).data;
+  }
+
+  private async requestWithMetadata<T>(
+    table: string,
+    options: {
+      method?: "GET" | "POST" | "PATCH" | "DELETE";
+      query?: Record<string, QueryValue>;
+      body?: unknown;
+      prefer?: string;
+    } = {},
+  ): Promise<{ data: T; headers: Headers }> {
     const url = new URL(`/rest/v1/${table}`, this.baseUrl);
     for (const [key, value] of Object.entries(options.query ?? {})) {
       url.searchParams.set(key, String(value));
@@ -107,9 +172,18 @@ export class SupabaseRestClient {
       throw new Error(`Supabase ${response.status}: ${detail}`);
     }
 
-    if (response.status === 204 || responseText.length === 0) return [] as T;
-    return JSON.parse(responseText) as T;
+    if (response.status === 204 || responseText.length === 0) {
+      return { data: [] as T, headers: response.headers };
+    }
+    return { data: JSON.parse(responseText) as T, headers: response.headers };
   }
+}
+
+function readContentRangeTotal(contentRange: string | null) {
+  const total = contentRange?.match(/\/(\d+)$/)?.[1];
+  if (!total) return undefined;
+  const parsed = Number.parseInt(total, 10);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function isJwt(value?: string) {

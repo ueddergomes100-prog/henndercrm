@@ -271,12 +271,20 @@ function buildRepurchaseTrend(snapshot: CrmSnapshot) {
     ["06", "Jun"],
   ] as const;
 
+  const saleCountByCustomer = new Map<string, number>();
+  for (const sale of snapshot.sales) {
+    saleCountByCustomer.set(
+      sale.customerId,
+      (saleCountByCustomer.get(sale.customerId) ?? 0) + 1,
+    );
+  }
+
   return months.map(([month, label]) => {
     const sales = snapshot.sales.filter((sale) => sale.soldAt.slice(5, 7) === month);
     const recurringCustomers = new Set(
       sales
         .map((sale) => sale.customerId)
-        .filter((customerId) => snapshot.sales.filter((sale) => sale.customerId === customerId).length > 1),
+        .filter((customerId) => (saleCountByCustomer.get(customerId) ?? 0) > 1),
     );
     return {
       mes: label,

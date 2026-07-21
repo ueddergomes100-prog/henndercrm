@@ -1,14 +1,33 @@
 import { cookies } from "next/headers";
-import type { CrmCustomer, CrmDashboard, CrmSessionUser, CrmSnapshot } from "@/domain/crm/types";
+import type {
+  CrmCustomer,
+  CrmDashboard,
+  CrmDashboardInsights,
+  CrmSessionUser,
+  CrmSnapshot,
+} from "@/domain/crm/types";
 import { CRM_SESSION_COOKIE, readSessionToken } from "@/lib/crm-auth";
-import { getCachedCrmSnapshot } from "@/lib/crm-snapshot-cache";
+import {
+  getCachedCrmDashboardSnapshot,
+  getCachedCrmSnapshot,
+  invalidateCrmSnapshotCache,
+} from "@/lib/crm-snapshot-cache";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const user = await requireUser();
     if (user instanceof Response) return user;
-    const snapshot = await getCachedCrmSnapshot();
-    return Response.json(scopeSnapshotForUser(snapshot, user));
+    if (new URL(request.url).searchParams.get("refresh") === "1") {
+      invalidateCrmSnapshotCache();
+    }
+    const dashboardOnly = new URL(request.url).searchParams.get("mode") === "dashboard";
+    const snapshot = dashboardOnly
+      ? await getCachedCrmDashboardSnapshot()
+      : await getCachedCrmSnapshot();
+    const scopedSnapshot = scopeSnapshotForUser(snapshot, user);
+    return Response.json(
+      dashboardOnly ? createDashboardResponse(scopedSnapshot) : scopedSnapshot,
+    );
   } catch (error) {
     return Response.json(
       {
@@ -20,6 +39,72 @@ export async function GET() {
       { status: 500 },
     );
   }
+}
+
+function createDashboardResponse(snapshot: CrmSnapshot): CrmSnapshot {
+  return {
+    ...snapshot,
+    sales: [],
+    saleItems: [],
+    opportunities: [],
+    dashboardInsights: buildDashboardInsights(snapshot),
+  };
+}
+
+function buildDashboardInsights(snapshot: CrmSnapshot): CrmDashboardInsights {
+  const months = [
+    ["01", "Jan"],
+    ["02", "Fev"],
+    ["03", "Mar"],
+    ["04", "Abr"],
+    ["05", "Mai"],
+    ["06", "Jun"],
+  ] as const;
+  const saleCountByCustomer = new Map<string, number>();
+  for (const sale of snapshot.sales) {
+    saleCountByCustomer.set(
+      sale.customerId,
+      (saleCountByCustomer.get(sale.customerId) ?? 0) + 1,
+    );
+  }
+  const repurchaseTrend = months.map(([month, label]) => {
+    const monthSales = snapshot.sales.filter((sale) => sale.soldAt.slice(5, 7) === month);
+    const recurringCustomers = new Set(
+      monthSales
+        .map((sale) => sale.customerId)
+        .filter((customerId) => (saleCountByCustomer.get(customerId) ?? 0) > 1),
+    );
+    return {
+      mes: label,
+      recompra: monthSales.length,
+      recuperados: recurringCustomers.size,
+    };
+  });
+  const productsById = new Map(snapshot.products.map((product) => [product.id, product]));
+  const categoryTotals = new Map<string, number>();
+
+  for (const item of snapshot.saleItems) {
+    const department = item.productId
+      ? productsById.get(item.productId)?.department || "Outros"
+      : "Outros";
+    categoryTotals.set(
+      department,
+      (categoryTotals.get(department) ?? 0) + item.estimatedValue,
+    );
+  }
+
+  const colors = ["#16a34a", "#0f766e", "#f59e0b", "#2563eb"];
+  const grandTotal = [...categoryTotals.values()].reduce((total, value) => total + value, 0) || 1;
+  const categoryData = [...categoryTotals.entries()]
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, 4)
+    .map(([name, value], index) => ({
+      name,
+      value: Math.round((value / grandTotal) * 100),
+      color: colors[index],
+    }));
+
+  return { repurchaseTrend, categoryData };
 }
 
 async function requireUser(): Promise<CrmSessionUser | Response> {

@@ -6,6 +6,7 @@ import path from "node:path";
 import type {
   CrmAgendaEvent,
   CrmContactRecord,
+  CrmContactSaveResult,
   CrmOpportunity,
   CrmRepurchaseAlert,
   CrmWorkspace,
@@ -39,7 +40,7 @@ export class CrmWorkspaceRepository implements ICrmWorkspaceRepository {
 
   async createContact(
     input: Omit<CrmContactRecord, "id">,
-  ): Promise<CrmContactRecord> {
+  ): Promise<CrmContactSaveResult> {
     const workspace = await this.getWorkspace();
     const record = {
       ...input,
@@ -52,8 +53,42 @@ export class CrmWorkspaceRepository implements ICrmWorkspaceRepository {
         ) + 1,
     };
     workspace.contacts.unshift(record);
+
+    const automaticContact = isAutomaticContactNote(input.note);
+    const existingFollowUps = workspace.agenda.filter(
+      (event) =>
+        Boolean(event.contactId) &&
+        event.customerId === input.customerId &&
+        (!input.sellerId || event.sellerId === input.sellerId),
+    );
+    const removedFollowUpIds = automaticContact
+      ? []
+      : existingFollowUps.map((event) => event.id);
+    let followUp: CrmAgendaEvent | undefined;
+
+    if (!automaticContact) {
+      workspace.agenda = workspace.agenda.filter(
+        (event) => !removedFollowUpIds.includes(event.id),
+      );
+      if (input.nextContact) {
+        followUp = {
+          id: existingFollowUps[0]?.id ?? randomUUID(),
+          date: input.nextContact,
+          time: "09:00",
+          title: `Retorno: ${input.customerName}`,
+          type: "Retorno",
+          customerId: input.customerId,
+          sellerId: input.sellerId,
+          completed: false,
+          note: followUpNote(String(record.id)),
+          contactId: String(record.id),
+        };
+        workspace.agenda.push(followUp);
+      }
+    }
+
     await this.save(workspace);
-    return record;
+    return { contact: record, followUp, removedFollowUpIds };
   }
 
   async createManualCustomer(input: ManualCustomerInput): Promise<ManualCustomerResult> {
@@ -195,3 +230,11 @@ function normalizeWorkspace(value: Partial<CrmWorkspace>): CrmWorkspace {
 }
 
 export const crmWorkspaceRepository = new CrmWorkspaceRepository();
+
+function isAutomaticContactNote(note: string) {
+  return note.trim().toLowerCase().startsWith("registro autom");
+}
+
+function followUpNote(contactId: string) {
+  return `crm_follow_up_contact:${contactId}`;
+}

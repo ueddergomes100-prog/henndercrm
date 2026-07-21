@@ -133,6 +133,14 @@ export function AppInlineLoading({ label = "Carregando conteúdo" }: { label?: s
   );
 }
 
+export function AppLoadingMark({ active }: { active: boolean }) {
+  return (
+    <span className="app-loading-mark" aria-hidden="true">
+      <AppLoadingAnimation active={active} icon />
+    </span>
+  );
+}
+
 function GlobalLoadingOverlay({
   visible,
   activeCount,
@@ -160,9 +168,11 @@ function GlobalLoadingOverlay({
 function AppLoadingAnimation({
   active,
   compact = false,
+  icon = false,
 }: {
   active: boolean;
   compact?: boolean;
+  icon?: boolean;
 }) {
   const reduceMotion = useReducedMotion();
   const [playerFailed, setPlayerFailed] = useState(false);
@@ -273,7 +283,9 @@ function AppLoadingAnimation({
   const showFallback = Boolean(reduceMotion || playerFailed);
 
   return (
-    <div className={`app-loading-animation ${compact ? "app-loading-animation--compact" : ""}`}>
+    <div
+      className={`app-loading-animation ${compact ? "app-loading-animation--compact" : ""} ${icon ? "app-loading-animation--icon" : ""}`}
+    >
       <canvas
         ref={canvasRef}
         className={showFallback ? "hidden" : "h-full w-full"}
