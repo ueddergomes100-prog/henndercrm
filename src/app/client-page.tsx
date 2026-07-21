@@ -188,6 +188,20 @@ type CrmNotification = {
   tone: "red" | "amber" | "cyan" | "emerald";
   customerId?: string;
   view?: View;
+  source?: "local" | "remote";
+};
+type NotificationApiResponse = {
+  notifications?: CrmNotification[];
+  process?: {
+    ok: boolean;
+    schemaReady: boolean;
+    error?: string;
+  };
+  push?: {
+    configured: boolean;
+    publicKey: string;
+  };
+  error?: string;
 };
 type SyncLogResponse = {
   date: string;
@@ -385,6 +399,11 @@ export default function Home() {
   const [customerContactUpdates, setCustomerContactUpdates] = useState<Record<string, CustomerContactUpdate>>({});
   const [quickAction, setQuickAction] = useState<QuickAction | null>(null);
   const [dismissedNotificationIds, setDismissedNotificationIds] = useState<string[]>([]);
+  const [remoteNotifications, setRemoteNotifications] = useState<CrmNotification[]>([]);
+  const [notificationSchemaReady, setNotificationSchemaReady] = useState(true);
+  const [notificationError, setNotificationError] = useState("");
+  const [pushStatus, setPushStatus] = useState<"idle" | "activating" | "active" | "blocked" | "unsupported">("idle");
+  const [pushTestStatus, setPushTestStatus] = useState("");
   const [resultsRefreshing, setResultsRefreshing] = useState(false);
   const [resultsUpdatedAt, setResultsUpdatedAt] = useState<string | null>(null);
   const [resultsRefreshError, setResultsRefreshError] = useState("");
@@ -531,6 +550,65 @@ export default function Home() {
       });
   }, [snapshotChecking, user]);
 
+  useEffect(() => {
+    if (!user || snapshotChecking) return;
+    let active = true;
+
+    async function loadNotifications() {
+      try {
+        const response = await fetch("/api/crm/notifications", { cache: "no-store" });
+        const result = (await response.json()) as NotificationApiResponse;
+        if (!active) return;
+        if (!response.ok) throw new Error(result.error ?? "Nao foi possivel carregar notificacoes.");
+
+        setRemoteNotifications(
+          (result.notifications ?? []).map((notification) => ({
+            ...notification,
+            source: "remote" as const,
+          })),
+        );
+        setNotificationSchemaReady(result.process?.schemaReady ?? true);
+        setNotificationError(result.process?.error ?? "");
+      } catch (error) {
+        if (!active) return;
+        setRemoteNotifications([]);
+        setNotificationError(error instanceof Error ? error.message : "Nao foi possivel carregar notificacoes.");
+      }
+    }
+
+    void loadNotifications();
+    const timer = window.setInterval(loadNotifications, 60_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [snapshotChecking, user]);
+
+  useEffect(() => {
+    if (!user) return;
+    if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) {
+      queueMicrotask(() => setPushStatus("unsupported"));
+      return;
+    }
+    if (Notification.permission === "denied") {
+      queueMicrotask(() => setPushStatus("blocked"));
+      return;
+    }
+    if (Notification.permission !== "granted") return;
+
+    let active = true;
+    navigator.serviceWorker.ready
+      .then((registration) => registration.pushManager.getSubscription())
+      .then((subscription) => {
+        if (active && subscription) setPushStatus("active");
+      })
+      .catch(() => undefined);
+
+    return () => {
+      active = false;
+    };
+  }, [user]);
+
   async function refreshResultsData() {
     if (!user || resultsRefreshing) return;
     setResultsRefreshing(true);
@@ -637,9 +715,11 @@ export default function Home() {
   const visibleView = canAccessView(user, activeView) ? activeView : "dashboard";
   const fullDataViewLoading = visibleView !== "dashboard" && !fullSnapshotReady;
   const notificationContacts = filterNotificationContactRecordsForUser(user, appContactRecords);
-  const generatedNotifications = buildTopbarNotifications(appCustomers, appAlerts, notificationContacts, scopedData.agenda);
+  const generatedNotifications = buildTopbarNotifications(appCustomers, appAlerts, notificationContacts, scopedData.agenda)
+    .map((notification) => ({ ...notification, source: "local" as const }));
   const dismissedNotifications = new Set(dismissedNotificationIds);
-  const notifications = generatedNotifications.filter((notification) => !dismissedNotifications.has(notification.id));
+  const notifications = mergeNotifications(remoteNotifications, generatedNotifications)
+    .filter((notification) => !dismissedNotifications.has(notification.id));
 
   if (!safeSelectedCustomer) {
     if (snapshotChecking) {
@@ -854,11 +934,89 @@ export default function Home() {
     localStorage.removeItem("agrocrm-theme");
   };
 
-  const clearNotifications = () => {
+  const clearNotifications = async () => {
     if (!notifications.length) return;
     const nextDismissed = [...new Set([...dismissedNotificationIds, ...notifications.map((notification) => notification.id)])];
     setDismissedNotificationIds(nextDismissed);
     localStorage.setItem(getNotificationStorageKey(user.id, crmReferenceDate), JSON.stringify(nextDismissed));
+    setRemoteNotifications([]);
+    try {
+      await fetch("/api/crm/notifications", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "clear_all" }),
+      });
+    } catch {
+      // Local dismissal keeps the CRM usable if the remote inbox is temporarily unavailable.
+    }
+  };
+
+  const enablePushNotifications = async () => {
+    if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) {
+      setPushStatus("unsupported");
+      return;
+    }
+
+    setPushStatus("activating");
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") {
+        setPushStatus("blocked");
+        return;
+      }
+
+      const keyResponse = await fetch("/api/crm/push-subscription", { cache: "no-store" });
+      const keyResult = (await keyResponse.json()) as { configured: boolean; publicKey: string; error?: string };
+      if (!keyResponse.ok || !keyResult.configured || !keyResult.publicKey) {
+        throw new Error(keyResult.error ?? "Push ainda nao configurado no servidor.");
+      }
+
+      const registration = await navigator.serviceWorker.ready;
+      const existing = await registration.pushManager.getSubscription();
+      const subscription =
+        existing ??
+        (await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(keyResult.publicKey),
+        }));
+
+      const response = await fetch("/api/crm/push-subscription", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(subscription.toJSON()),
+      });
+      if (!response.ok) {
+        const result = (await response.json()) as { error?: string };
+        throw new Error(result.error ?? "Nao foi possivel ativar push.");
+      }
+      setPushStatus("active");
+    } catch (error) {
+      setPushStatus("idle");
+      setNotificationError(error instanceof Error ? error.message : "Nao foi possivel ativar push.");
+    }
+  };
+
+  const sendTestNotificationToAllUsers = async () => {
+    setPushTestStatus("Enviando teste...");
+    try {
+      const response = await fetch("/api/crm/notifications", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "test_all" }),
+      });
+      const result = (await response.json()) as {
+        created?: { recipients: number };
+        push?: { sent: number; skipped: number };
+        error?: string;
+      };
+      if (!response.ok) throw new Error(result.error ?? "Nao foi possivel enviar o teste.");
+      setPushTestStatus(
+        `Teste criado para ${result.created?.recipients ?? 0} usuarios. Push entregue em ${result.push?.sent ?? 0} aparelho(s).`,
+      );
+      setTimeout(() => setPushTestStatus(""), 8_000);
+    } catch (error) {
+      setPushTestStatus(error instanceof Error ? error.message : "Falha ao enviar teste.");
+    }
   };
 
   return (
@@ -879,9 +1037,15 @@ export default function Home() {
             user={user}
             customers={appCustomers}
             notifications={notifications}
+            notificationSchemaReady={notificationSchemaReady}
+            notificationError={notificationError}
+            pushStatus={pushStatus}
+            pushTestStatus={pushTestStatus}
             onOpenCustomer={openProfile}
             onOpenView={(view) => setActiveView(view)}
             onClearNotifications={clearNotifications}
+            onEnablePush={enablePushNotifications}
+            onSendTestNotifications={sendTestNotificationToAllUsers}
             onQuickAction={setQuickAction}
             onLogout={() =>
               runWithLoading(
@@ -1345,6 +1509,26 @@ function readDismissedNotificationIds(userId: string, referenceDate: string) {
   }
 }
 
+function mergeNotifications(remote: CrmNotification[], local: CrmNotification[]) {
+  const seen = new Set<string>();
+  const merged: CrmNotification[] = [];
+
+  for (const notification of [...remote, ...local]) {
+    if (seen.has(notification.id)) continue;
+    seen.add(notification.id);
+    merged.push(notification);
+  }
+
+  return merged;
+}
+
+function urlBase64ToUint8Array(value: string) {
+  const padding = "=".repeat((4 - (value.length % 4)) % 4);
+  const base64 = `${value}${padding}`.replace(/-/g, "+").replace(/_/g, "/");
+  const raw = window.atob(base64);
+  return Uint8Array.from([...raw].map((char) => char.charCodeAt(0)));
+}
+
 function notificationToneClass(tone: CrmNotification["tone"]) {
   return {
     red: "bg-red-500",
@@ -1437,9 +1621,15 @@ function AuthenticatedLoadingShell({
             user={user}
             customers={[]}
             notifications={[]}
+            notificationSchemaReady={true}
+            notificationError=""
+            pushStatus="idle"
+            pushTestStatus=""
             onOpenCustomer={() => undefined}
             onOpenView={setActiveView}
             onClearNotifications={() => undefined}
+            onEnablePush={() => undefined}
+            onSendTestNotifications={() => undefined}
             onQuickAction={() => undefined}
             onLogout={onLogout}
           />
@@ -2229,9 +2419,15 @@ function Topbar({
   user,
   customers,
   notifications,
+  notificationSchemaReady,
+  notificationError,
+  pushStatus,
+  pushTestStatus,
   onOpenCustomer,
   onOpenView,
   onClearNotifications,
+  onEnablePush,
+  onSendTestNotifications,
   onQuickAction,
   onLogout,
 }: {
@@ -2241,9 +2437,15 @@ function Topbar({
   user: CrmSessionUser;
   customers: CustomerRow[];
   notifications: CrmNotification[];
+  notificationSchemaReady: boolean;
+  notificationError: string;
+  pushStatus: "idle" | "activating" | "active" | "blocked" | "unsupported";
+  pushTestStatus: string;
   onOpenCustomer: (customer: CustomerRow) => void;
   onOpenView: (view: View) => void;
-  onClearNotifications: () => void;
+  onClearNotifications: () => void | Promise<void>;
+  onEnablePush: () => void | Promise<void>;
+  onSendTestNotifications: () => void | Promise<void>;
   onQuickAction: (action: QuickAction) => void;
   onLogout: () => Promise<void>;
 }) {
@@ -2499,12 +2701,53 @@ function Topbar({
                   {notifications.length > 0 && (
                     <button
                       type="button"
-                      onClick={onClearNotifications}
+                      onClick={() => void onClearNotifications()}
                       className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border border-blue-100 bg-[#f8fbff] px-2 text-xs font-bold text-[#0753a6] transition hover:border-cyan-300 hover:bg-cyan-50"
                     >
                       <Trash2 size={13} />
                       Limpar
                     </button>
+                  )}
+                </div>
+                <div className="grid gap-2 border-y border-blue-50 px-3 py-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void onEnablePush()}
+                      disabled={pushStatus === "activating" || pushStatus === "active"}
+                      className="inline-flex h-8 items-center gap-1 rounded-lg border border-blue-100 bg-[#f8fbff] px-2 text-xs font-bold text-[#0753a6] transition hover:border-cyan-300 hover:bg-cyan-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <Bell size={13} />
+                      {pushStatus === "active"
+                        ? "Push ativo"
+                        : pushStatus === "activating"
+                          ? "Ativando..."
+                          : "Ativar push"}
+                    </button>
+                    {user.role === "administrador" && (
+                      <button
+                        type="button"
+                        onClick={() => void onSendTestNotifications()}
+                        className="inline-flex h-8 items-center gap-1 rounded-lg border border-blue-100 bg-[#f8fbff] px-2 text-xs font-bold text-[#0753a6] transition hover:border-cyan-300 hover:bg-cyan-50"
+                      >
+                        <Send size={13} />
+                        Testar todos
+                      </button>
+                    )}
+                  </div>
+                  {!notificationSchemaReady && (
+                    <p className="text-xs leading-5 text-amber-700">
+                      A estrutura persistente de notificacoes ainda precisa ser aplicada no Supabase.
+                    </p>
+                  )}
+                  {pushStatus === "blocked" && (
+                    <p className="text-xs leading-5 text-amber-700">Permissao bloqueada no navegador deste aparelho.</p>
+                  )}
+                  {pushStatus === "unsupported" && (
+                    <p className="text-xs leading-5 text-slate-500">Este navegador nao oferece Web Push para PWA.</p>
+                  )}
+                  {(pushTestStatus || notificationError) && (
+                    <p className="text-xs leading-5 text-slate-500">{pushTestStatus || notificationError}</p>
                   )}
                 </div>
                 {notifications.length ? (

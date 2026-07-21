@@ -1,4 +1,4 @@
-const CACHE_NAME = "hennder-crm-static-v3";
+const CACHE_NAME = "hennder-crm-static-v4";
 const STATIC_ASSETS = [
   "/manifest.webmanifest",
   "/apple-touch-icon.png",
@@ -51,6 +51,47 @@ self.addEventListener("fetch", (event) => {
   }
 });
 
+self.addEventListener("push", (event) => {
+  const payload = readPushPayload(event);
+  const title = payload.title || "Hennder CRM";
+  const options = {
+    body: payload.body || "Voce tem uma nova atividade comercial.",
+    icon: payload.icon || "/icons/hennder-icon-192.png",
+    badge: payload.badge || "/icons/hennder-icon-96.png",
+    data: payload.data || { url: "/" },
+    tag: payload.data?.notificationId || "hennder-crm",
+    renotify: false,
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const targetUrl = new URL(event.notification.data?.url || "/", self.location.origin);
+
+  event.waitUntil(
+    self.clients
+      .matchAll({ type: "window", includeUncontrolled: true })
+      .then((clients) => {
+        const existing = clients.find((client) => {
+          try {
+            return new URL(client.url).origin === targetUrl.origin;
+          } catch {
+            return false;
+          }
+        });
+
+        if (existing) {
+          existing.focus();
+          return existing.navigate(targetUrl.href);
+        }
+
+        return self.clients.openWindow(targetUrl.href);
+      }),
+  );
+});
+
 function isAppAsset(url) {
   return (
     url.pathname.startsWith("/icons/") ||
@@ -84,5 +125,14 @@ async function networkFirst(request) {
     const cached = await caches.match(request);
     if (cached) return cached;
     throw error;
+  }
+}
+
+function readPushPayload(event) {
+  if (!event.data) return {};
+  try {
+    return event.data.json();
+  } catch {
+    return { body: event.data.text() };
   }
 }
