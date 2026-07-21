@@ -76,6 +76,7 @@ export async function sendPendingPushNotifications(
       body: notification.descricao,
       icon: "/icons/hennder-icon-192.png",
       badge: "/icons/hennder-icon-96.png",
+      tag: notification.id,
       data: {
         notificationId: notification.id,
         customerId: notification.cliente_id,

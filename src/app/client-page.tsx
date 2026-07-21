@@ -404,6 +404,7 @@ export default function Home() {
   const [notificationError, setNotificationError] = useState("");
   const [pushStatus, setPushStatus] = useState<"idle" | "activating" | "active" | "blocked" | "unsupported">("idle");
   const [pushTestStatus, setPushTestStatus] = useState("");
+  const [devicePushTestStatus, setDevicePushTestStatus] = useState("");
   const [resultsRefreshing, setResultsRefreshing] = useState(false);
   const [resultsUpdatedAt, setResultsUpdatedAt] = useState<string | null>(null);
   const [resultsRefreshError, setResultsRefreshError] = useState("");
@@ -1019,6 +1020,42 @@ export default function Home() {
     }
   };
 
+  const sendDeviceNotificationTest = async () => {
+    setDevicePushTestStatus("Testando aparelho...");
+    try {
+      if (!("Notification" in window) || !("serviceWorker" in navigator)) {
+        setPushStatus("unsupported");
+        setDevicePushTestStatus("Este navegador nao suporta notificacoes do PWA.");
+        return;
+      }
+
+      const permission =
+        Notification.permission === "granted"
+          ? "granted"
+          : await Notification.requestPermission();
+      if (permission !== "granted") {
+        setPushStatus("blocked");
+        setDevicePushTestStatus("Permissao de notificacao nao foi liberada neste aparelho.");
+        return;
+      }
+
+      const registration = await navigator.serviceWorker.ready;
+      await registration.showNotification("Hennder CRM", {
+        body: "Teste local: esta notificacao deve aparecer na barra do celular.",
+        icon: "/icons/hennder-icon-192.png",
+        badge: "/icons/hennder-icon-96.png",
+        tag: `hennder-device-test-${Date.now()}`,
+        requireInteraction: true,
+        silent: false,
+        data: { url: "/" },
+      });
+      setDevicePushTestStatus("Teste enviado para a barra do aparelho.");
+      setTimeout(() => setDevicePushTestStatus(""), 8_000);
+    } catch (error) {
+      setDevicePushTestStatus(error instanceof Error ? error.message : "Falha ao testar este aparelho.");
+    }
+  };
+
   return (
     <main className="crm-app min-h-screen bg-[#eaf3fb] text-slate-950">
       <div className="flex min-h-screen">
@@ -1041,10 +1078,12 @@ export default function Home() {
             notificationError={notificationError}
             pushStatus={pushStatus}
             pushTestStatus={pushTestStatus}
+            devicePushTestStatus={devicePushTestStatus}
             onOpenCustomer={openProfile}
             onOpenView={(view) => setActiveView(view)}
             onClearNotifications={clearNotifications}
             onEnablePush={enablePushNotifications}
+            onTestDevicePush={sendDeviceNotificationTest}
             onSendTestNotifications={sendTestNotificationToAllUsers}
             onQuickAction={setQuickAction}
             onLogout={() =>
@@ -1625,10 +1664,12 @@ function AuthenticatedLoadingShell({
             notificationError=""
             pushStatus="idle"
             pushTestStatus=""
+            devicePushTestStatus=""
             onOpenCustomer={() => undefined}
             onOpenView={setActiveView}
             onClearNotifications={() => undefined}
             onEnablePush={() => undefined}
+            onTestDevicePush={() => undefined}
             onSendTestNotifications={() => undefined}
             onQuickAction={() => undefined}
             onLogout={onLogout}
@@ -2423,10 +2464,12 @@ function Topbar({
   notificationError,
   pushStatus,
   pushTestStatus,
+  devicePushTestStatus,
   onOpenCustomer,
   onOpenView,
   onClearNotifications,
   onEnablePush,
+  onTestDevicePush,
   onSendTestNotifications,
   onQuickAction,
   onLogout,
@@ -2441,10 +2484,12 @@ function Topbar({
   notificationError: string;
   pushStatus: "idle" | "activating" | "active" | "blocked" | "unsupported";
   pushTestStatus: string;
+  devicePushTestStatus: string;
   onOpenCustomer: (customer: CustomerRow) => void;
   onOpenView: (view: View) => void;
   onClearNotifications: () => void | Promise<void>;
   onEnablePush: () => void | Promise<void>;
+  onTestDevicePush: () => void | Promise<void>;
   onSendTestNotifications: () => void | Promise<void>;
   onQuickAction: (action: QuickAction) => void;
   onLogout: () => Promise<void>;
@@ -2724,6 +2769,14 @@ function Topbar({
                           ? "Ativando..."
                           : "Ativar push"}
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => void onTestDevicePush()}
+                      className="inline-flex h-8 items-center gap-1 rounded-lg border border-blue-100 bg-[#f8fbff] px-2 text-xs font-bold text-[#0753a6] transition hover:border-cyan-300 hover:bg-cyan-50"
+                    >
+                      <Bell size={13} />
+                      Testar aparelho
+                    </button>
                     {user.role === "administrador" && (
                       <button
                         type="button"
@@ -2746,8 +2799,10 @@ function Topbar({
                   {pushStatus === "unsupported" && (
                     <p className="text-xs leading-5 text-slate-500">Este navegador nao oferece Web Push para PWA.</p>
                   )}
-                  {(pushTestStatus || notificationError) && (
-                    <p className="text-xs leading-5 text-slate-500">{pushTestStatus || notificationError}</p>
+                  {(devicePushTestStatus || pushTestStatus || notificationError) && (
+                    <p className="text-xs leading-5 text-slate-500">
+                      {devicePushTestStatus || pushTestStatus || notificationError}
+                    </p>
                   )}
                 </div>
                 {notifications.length ? (

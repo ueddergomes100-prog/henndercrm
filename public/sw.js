@@ -59,8 +59,12 @@ self.addEventListener("push", (event) => {
     icon: payload.icon || "/icons/hennder-icon-192.png",
     badge: payload.badge || "/icons/hennder-icon-96.png",
     data: payload.data || { url: "/" },
-    tag: payload.data?.notificationId || "hennder-crm",
-    renotify: false,
+    tag: payload.tag || payload.data?.notificationId || "hennder-crm",
+    renotify: true,
+    requireInteraction: true,
+    silent: false,
+    timestamp: Date.now(),
+    vibrate: [120, 80, 120],
   };
 
   event.waitUntil(self.registration.showNotification(title, options));
