@@ -660,6 +660,13 @@ export default function Home() {
     }
   }
 
+  function openView(view: View) {
+    setActiveView(view);
+    if (user && view === "resultados" && canAccessView(user, view)) {
+      void refreshResultsData();
+    }
+  }
+
   if (authChecking) {
     return <AppLoadingScreen label="Carregando sessão comercial" />;
   }
@@ -1061,7 +1068,7 @@ export default function Home() {
       <div className="flex min-h-screen">
         <Sidebar
           activeView={activeView}
-          setActiveView={setActiveView}
+          setActiveView={openView}
           mobileOpen={mobileOpen}
           setMobileOpen={setMobileOpen}
           user={user}
@@ -1080,7 +1087,7 @@ export default function Home() {
             pushTestStatus={pushTestStatus}
             devicePushTestStatus={devicePushTestStatus}
             onOpenCustomer={openProfile}
-            onOpenView={(view) => setActiveView(view)}
+            onOpenView={openView}
             onClearNotifications={clearNotifications}
             onEnablePush={enablePushNotifications}
             onTestDevicePush={sendDeviceNotificationTest}
@@ -1290,7 +1297,7 @@ export default function Home() {
         customers={appCustomers}
         products={scopedData.products}
         onClose={() => setQuickAction(null)}
-        onGoTo={(view) => setActiveView(view)}
+        onGoTo={openView}
         onCreateCustomer={createManualCustomer}
         onCreateAlert={async (alert) => {
           await createManualAlert(alert);
@@ -5267,14 +5274,13 @@ const recoveryFilters: Array<{ id: RecoveryFilter; label: string }> = [
 function matchesRecoveryFilter(
   customer: CustomerRow,
   filter: RecoveryFilter,
-  contactRecords: ContactRecord[],
+  contactedCustomerIds: Set<string>,
 ) {
+  if (filter === "todos") return true;
+  if (contactedCustomerIds.has(customer.id)) return false;
   if (filter === "30-60") return customer.days >= 30 && customer.days <= 60;
   if (filter === "60-90") return customer.days > 60 && customer.days <= 90;
   if (filter === "90-plus") return customer.days > 90;
-  if (filter === "sem-retorno") {
-    return !contactRecords.some((record) => record.customerId === customer.id);
-  }
   return true;
 }
 
@@ -5298,7 +5304,6 @@ function RecoveryCustomers({
   const [contactCustomer, setContactCustomer] = useState<CustomerRow | null>(null);
   const [activeFilter, setActiveFilter] = useState<RecoveryFilter>("todos");
   const [page, setPage] = useState(1);
-  const [contactHistoryPage, setContactHistoryPage] = useState(1);
   const inactiveCustomers = [...customers]
     .filter(
       (customer) =>
@@ -5306,8 +5311,9 @@ function RecoveryCustomers({
         !hasFutureFollowUp(customer.id, agenda, crmReferenceDate),
     )
     .sort((a, b) => b.days - a.days);
+  const contactedCustomerIds = new Set(contactRecords.map((record) => record.customerId));
   const filteredInactiveCustomers = inactiveCustomers.filter((customer) =>
-    matchesRecoveryFilter(customer, activeFilter, contactRecords),
+    matchesRecoveryFilter(customer, activeFilter, contactedCustomerIds),
   );
   const totalPages = Math.max(1, Math.ceil(filteredInactiveCustomers.length / LIST_PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
@@ -5315,14 +5321,8 @@ function RecoveryCustomers({
     (currentPage - 1) * LIST_PAGE_SIZE,
     currentPage * LIST_PAGE_SIZE,
   );
-  const contactHistoryTotalPages = Math.max(
-    1,
-    Math.ceil(contactRecords.length / LIST_PAGE_SIZE),
-  );
-  const currentContactHistoryPage = Math.min(contactHistoryPage, contactHistoryTotalPages);
-  const visibleContactHistory = contactRecords.slice(
-    (currentContactHistoryPage - 1) * LIST_PAGE_SIZE,
-    currentContactHistoryPage * LIST_PAGE_SIZE,
+  const pendingContactCustomers = inactiveCustomers.filter(
+    (customer) => !contactedCustomerIds.has(customer.id),
   );
 
   return (
@@ -5340,7 +5340,7 @@ function RecoveryCustomers({
           label="Casos acima de 90 dias"
           tone="red"
         />
-        <RecoveryMetric value={`${contactRecords.length}`} label="Contatos registrados" tone="blue" />
+        <RecoveryMetric value={`${pendingContactCustomers.length}`} label="Sem contato ainda" tone="blue" />
         <RecoveryMetric
           value={`${agenda.filter(isOpenAutomaticFollowUp).length}`}
           label="Retornos agendados"
@@ -5368,6 +5368,11 @@ function RecoveryCustomers({
             </button>
           ))}
         </div>
+        {activeFilter !== "todos" && (
+          <div className="mb-4 rounded-lg border border-blue-100 bg-blue-50/60 px-4 py-3 text-sm font-medium text-slate-700">
+            Este filtro mostra apenas clientes sem contato registrado, para o vendedor continuar a fila sem perder tempo.
+          </div>
+        )}
 
         <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
           {visibleInactiveCustomers.map((customer) => {
@@ -5454,38 +5459,6 @@ function RecoveryCustomers({
           totalItems={filteredInactiveCustomers.length}
           itemLabel="clientes"
           onPageChange={setPage}
-        />
-      </Panel>
-
-      <Panel title="Histórico de contatos" icon={MessageCircle} action={`${contactRecords.length} registros`}>
-        {contactRecords.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-blue-200 bg-[#f8fbff] px-4 py-8 text-center">
-            <p className="text-sm font-semibold text-slate-700">Nenhum contato registrado ainda</p>
-            <p className="mt-1 text-xs text-slate-500">Os resultados informados pela equipe aparecerão aqui.</p>
-          </div>
-        ) : (
-          <div className="grid gap-2">
-            {visibleContactHistory.map((record) => (
-              <div
-                key={record.id}
-                className="grid gap-2 rounded-lg border border-blue-100 bg-[#f8fbff] px-4 py-3 md:grid-cols-[1.2fr_1fr_0.8fr_1.5fr]"
-              >
-                <Metric label="Cliente" value={record.customerName} />
-                <Metric label="Resultado" value={contactOutcomeLabels[record.outcome]} />
-                <Metric label="Contato" value={record.contactedAt} />
-                <Metric
-                  label={record.nextContact ? "Próximo contato" : "Observação"}
-                  value={record.nextContact ? formatContactDate(record.nextContact) : record.note || "Sem observação"}
-                />
-              </div>
-            ))}
-          </div>
-        )}
-        <PaginationControls
-          page={currentContactHistoryPage}
-          totalItems={contactRecords.length}
-          itemLabel="contatos"
-          onPageChange={setContactHistoryPage}
         />
       </Panel>
 
