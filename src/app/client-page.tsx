@@ -2736,31 +2736,31 @@ function Topbar({
               <motion.div
                 initial={{ opacity: 0, y: -6, scale: 0.98 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
-                className="absolute right-0 top-12 z-40 w-80 overflow-hidden rounded-xl border border-blue-100 bg-white p-2 text-slate-900 shadow-2xl"
+                className="fixed left-3 right-3 top-[calc(4.5rem+env(safe-area-inset-top))] z-50 flex max-h-[calc(100dvh-5.25rem)] flex-col overflow-hidden rounded-2xl border border-blue-100 bg-white text-slate-900 shadow-2xl sm:absolute sm:left-auto sm:right-0 sm:top-12 sm:max-h-[calc(100dvh-5rem)] sm:w-[27rem]"
               >
-                <div className="flex items-start justify-between gap-3 px-3 py-2">
-                  <div>
+                <div className="flex shrink-0 items-start justify-between gap-3 border-b border-blue-50 px-4 py-3">
+                  <div className="min-w-0">
                     <p className="text-sm font-black text-[#123252]">Notificacoes comerciais</p>
-                    <p className="mt-1 text-xs text-slate-500">Resumo individual da sua carteira, atrasos e cadastros para revisar.</p>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">Carteira, retornos, agenda e avisos do CRM.</p>
                   </div>
                   {notifications.length > 0 && (
                     <button
                       type="button"
                       onClick={() => void onClearNotifications()}
-                      className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border border-blue-100 bg-[#f8fbff] px-2 text-xs font-bold text-[#0753a6] transition hover:border-cyan-300 hover:bg-cyan-50"
+                      className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border border-blue-100 bg-[#f8fbff] px-2.5 text-xs font-bold text-[#0753a6] transition hover:border-cyan-300 hover:bg-cyan-50"
                     >
                       <Trash2 size={13} />
                       Limpar
                     </button>
                   )}
                 </div>
-                <div className="grid gap-2 border-y border-blue-50 px-3 py-2">
-                  <div className="flex flex-wrap items-center gap-2">
+                <div className="grid shrink-0 gap-2 border-b border-blue-50 bg-[#f8fbff] px-4 py-3">
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                     <button
                       type="button"
                       onClick={() => void onEnablePush()}
                       disabled={pushStatus === "activating" || pushStatus === "active"}
-                      className="inline-flex h-8 items-center gap-1 rounded-lg border border-blue-100 bg-[#f8fbff] px-2 text-xs font-bold text-[#0753a6] transition hover:border-cyan-300 hover:bg-cyan-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="inline-flex h-9 items-center justify-center gap-1 rounded-lg border border-blue-100 bg-white px-2 text-xs font-bold text-[#0753a6] transition hover:border-cyan-300 hover:bg-cyan-50 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       <Bell size={13} />
                       {pushStatus === "active"
@@ -2772,16 +2772,16 @@ function Topbar({
                     <button
                       type="button"
                       onClick={() => void onTestDevicePush()}
-                      className="inline-flex h-8 items-center gap-1 rounded-lg border border-blue-100 bg-[#f8fbff] px-2 text-xs font-bold text-[#0753a6] transition hover:border-cyan-300 hover:bg-cyan-50"
+                      className="inline-flex h-9 items-center justify-center gap-1 rounded-lg border border-blue-100 bg-white px-2 text-xs font-bold text-[#0753a6] transition hover:border-cyan-300 hover:bg-cyan-50"
                     >
                       <Bell size={13} />
-                      Testar aparelho
+                      Testar local
                     </button>
                     {user.role === "administrador" && (
                       <button
                         type="button"
                         onClick={() => void onSendTestNotifications()}
-                        className="inline-flex h-8 items-center gap-1 rounded-lg border border-blue-100 bg-[#f8fbff] px-2 text-xs font-bold text-[#0753a6] transition hover:border-cyan-300 hover:bg-cyan-50"
+                        className="col-span-2 inline-flex h-9 items-center justify-center gap-1 rounded-lg border border-blue-100 bg-white px-2 text-xs font-bold text-[#0753a6] transition hover:border-cyan-300 hover:bg-cyan-50 sm:col-span-1"
                       >
                         <Send size={13} />
                         Testar todos
@@ -2806,13 +2806,13 @@ function Topbar({
                   )}
                 </div>
                 {notifications.length ? (
-                  <div className="max-h-96 space-y-1 overflow-y-auto pr-1">
+                  <div className="min-h-0 flex-1 space-y-1 overflow-y-auto px-2 py-2">
                     {notifications.slice(0, 8).map((notification) => (
                       <button
                         key={notification.id}
                         type="button"
                         onClick={() => openNotification(notification)}
-                        className="grid w-full gap-1 rounded-lg px-3 py-3 text-left transition hover:bg-cyan-50"
+                        className="grid w-full gap-1 rounded-xl px-3 py-3 text-left transition hover:bg-cyan-50"
                       >
                         <span className="flex items-center gap-2">
                           <span className={`h-2.5 w-2.5 rounded-full ${notificationToneClass(notification.tone)}`} />
@@ -2823,7 +2823,7 @@ function Topbar({
                     ))}
                   </div>
                 ) : (
-                  <p className="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-4 text-sm text-emerald-800">
+                  <p className="m-3 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-4 text-sm text-emerald-800">
                     Nada urgente agora. A rotina comercial esta em dia.
                   </p>
                 )}

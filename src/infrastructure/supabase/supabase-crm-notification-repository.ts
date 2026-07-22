@@ -240,6 +240,7 @@ export class SupabaseCrmNotificationRepository {
       }],
       "endpoint",
     );
+    await this.resetPushErrorsForUser(userId);
   }
 
   async disablePushSubscription(userId: string, endpoint: string) {
@@ -273,6 +274,27 @@ export class SupabaseCrmNotificationRepository {
       "crm_notificacao_destinatarios",
       { id: recipientId },
       { erro_push: error.slice(0, 300) },
+    );
+  }
+
+  async resetPushErrorsForUser(userId: string) {
+    const rows = await this.client.select<RecipientRow>("crm_notificacao_destinatarios", {
+      select:
+        "id,notificacao_id,usuario_id,vendedor_id,lida_em,limpa_em,enviada_push_em,erro_push,created_at",
+      usuario_id: `eq.${userId}`,
+      enviada_push_em: "is.null",
+      erro_push: "not.is.null",
+      limit: 100,
+    });
+
+    await Promise.all(
+      rows.map((row) =>
+        this.client.update<RecipientRow>(
+          "crm_notificacao_destinatarios",
+          { id: row.id },
+          { erro_push: null },
+        ),
+      ),
     );
   }
 

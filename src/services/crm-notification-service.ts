@@ -33,9 +33,10 @@ export type NotificationProcessResult = {
 
 export async function processCrmNotifications(
   repository = new SupabaseCrmNotificationRepository(),
+  options: { force?: boolean } = {},
 ): Promise<NotificationProcessResult> {
   const now = Date.now();
-  if (lastProcessResult && now - lastProcessAt < PROCESS_TTL_MS) return lastProcessResult;
+  if (!options.force && lastProcessResult && now - lastProcessAt < PROCESS_TTL_MS) return lastProcessResult;
   if (pendingProcess) return pendingProcess;
 
   pendingProcess = processCrmNotificationsNow(repository).finally(() => {

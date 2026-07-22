@@ -19,7 +19,8 @@
     "test": "node --test scripts/*.test.mjs",
     "sync:uniplus": "node scripts/hennder-sync.mjs --dry-run",
     "sync:uniplus:apply": "node scripts/hennder-sync.mjs --apply",
-    "sync:uniplus:auto": "node scripts/hennder-sync.mjs --since auto --apply"
+    "sync:uniplus:auto": "node scripts/hennder-sync.mjs --since auto --apply",
+    "notifications:dispatch": "node scripts/dispatch-crm-notifications.mjs"
   },
   "dependencies": {
     "@lottiefiles/dotlottie-web": "^0.78.0",

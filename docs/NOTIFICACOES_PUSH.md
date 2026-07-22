@@ -11,6 +11,7 @@ O CRM agora possui a base para notificacoes individuais por usuario:
 - Botao `Ativar push` no sino.
 - Botao administrativo `Testar todos`.
 - Processador de notificacoes operacionais com cache de 5 minutos.
+- Despachador server-side para enviar push mesmo com o PWA fechado.
 
 ## Notificacoes geradas
 
@@ -47,6 +48,9 @@ Configurar local e Hostinger:
 NEXT_PUBLIC_VAPID_PUBLIC_KEY=
 VAPID_PRIVATE_KEY=
 VAPID_SUBJECT=mailto:suporte@nexarcompany.com.br
+CRM_NOTIFICATIONS_DISPATCH_SECRET=
+CRM_PUBLIC_URL=https://gestao.nexarcompany.com.br
+CRM_NOTIFICATIONS_DISPATCH_INTERVAL_MS=300000
 ```
 
 As chaves locais foram geradas com:
@@ -61,11 +65,37 @@ node -e "console.log(require('web-push').generateVAPIDKeys())"
 2. Subir o sistema em producao ou rodar `npm run build` e `npm run start`.
 3. Entrar no CRM com cada usuario em seu celular.
 4. Abrir o sino e tocar em `Ativar push`.
-5. No usuario administrador, tocar em `Testar todos`.
-6. Confirmar:
+5. Tocar em `Testar local` para validar se o aparelho mostra notificacao na barra.
+6. No usuario administrador, tocar em `Testar todos`.
+7. Confirmar:
    - usuarios com push ativo recebem notificacao no aparelho;
    - todos os usuarios ativos enxergam o teste no sino;
    - limpar notificacoes limpa somente para o usuario logado.
+
+## Despacho com app fechado
+
+O sininho aparece quando o CRM abre, mas a barra do celular so recebe push quando
+o servidor executa o despacho. Em producao, o `server.js` agenda chamadas para:
+
+`/api/crm/notifications/dispatch`
+
+O agendamento roda a cada 5 minutos por padrao quando estas variaveis existem:
+
+- `CRM_NOTIFICATIONS_DISPATCH_SECRET`
+- `CRM_PUBLIC_URL`
+
+Tambem e possivel chamar manualmente:
+
+```bash
+npm run notifications:dispatch
+```
+
+ou configurar um cron externo chamando:
+
+```text
+POST https://gestao.nexarcompany.com.br/api/crm/notifications/dispatch
+Authorization: Bearer CRM_NOTIFICATIONS_DISPATCH_SECRET
+```
 
 ## Observacao iOS
 

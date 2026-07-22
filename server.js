@@ -17,6 +17,8 @@ if (existsSync(standaloneServer)) {
   startFallbackNextServer();
 }
 
+scheduleNotificationDispatch();
+
 function resolvePort() {
   const portFromEnv = Number(process.env.PORT);
   if (Number.isInteger(portFromEnv) && portFromEnv > 0) return portFromEnv;
@@ -52,4 +54,35 @@ function startFallbackNextServer() {
       console.error("Hennder CRM failed to start", error);
       process.exit(1);
     });
+}
+
+function scheduleNotificationDispatch() {
+  const secret = process.env.CRM_NOTIFICATIONS_DISPATCH_SECRET;
+  const publicUrl = process.env.CRM_PUBLIC_URL;
+  const intervalMs = Number(process.env.CRM_NOTIFICATIONS_DISPATCH_INTERVAL_MS ?? 5 * 60 * 1000);
+
+  if (!secret || !publicUrl || !Number.isFinite(intervalMs) || intervalMs <= 0) {
+    return;
+  }
+
+  const dispatch = async () => {
+    try {
+      const url = new URL("/api/crm/notifications/dispatch", publicUrl);
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { authorization: `Bearer ${secret}` },
+      });
+      if (!response.ok) {
+        console.warn(`Hennder CRM notification dispatch failed: ${response.status}`);
+      }
+    } catch (error) {
+      console.warn(
+        "Hennder CRM notification dispatch failed:",
+        error instanceof Error ? error.message : error,
+      );
+    }
+  };
+
+  setTimeout(dispatch, 30 * 1000);
+  setInterval(dispatch, intervalMs);
 }
