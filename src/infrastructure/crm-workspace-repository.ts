@@ -134,10 +134,32 @@ export class CrmWorkspaceRepository implements ICrmWorkspaceRepository {
   async updateCustomerContact(
     input: CustomerContactUpdateInput,
   ): Promise<CustomerContactUpdateResult> {
+    const workspace = await this.getWorkspace();
+    const invalidatedContactIds = input.retryWhatsApp
+      ? workspace.contacts
+          .filter(
+            (contact) =>
+              contact.customerId === input.customerId &&
+              contact.channel === "WhatsApp" &&
+              (!input.sellerId || contact.sellerId === input.sellerId) &&
+              contact.outcome !== "invalid_number" &&
+              isAutomaticContactNote(contact.note) &&
+              isToday(contact.contactedAt),
+          )
+          .slice(0, 1)
+          .map((contact) => {
+            contact.outcome = "invalid_number";
+            return String(contact.id);
+          })
+      : [];
+
+    if (invalidatedContactIds.length) await this.save(workspace);
+
     return {
       customerId: input.customerId,
       phone: input.phone.trim(),
       whatsapp: input.whatsapp.trim() || input.phone.trim(),
+      invalidatedContactIds,
     };
   }
 
@@ -233,6 +255,17 @@ export const crmWorkspaceRepository = new CrmWorkspaceRepository();
 
 function isAutomaticContactNote(note: string) {
   return note.trim().toLowerCase().startsWith("registro autom");
+}
+
+function isToday(value: string) {
+  const date = new Date(value);
+  const now = new Date();
+  return (
+    !Number.isNaN(date.getTime()) &&
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate()
+  );
 }
 
 function followUpNote(contactId: string) {

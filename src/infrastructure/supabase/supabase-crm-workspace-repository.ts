@@ -210,7 +210,7 @@ export class SupabaseCrmWorkspaceRepository implements ICrmWorkspaceRepository {
     const channel = toDatabaseChannel(input.channel);
     const automaticContact = isAutomaticContactNote(input.note);
     const existingAutomaticContact = automaticContact
-      ? await this.findAutomaticContactToday(customer.id, channel)
+      ? await this.findAutomaticContactToday(customer.id, channel, sellerId ?? undefined)
       : undefined;
 
     if (existingAutomaticContact) {
@@ -393,11 +393,29 @@ export class SupabaseCrmWorkspaceRepository implements ICrmWorkspaceRepository {
     const row = rows[0];
     if (!row) throw new Error("Cliente nao encontrado no Supabase.");
 
+    const invalidatedContactIds: string[] = [];
+    if (input.retryWhatsApp) {
+      const automaticContact = await this.findAutomaticContactToday(
+        row.id,
+        "whatsapp",
+        input.sellerId,
+      );
+      if (automaticContact) {
+        await this.client.update(
+          "crm_historico_contatos",
+          { id: automaticContact.id },
+          { resultado: "atualizar_cadastro" },
+        );
+        invalidatedContactIds.push(automaticContact.id);
+      }
+    }
+
     return {
       customerId: row.id,
       customerName: row.nome,
       phone: row.telefone ?? phone,
       whatsapp: row.whatsapp ?? row.celular ?? whatsapp,
+      invalidatedContactIds,
     };
   }
 
@@ -465,18 +483,27 @@ export class SupabaseCrmWorkspaceRepository implements ICrmWorkspaceRepository {
     await this.client.delete("crm_oportunidades", { id });
   }
 
-  private async findAutomaticContactToday(customerId: string, channel: string) {
+  private async findAutomaticContactToday(
+    customerId: string,
+    channel: string,
+    sellerId?: string,
+  ) {
     const rows = await this.client.select<ContactRow>("crm_historico_contatos", {
       select:
         "id,cliente_id,vendedor_id,tipo_contato,data_contato,resultado,observacao,proximo_contato,responsavel_nome",
       cliente_id: `eq.${customerId}`,
       tipo_contato: `eq.${channel}`,
+      ...(sellerId ? { vendedor_id: `eq.${sellerId}` } : {}),
       data_contato: `gte.${todayStartIso()}`,
       order: "data_contato.desc",
       limit: 25,
     });
 
-    return rows.find((row) => isAutomaticContactNote(row.observacao ?? ""));
+    return rows.find(
+      (row) =>
+        row.resultado !== "atualizar_cadastro" &&
+        isAutomaticContactNote(row.observacao ?? ""),
+    );
   }
 
   private async findOpenFollowUps(customerId: string, sellerId: string) {

@@ -132,7 +132,9 @@ export async function POST(request: Request) {
         );
       case "update_customer_contact":
         return changedResponse(
-          await repository.updateCustomerContact(command.contact),
+          await repository.updateCustomerContact(
+            await assignCustomerContactOwner(user, command.contact),
+          ),
         );
       case "update_alert":
         return changedResponse(
@@ -203,6 +205,18 @@ async function assignContactOwner(
     ...record,
     sellerId: seller?.id ?? record.sellerId,
     responsible: seller?.name ?? record.responsible,
+  };
+}
+
+async function assignCustomerContactOwner(
+  user: CrmSessionUser,
+  contact: CustomerContactUpdateInput,
+) {
+  if (user.role === "administrador") return contact;
+  const snapshot = await getCachedCrmSnapshot();
+  return {
+    ...contact,
+    sellerId: resolveSnapshotSellerId(user.sellerId ?? "", snapshot),
   };
 }
 

@@ -47,10 +47,16 @@ export type CustomerContactUpdateInput = {
   customerId: string;
   phone: string;
   whatsapp: string;
+  sellerId?: string;
+  retryWhatsApp?: boolean;
 };
 
-export type CustomerContactUpdateResult = CustomerContactUpdateInput & {
+export type CustomerContactUpdateResult = {
+  customerId: string;
+  phone: string;
+  whatsapp: string;
   customerName?: string;
+  invalidatedContactIds: string[];
 };
 
 export interface ICrmWorkspaceRepository {

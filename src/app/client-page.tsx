@@ -270,6 +270,10 @@ type CustomerContactUpdate = {
   phone: string;
   whatsapp: string;
   customerName?: string;
+  invalidatedContactIds?: string[];
+};
+type CustomerContactUpdateOptions = {
+  retryWhatsApp?: boolean;
 };
 
 const contactOutcomeLabels: Record<ContactOutcome, string> = {
@@ -995,11 +999,31 @@ export default function Home() {
     setOpportunityItems((current) => current.filter((item) => item.id !== id));
   };
 
-  const updateCustomerContact = async (customer: CustomerRow, rawPhone: string) => {
+  const updateCustomerContact = async (
+    customer: CustomerRow,
+    rawPhone: string,
+    options: CustomerContactUpdateOptions = {},
+  ) => {
     const normalized = normalizeBrazilianWhatsAppNumber(rawPhone);
     if (!normalized) {
       throw new Error("Informe um WhatsApp valido com DDD. Exemplo: (33) 99999-9999.");
     }
+
+    const contactSellerId = resolveContactSellerId(user, customer);
+    const localInvalidatedContactIds = options.retryWhatsApp
+      ? contactRecords
+          .filter(
+            (record) =>
+              record.customerId === customer.id &&
+              record.channel === "WhatsApp" &&
+              (!contactSellerId || record.sellerId === contactSellerId) &&
+              record.outcome !== "invalid_number" &&
+              isAutomaticContactRecord(record) &&
+              isContactFromToday(record.contactedAt),
+          )
+          .slice(0, 1)
+          .map((record) => String(record.id))
+      : [];
 
     const update: CustomerContactUpdate = customer.id.startsWith("manual-customer-")
       ? {
@@ -1007,6 +1031,7 @@ export default function Home() {
           customerName: customer.name,
           phone: rawPhone.trim(),
           whatsapp: rawPhone.trim(),
+          invalidatedContactIds: localInvalidatedContactIds,
         }
       : await mutateWorkspace<CustomerContactUpdate>({
           action: "update_customer_contact",
@@ -1014,8 +1039,22 @@ export default function Home() {
             customerId: customer.id,
             phone: rawPhone.trim(),
             whatsapp: rawPhone.trim(),
+            sellerId: contactSellerId,
+            retryWhatsApp: options.retryWhatsApp,
           },
         });
+
+    const invalidatedContactIds = new Set(update.invalidatedContactIds ?? []);
+    if (invalidatedContactIds.size) {
+      setContactRecords((current) =>
+        current.map((record) =>
+          invalidatedContactIds.has(String(record.id))
+            ? { ...record, outcome: "invalid_number" }
+            : record,
+        ),
+      );
+    }
+    if (options.retryWhatsApp) clearAutomaticContactIntent(customer.id);
 
     setCustomerContactUpdates((current) => ({
       ...current,
@@ -1576,7 +1615,11 @@ function buildTopbarNotifications(
   scopedContacts: ContactRecord[],
   scopedAgenda: CrmAgendaEvent[],
 ): CrmNotification[] {
-  const contactedCustomerIds = new Set(scopedContacts.map((record) => record.customerId));
+  const contactedCustomerIds = new Set(
+    scopedContacts
+      .filter((record) => record.outcome !== "invalid_number")
+      .map((record) => record.customerId),
+  );
   const pendingAlerts = scopedAlerts.filter((alert) => alert.status === "pendente");
   const overdueAlerts = pendingAlerts
     .filter((alert) => alert.recommendedIso < crmReferenceDate)
@@ -4268,7 +4311,11 @@ function CampaignsModule({
   alerts: AlertRow[];
   user: CrmSessionUser;
   openProfile: (customer: CustomerRow) => void;
-  onUpdateContact: (customer: CustomerRow, phone: string) => Promise<void>;
+  onUpdateContact: (
+    customer: CustomerRow,
+    phone: string,
+    options?: CustomerContactUpdateOptions,
+  ) => Promise<void>;
   onRegisterContact: (record: Omit<ContactRecord, "id">) => Promise<void>;
 }) {
   const campaignDefinitions = buildCampaignDefinitions(customers, alerts);
@@ -4396,21 +4443,29 @@ function buildCampaignDefinitions(customers: CustomerRow[], alerts: AlertRow[]) 
 }
 
 function RepurchaseEngineModule({ alerts, user }: { alerts: AlertRow[]; user: CrmSessionUser }) {
-  const activeProducts = snapshot.products.filter((product) => product.repurchaseActive);
-  const departments = [...new Set(activeProducts.map((product) => product.department || "Sem departamento"))];
-  const manualRules = alerts.filter((alert) => alert.origin === "manual");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
   const [daysByProduct, setDaysByProduct] = useState<Record<string, string>>({});
   const [savingProductId, setSavingProductId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
+  const configurableProducts = snapshot.products;
+  const configuredProductIds = new Set(
+    configurableProducts
+      .filter((product) => product.defaultRepurchaseDays)
+      .map((product) => product.id),
+  );
+  for (const [productId, value] of Object.entries(daysByProduct)) {
+    if (Number(value) > 0) configuredProductIds.add(productId);
+    else configuredProductIds.delete(productId);
+  }
+  const manualAlerts = alerts.filter((alert) => alert.origin === "manual");
   const canEditRules = user.role !== "vendedor";
 
-  async function saveProductRule(product: ProductRow, mode: "manual" | "auto") {
+  async function saveProductRule(product: ProductRow, remove = false) {
     if (!canEditRules) return;
     const rawDays = daysByProduct[product.id] ?? "";
     const manualDays = Number(rawDays);
-    if (mode === "manual" && (!Number.isFinite(manualDays) || manualDays <= 0)) {
+    if (!remove && (!Number.isFinite(manualDays) || manualDays <= 0)) {
       setMessage("Informe uma quantidade valida de dias.");
       return;
     }
@@ -4423,7 +4478,7 @@ function RepurchaseEngineModule({ alerts, user }: { alerts: AlertRow[]; user: Cr
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           id: product.id,
-          defaultRepurchaseDays: mode === "auto" ? null : Math.round(manualDays),
+          defaultRepurchaseDays: remove ? null : Math.round(manualDays),
         }),
       });
       const result = (await response.json()) as { defaultRepurchaseDays?: number | null; error?: string };
@@ -4432,7 +4487,7 @@ function RepurchaseEngineModule({ alerts, user }: { alerts: AlertRow[]; user: Cr
         ...current,
         [product.id]: result.defaultRepurchaseDays ? String(result.defaultRepurchaseDays) : "",
       }));
-      setMessage(mode === "auto" ? "Produto voltou para a regra automatica." : "Regra de recompra salva.");
+      setMessage(remove ? "Regra removida. Este produto nao gerara alertas." : "Regra manual de recompra salva.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Falha ao salvar regra.");
     } finally {
@@ -4440,7 +4495,7 @@ function RepurchaseEngineModule({ alerts, user }: { alerts: AlertRow[]; user: Cr
     }
   }
 
-  const filteredProducts = activeProducts.filter((product) => {
+  const filteredProducts = configurableProducts.filter((product) => {
     const normalized = query.trim().toLowerCase();
     return !normalized || product.name.toLowerCase().includes(normalized) || product.code.toLowerCase().includes(normalized);
   });
@@ -4453,11 +4508,11 @@ function RepurchaseEngineModule({ alerts, user }: { alerts: AlertRow[]; user: Cr
 
   return (
     <div className="space-y-5">
-      <PageTitle eyebrow="Sistema" title="Motor de Recompra" description="Configure dias de recompra por produto. Sem ajuste manual, o CRM usa a regra automatica por item e departamento." />
+      <PageTitle eyebrow="Sistema" title="Motor de Recompra" description="Defina manualmente o prazo exato de cada produto. Itens sem regra nao geram alertas." />
       <div className="grid gap-4 md:grid-cols-4">
-        <MetricCard label="Produtos recorrentes" value={String(activeProducts.length)} />
-        <MetricCard label="Regras manuais" value={String(activeProducts.filter((product) => product.defaultRepurchaseDays).length)} />
-        <MetricCard label="Departamentos" value={String(departments.length)} />
+        <MetricCard label="Produtos cadastrados" value={String(configurableProducts.length)} />
+        <MetricCard label="Regras configuradas" value={String(configuredProductIds.size)} />
+        <MetricCard label="Aguardando definicao" value={String(configurableProducts.length - configuredProductIds.size)} />
         <MetricCard label="Alertas gerados" value={String(alerts.length)} />
       </div>
       <div className="grid gap-5 xl:grid-cols-[1.25fr_0.75fr]">
@@ -4481,10 +4536,8 @@ function RepurchaseEngineModule({ alerts, user }: { alerts: AlertRow[]; user: Cr
           {message && <p className="mb-4 rounded-lg border border-cyan-100 bg-cyan-50 px-3 py-2 text-sm font-semibold text-cyan-800">{message}</p>}
           <div className="space-y-3">
             {visibleProducts.map((product) => {
-              const automaticDays = inferAutomaticRepurchaseDays(product);
               const configuredValue = daysByProduct[product.id] ?? (product.defaultRepurchaseDays ? String(product.defaultRepurchaseDays) : "");
               const configuredDays = configuredValue ? Number(configuredValue) : undefined;
-              const activeDays = configuredDays ?? automaticDays;
               const saving = savingProductId === product.id;
               return (
                 <div key={product.id} className="rounded-lg border border-blue-100 bg-[#f8fbff] p-3">
@@ -4492,7 +4545,9 @@ function RepurchaseEngineModule({ alerts, user }: { alerts: AlertRow[]; user: Cr
                     <div className="min-w-0">
                       <p className="truncate font-bold text-[#123252]">{product.name}</p>
                       <p className="mt-1 text-xs text-slate-500">{product.code || "Sem codigo"} ? {product.department || "Sem departamento"}</p>
-                      <p className="mt-1 text-xs font-semibold text-cyan-700">Em uso: {activeDays} dias ? {configuredDays ? "manual" : "automatico"}</p>
+                      <p className={`mt-1 text-xs font-semibold ${configuredDays ? "text-cyan-700" : "text-amber-700"}`}>
+                        {configuredDays ? `Regra ativa: ${configuredDays} dias` : "Aguardando definicao do gestor"}
+                      </p>
                     </div>
                     <label className="block">
                       <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Dias</span>
@@ -4502,37 +4557,37 @@ function RepurchaseEngineModule({ alerts, user }: { alerts: AlertRow[]; user: Cr
                         max={730}
                         value={configuredValue}
                         onChange={(event) => setDaysByProduct((current) => ({ ...current, [product.id]: event.target.value }))}
-                        placeholder={String(automaticDays)}
+                        placeholder="Definir"
                         disabled={!canEditRules}
                         className="mt-2 h-10 w-full rounded-lg border border-blue-100 bg-white px-3 text-sm outline-none focus:border-cyan-400 disabled:opacity-60"
                       />
                     </label>
                     <div className="rounded-lg border border-blue-100 bg-white px-3 py-2 text-xs text-slate-600">
-                      Fallback automatico: <span className="font-bold text-[#0753a6]">{automaticDays} dias</span>
+                      {configuredDays ? "Prazo definido manualmente" : "Sem regra, sem alerta"}
                     </div>
                     <div className="flex gap-2">
                       <button
                         type="button"
                         disabled={!canEditRules || saving}
-                        onClick={() => void saveProductRule(product, "manual")}
+                        onClick={() => void saveProductRule(product)}
                         className="h-10 rounded-lg bg-[#0753a6] px-3 text-xs font-bold text-white transition hover:bg-[#063d7c] disabled:opacity-55"
                       >
                         {saving ? "Salvando" : "Salvar"}
                       </button>
                       <button
                         type="button"
-                        disabled={!canEditRules || saving}
-                        onClick={() => void saveProductRule(product, "auto")}
+                        disabled={!canEditRules || saving || !configuredDays}
+                        onClick={() => void saveProductRule(product, true)}
                         className="h-10 rounded-lg border border-blue-100 px-3 text-xs font-bold text-slate-600 transition hover:bg-white disabled:opacity-55"
                       >
-                        Automatico
+                        Remover
                       </button>
                     </div>
                   </div>
                 </div>
               );
             })}
-            {!filteredProducts.length && <EmptyState text="Nenhum produto recorrente encontrado." />}
+            {!filteredProducts.length && <EmptyState text="Nenhum produto encontrado." />}
           </div>
           <PaginationControls
             page={currentPage}
@@ -4541,34 +4596,21 @@ function RepurchaseEngineModule({ alerts, user }: { alerts: AlertRow[]; user: Cr
             onPageChange={setPage}
           />
         </Panel>
-        <Panel title="Regras complementares" icon={Database}>
+        <Panel title="Como funciona" icon={Database}>
           <SimpleRows
             rows={[
-              ["Produto", "Prioridade para dias definidos manualmente", "Editavel"],
-              ["Palavra-chave", "racao, vermifugo, vacina", "Fallback"],
-              ["Departamento", departments.slice(0, 3).join(", ") || "Sem dados", "Fallback"],
-              ["Historico do cliente", "Media de recompra observada", "Fallback"],
-              ["Manual cliente/produto", String(manualRules.length) + " regra(s)", "Operacional"],
+              ["Regra obrigatoria", "Cada produto precisa de um prazo definido pelo gestor", "Manual"],
+              ["Produto sem prazo", "Nao gera alerta nem notificacao de recompra", "Inativo"],
+              ["Nova compra", "Reinicia a contagem usando a venda faturada mais recente", "Automatico"],
+              ["Janela de exibicao", "O alerta aparece quando faltam ate 15 dias", "Operacional"],
+              ["Alertas manuais", String(manualAlerts.length) + " alerta(s) cadastrado(s)", "Separado"],
             ]}
-            empty="Sem regras complementares."
+            empty="Sem informacoes para exibir."
           />
         </Panel>
       </div>
     </div>
   );
-}
-
-function inferAutomaticRepurchaseDays(product: ProductRow) {
-  const text = `${product.name} ${product.department}`
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .toLocaleUpperCase("pt-BR");
-  if (/(SACHE|PETISCO)/u.test(text)) return 20;
-  if (/(RACAO|AREIA HIGI)/u.test(text)) return 30;
-  if (/(VERM|ANTIPULG|CARRAP|VACINA)/u.test(text)) return 90;
-  if (text.includes("VETERINARIA")) return 90;
-  if (text.includes("AGRO")) return 60;
-  return 45;
 }
 
 function SyncModule() {
@@ -5248,7 +5290,11 @@ function Dashboard({
   insights?: CrmDashboardInsights;
   detailsLoading: boolean;
   user: CrmSessionUser;
-  onUpdateContact: (customer: CustomerRow, phone: string) => Promise<void>;
+  onUpdateContact: (
+    customer: CustomerRow,
+    phone: string,
+    options?: CustomerContactUpdateOptions,
+  ) => Promise<void>;
   onRegisterContact: (record: Omit<ContactRecord, "id">) => Promise<void>;
 }) {
   const chartColors = getChartColors(theme);
@@ -5517,9 +5563,15 @@ function RecoveryCustomers({
   agenda: CrmAgendaEvent[];
   onRegisterContact: (record: Omit<ContactRecord, "id">) => Promise<void>;
   user: CrmSessionUser;
-  onUpdateContact: (customer: CustomerRow, phone: string) => Promise<void>;
+  onUpdateContact: (
+    customer: CustomerRow,
+    phone: string,
+    options?: CustomerContactUpdateOptions,
+  ) => Promise<void>;
 }) {
   const [contactCustomer, setContactCustomer] = useState<CustomerRow | null>(null);
+  const [lastWhatsAppCustomer, setLastWhatsAppCustomer] = useState<CustomerRow | null>(null);
+  const [contactCorrectionCustomer, setContactCorrectionCustomer] = useState<CustomerRow | null>(null);
   const [activeFilter, setActiveFilter] = useState<RecoveryFilter>("todos");
   const [page, setPage] = useState(1);
   const inactiveCustomers = [...customers]
@@ -5529,7 +5581,11 @@ function RecoveryCustomers({
         !hasFutureFollowUp(customer.id, agenda, crmReferenceDate),
     )
     .sort((a, b) => b.days - a.days);
-  const contactedCustomerIds = new Set(contactRecords.map((record) => record.customerId));
+  const contactedCustomerIds = new Set(
+    contactRecords
+      .filter((record) => record.outcome !== "invalid_number")
+      .map((record) => record.customerId),
+  );
   const filteredInactiveCustomers = inactiveCustomers.filter((customer) =>
     matchesRecoveryFilter(customer, activeFilter, contactedCustomerIds),
   );
@@ -5592,6 +5648,41 @@ function RecoveryCustomers({
           </div>
         )}
 
+        {lastWhatsAppCustomer && (
+          <div className="mb-4 flex flex-col gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-start gap-3">
+              <MessageCircle className="mt-0.5 shrink-0 text-amber-700" size={18} />
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-slate-900">
+                  WhatsApp aberto para {lastWhatsAppCustomer.name}
+                </p>
+                <p className="mt-0.5 text-xs text-slate-600">
+                  Se o numero estiver errado, corrija aqui e o cliente volta para esta fila.
+                </p>
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setContactCorrectionCustomer(lastWhatsAppCustomer)}
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-amber-700 px-3 text-sm font-semibold text-white transition hover:bg-amber-800"
+              >
+                <Pencil size={15} />
+                Corrigir numero
+              </button>
+              <button
+                type="button"
+                onClick={() => setLastWhatsAppCustomer(null)}
+                aria-label="Fechar aviso da ultima tentativa"
+                title="Fechar"
+                className="flex h-10 w-10 items-center justify-center rounded-lg border border-amber-200 bg-white text-slate-600 transition hover:bg-amber-100"
+              >
+                <X size={17} />
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
           {visibleInactiveCustomers.map((customer) => {
             const latestContact = contactRecords.find((record) => record.customerId === customer.id);
@@ -5645,6 +5736,7 @@ function RecoveryCustomers({
                     message="Olá! Aqui é da Hennder CRM. Sentimos sua falta e gostaríamos de ajudar com sua próxima compra. Podemos conversar?"
                     onUpdateContact={onUpdateContact}
                     onRegisterContact={onRegisterContact}
+                    onContactIntent={setLastWhatsAppCustomer}
                   />
                 </div>
                 <div className="mt-2 grid grid-cols-2 gap-2">
@@ -5691,6 +5783,17 @@ function RecoveryCustomers({
           }}
         />
       )}
+      {contactCorrectionCustomer && (
+        <CustomerContactModal
+          customer={contactCorrectionCustomer}
+          onClose={() => setContactCorrectionCustomer(null)}
+          onSave={async (phone) => {
+            await onUpdateContact(contactCorrectionCustomer, phone, { retryWhatsApp: true });
+            setContactCorrectionCustomer(null);
+            setLastWhatsAppCustomer(null);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -5705,7 +5808,11 @@ function Customers({
   customers: CustomerRow[];
   openProfile: (customer: CustomerRow) => void;
   user: CrmSessionUser;
-  onUpdateContact: (customer: CustomerRow, phone: string) => Promise<void>;
+  onUpdateContact: (
+    customer: CustomerRow,
+    phone: string,
+    options?: CustomerContactUpdateOptions,
+  ) => Promise<void>;
   onRegisterContact: (record: Omit<ContactRecord, "id">) => Promise<void>;
 }) {
   const [query, setQuery] = useState("");
@@ -5901,7 +6008,11 @@ function CustomerProfile({
   products: ProductRow[];
   user: CrmSessionUser;
   onCreateAlert: (alert: AlertRow, note?: string) => Promise<void>;
-  onUpdateContact: (customer: CustomerRow, phone: string) => Promise<void>;
+  onUpdateContact: (
+    customer: CustomerRow,
+    phone: string,
+    options?: CustomerContactUpdateOptions,
+  ) => Promise<void>;
   onRegisterContact: (record: Omit<ContactRecord, "id">) => Promise<void>;
 }) {
   const customerSales = sales
@@ -6118,7 +6229,11 @@ function RepurchaseAlerts({
   onStatusChange: (id: string, status: RepurchaseAlertStatus) => Promise<void>;
   onRegisterContact: (record: Omit<ContactRecord, "id">) => Promise<void>;
   onCreateAlert: (alert: AlertRow, note?: string) => Promise<void>;
-  onUpdateContact: (customer: CustomerRow, phone: string) => Promise<void>;
+  onUpdateContact: (
+    customer: CustomerRow,
+    phone: string,
+    options?: CustomerContactUpdateOptions,
+  ) => Promise<void>;
 }) {
   const [filter, setFilter] = useState("todos");
   const [page, setPage] = useState(1);
@@ -6774,7 +6889,11 @@ function SellerPortfolioBySeller({
   onRegisterContact: (record: Omit<ContactRecord, "id">) => Promise<void>;
   user: CrmSessionUser;
   sellers: SellerRow[];
-  onUpdateContact: (customer: CustomerRow, phone: string) => Promise<void>;
+  onUpdateContact: (
+    customer: CustomerRow,
+    phone: string,
+    options?: CustomerContactUpdateOptions,
+  ) => Promise<void>;
 }) {
   const canSwitchSeller = user.role === "administrador";
   const initialSellerId = canSwitchSeller
@@ -7095,7 +7214,11 @@ function Opportunities({
   sellers: SellerRow[];
   onSave: (opportunity: Omit<CrmOpportunity, "id">, id?: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
-  onUpdateContact: (customer: CustomerRow, phone: string) => Promise<void>;
+  onUpdateContact: (
+    customer: CustomerRow,
+    phone: string,
+    options?: CustomerContactUpdateOptions,
+  ) => Promise<void>;
   onRegisterContact: (record: Omit<ContactRecord, "id">) => Promise<void>;
 }) {
   const [editing, setEditing] = useState<CrmOpportunity | "new" | null>(null);
@@ -9333,14 +9456,20 @@ function WhatsAppButton({
   sellerName,
   onUpdateContact,
   onRegisterContact,
+  onContactIntent,
   compact = false,
 }: {
   customer: CustomerRow;
   message?: string;
   user?: CrmSessionUser;
   sellerName?: string;
-  onUpdateContact?: (customer: CustomerRow, phone: string) => Promise<void>;
+  onUpdateContact?: (
+    customer: CustomerRow,
+    phone: string,
+    options?: CustomerContactUpdateOptions,
+  ) => Promise<void>;
   onRegisterContact?: (record: Omit<ContactRecord, "id">) => Promise<void>;
+  onContactIntent?: (customer: CustomerRow) => void;
   compact?: boolean;
 }) {
   const [editingContact, setEditingContact] = useState(false);
@@ -9369,7 +9498,7 @@ function WhatsAppButton({
             customer={customer}
             onClose={() => setEditingContact(false)}
             onSave={async (phoneValue) => {
-              await onUpdateContact(customer, phoneValue);
+              await onUpdateContact(customer, phoneValue, { retryWhatsApp: true });
               setEditingContact(false);
             }}
           />
@@ -9386,7 +9515,10 @@ function WhatsAppButton({
         href={href}
         target="_blank"
         rel="noopener noreferrer"
-        onClick={() => recordAutomaticContactIntent(customer, resolvedMessage, responsibleName, onRegisterContact)}
+        onClick={() => {
+          onContactIntent?.(customer);
+          recordAutomaticContactIntent(customer, resolvedMessage, responsibleName, onRegisterContact);
+        }}
         aria-label={`Chamar ${customer.name} no WhatsApp`}
         title={`Chamar ${customer.name} no WhatsApp`}
         className={`inline-flex items-center justify-center gap-2 rounded-lg bg-[#25d366] font-semibold text-white shadow-sm transition hover:bg-[#1ebe5d] focus-visible:outline-[#25d366] ${
@@ -9412,7 +9544,7 @@ function WhatsAppButton({
           customer={customer}
           onClose={() => setEditingContact(false)}
           onSave={async (phoneValue) => {
-            await onUpdateContact(customer, phoneValue);
+            await onUpdateContact(customer, phoneValue, { retryWhatsApp: true });
             setEditingContact(false);
           }}
         />
@@ -9427,8 +9559,7 @@ function recordAutomaticContactIntent(
   responsibleName: string,
   onRegisterContact?: (record: Omit<ContactRecord, "id">) => Promise<void>,
 ) {
-  const today = new Date().toISOString().slice(0, 10);
-  const storageKey = `hennder-crm-contact-intent:${customer.id}:${today}:whatsapp`;
+  const storageKey = automaticContactIntentStorageKey(customer.id);
   try {
     if (window.localStorage.getItem(storageKey)) return;
     window.localStorage.setItem(storageKey, new Date().toISOString());
@@ -9458,6 +9589,30 @@ function recordAutomaticContactIntent(
   }).catch(() => undefined);
 }
 
+function automaticContactIntentStorageKey(customerId: string) {
+  const today = new Date().toISOString().slice(0, 10);
+  return `hennder-crm-contact-intent:${customerId}:${today}:whatsapp`;
+}
+
+function isAutomaticContactRecord(record: ContactRecord) {
+  return record.note.trim().toLocaleLowerCase("pt-BR").startsWith("registro autom");
+}
+
+function isContactFromToday(value: string) {
+  const now = new Date();
+  const todayIso = now.toISOString().slice(0, 10);
+  if (value.slice(0, 10) === todayIso) return true;
+  return value === new Intl.DateTimeFormat("pt-BR").format(now);
+}
+
+function clearAutomaticContactIntent(customerId: string) {
+  try {
+    window.localStorage.removeItem(automaticContactIntentStorageKey(customerId));
+  } catch {
+    // The retry still works on the server when local storage is unavailable.
+  }
+}
+
 function resolveWhatsAppResponsibleName(
   user: CrmSessionUser | undefined,
   customer: CustomerRow,
@@ -9470,6 +9625,16 @@ function resolveWhatsAppResponsibleName(
     customer.preferredSeller ||
     "Hennder CRM"
   ).trim();
+}
+
+function resolveContactSellerId(
+  user: CrmSessionUser,
+  customer: CustomerRow,
+) {
+  return (
+    (user.sellerId ? resolveSellerForUser(user.sellerId)?.id : undefined) ??
+    customer.preferredSellerId
+  );
 }
 
 function firstName(value: string) {

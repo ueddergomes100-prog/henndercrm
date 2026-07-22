@@ -27,13 +27,27 @@ export async function PATCH(request: Request) {
   }
 
   try {
-    const [product] = await new SupabaseRestClient().update<{
+    const client = new SupabaseRestClient();
+    const [product] = await client.update<{
       id: string;
       dias_recompra_padrao: number | null;
     }>("crm_produtos", { id }, {
       dias_recompra_padrao: normalizedDays,
-      recompra_ativa: true,
+      recompra_ativa: normalizedDays !== null,
     });
+
+    const generatedAlerts = await client.select<{ id: string; origem: string }>(
+      "crm_alertas_recompra",
+      {
+        select: "id,origem",
+        produto_id: `eq.${id}`,
+      },
+    );
+    for (const alert of generatedAlerts) {
+      if (alert.origem !== "manual") {
+        await client.delete("crm_alertas_recompra", { id: alert.id });
+      }
+    }
     invalidateCrmSnapshotCache();
 
     return Response.json({

@@ -446,12 +446,34 @@ class SupabaseTarget {
 
   async upsertClients(clients) {
     if (clients.length === 0) return;
-    await this.upsert("crm_clientes", clients.map(mapClient), "uniplus_id");
+    const existingClients = await this.selectAll("crm_clientes", {
+      select: "uniplus_id,telefone,celular,whatsapp",
+    });
+    const existingByExternalId = new Map(
+      existingClients.map((client) => [Number(client.uniplus_id), client]),
+    );
+    await this.upsert(
+      "crm_clientes",
+      clients.map((client) => mapClient(client, existingByExternalId.get(client.id))),
+      "uniplus_id",
+    );
   }
 
   async upsertProducts(products) {
     if (products.length === 0) return;
-    await this.upsert("crm_produtos", uniqueProductsByCode(products).map(mapProduct), "uniplus_id");
+    const existingProducts = await this.selectAll("crm_produtos", {
+      select: "uniplus_id,recompra_ativa,dias_recompra_padrao",
+    });
+    const existingByExternalId = new Map(
+      existingProducts.map((product) => [Number(product.uniplus_id), product]),
+    );
+    await this.upsert(
+      "crm_produtos",
+      uniqueProductsByCode(products).map((product) =>
+        mapProduct(product, existingByExternalId.get(product.id)),
+      ),
+      "uniplus_id",
+    );
   }
 
   async upsertSellers(sellers) {
@@ -707,7 +729,7 @@ function isJwt(value) {
   return value.split(".").length === 3;
 }
 
-function mapClient(client) {
+function mapClient(client, existing) {
   const quality = calculateRegistrationQuality(client);
   return {
     uniplus_id: client.id,
@@ -715,9 +737,9 @@ function mapClient(client) {
     nome: client.name,
     razao_social: client.legalName ?? null,
     cpf_cnpj: client.document ?? null,
-    telefone: client.phone ?? null,
-    celular: client.mobile ?? null,
-    whatsapp: client.whatsapp ?? null,
+    telefone: existing?.telefone || client.phone || null,
+    celular: existing?.celular || client.mobile || null,
+    whatsapp: existing?.whatsapp || client.whatsapp || null,
     email: client.email ?? null,
     endereco: client.address ?? null,
     bairro: client.neighborhood ?? null,
@@ -735,7 +757,7 @@ function mapClient(client) {
   };
 }
 
-function mapProduct(product) {
+function mapProduct(product, existing) {
   return {
     uniplus_id: product.id,
     codigo: product.code ?? null,
@@ -749,7 +771,8 @@ function mapProduct(product) {
     data_ultima_compra: product.lastPurchaseAt ?? null,
     tipo_produto: product.productType ?? null,
     utiliza_crm: product.usesCrm,
-    recompra_ativa: product.usesCrm,
+    recompra_ativa: existing?.recompra_ativa ?? false,
+    dias_recompra_padrao: existing?.dias_recompra_padrao ?? null,
   };
 }
 

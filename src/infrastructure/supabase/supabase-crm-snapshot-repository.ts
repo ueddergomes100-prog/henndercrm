@@ -302,23 +302,26 @@ export class SupabaseCrmSnapshotRepository implements ICrmSnapshotRepository {
     referenceDate: string,
     existingAlerts: AlertRow[],
   ) {
-    const retainedAlerts = currentRepurchaseAlerts(existingAlerts, sales);
-    const retainedIds = new Set(retainedAlerts.map((alert) => alert.id));
-    const staleAlerts = existingAlerts.filter((alert) => !retainedIds.has(alert.id));
+    const currentAlerts = currentRepurchaseAlerts(existingAlerts, sales);
+    const currentIds = new Set(currentAlerts.map((alert) => alert.id));
+    const manualAlerts = currentAlerts.filter((alert) => alert.origem === "manual");
+    const rows = buildDerivedRepurchaseAlertRows(sales, items, products, referenceDate);
+    const desiredKeys = new Set(rows.map(alertUniqueKey));
+    const staleAlerts = existingAlerts.filter((alert) =>
+      !currentIds.has(alert.id) ||
+      (alert.origem !== "manual" && !desiredKeys.has(alertUniqueKey(alert))),
+    );
     await this.client.deleteMany(
       "crm_alertas_recompra",
       "id",
       staleAlerts.map((alert) => alert.id),
     );
-    const rows = buildDerivedRepurchaseAlertRows(sales, items, products, referenceDate);
-    const existingKeys = new Set(retainedAlerts.map(alertUniqueKey));
-    const missingRows = rows.filter((row) => !existingKeys.has(alertUniqueKey(row)));
-    if (!missingRows.length) return retainedAlerts;
+    if (!rows.length) return manualAlerts;
     return this.client.upsert<AlertRow>(
       "crm_alertas_recompra",
-      missingRows,
+      rows,
       "cliente_id,produto_id,venda_id,item_venda_id",
-    ).then((insertedRows) => [...retainedAlerts, ...insertedRows]);
+    ).then((savedRows) => [...manualAlerts, ...savedRows]);
   }
 
   private async ensureDerivedOpportunities(
@@ -621,7 +624,11 @@ function buildDerivedRepurchaseAlertRows(
     const product = productsById.get(item.produto_id);
     if (!sale || !product || !sale.aprovado) continue;
     if (dateOnly(sale.data_venda) !== latestSaleDateByCustomer.get(sale.cliente_id)) continue;
-    if (!product.recompra_ativa && !product.utiliza_crm) continue;
+    if (
+      !product.recompra_ativa ||
+      !product.dias_recompra_padrao ||
+      product.dias_recompra_padrao <= 0
+    ) continue;
 
     const key = `${sale.cliente_id}:${item.produto_id}`;
     const current = latestByCustomerProduct.get(key);
@@ -632,7 +639,7 @@ function buildDerivedRepurchaseAlertRows(
 
   return [...latestByCustomerProduct.values()]
     .map(({ sale, item, product }) => {
-      const repurchaseDays = resolveRepurchaseDays(product);
+      const repurchaseDays = product.dias_recompra_padrao as number;
       const purchaseDate = dateOnly(sale.data_venda);
       const expectedDate = addDays(purchaseDate, repurchaseDays);
       if (expectedDate > horizonDate) return null;
@@ -648,7 +655,7 @@ function buildDerivedRepurchaseAlertRows(
         dias_recompra: repurchaseDays,
         status: "pendente",
         prioridade: resolveAlertPriority(expectedDate, referenceDate),
-        origem: product.dias_recompra_padrao ? "regra_produto" : "historico_cliente",
+        origem: "regra_produto",
         observacao: "Gerado automaticamente pelo Hennder CRM a partir das vendas reais.",
       };
     })
@@ -733,20 +740,6 @@ function normalizeOpportunityProductName(value: string) {
     .toLocaleLowerCase("pt-BR")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
-}
-
-function resolveRepurchaseDays(product: ProductRow) {
-  if (product.dias_recompra_padrao && product.dias_recompra_padrao > 0) return product.dias_recompra_padrao;
-  const text = `${product.nome} ${product.departamento ?? ""}`
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .toLocaleUpperCase("pt-BR");
-  if (/(SACHE|PETISCO)/u.test(text)) return 20;
-  if (/(RACAO|AREIA HIGI)/u.test(text)) return 30;
-  if (/(VERM|ANTIPULG|CARRAP|VACINA)/u.test(text)) return 90;
-  if (text.includes("VETERINARIA")) return 90;
-  if (text.includes("AGRO")) return 60;
-  return 45;
 }
 
 function resolveAlertPriority(expectedDate: string, referenceDate: string): CrmRepurchaseAlert["priority"] {

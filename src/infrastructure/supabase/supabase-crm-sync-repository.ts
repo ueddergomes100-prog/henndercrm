@@ -17,7 +17,16 @@ import type { ICrmSyncTargetRepository } from "@/integrations/uniplus/repositori
 import { SupabaseRestClient } from "./supabase-rest-client";
 
 type ExternalIdRow = { id: string; uniplus_id: number };
+type ClientContactRow = ExternalIdRow & {
+  telefone: string | null;
+  celular: string | null;
+  whatsapp: string | null;
+};
 type ProductExternalIdRow = ExternalIdRow & { codigo: string | null; preco: number | null };
+type ProductRepurchaseConfigRow = ExternalIdRow & {
+  recompra_ativa: boolean;
+  dias_recompra_padrao: number | null;
+};
 
 export class SupabaseCrmSyncRepository implements ICrmSyncTargetRepository {
   constructor(private readonly client = new SupabaseRestClient()) {}
@@ -33,12 +42,36 @@ export class SupabaseCrmSyncRepository implements ICrmSyncTargetRepository {
 
   async upsertClients(clients: UniplusClient[]) {
     if (clients.length === 0) return;
-    await this.client.upsert("crm_clientes", clients.map(mapClient), "uniplus_id");
+    const existingClients = await this.client.select<ClientContactRow>("crm_clientes", {
+      select: "id,uniplus_id,telefone,celular,whatsapp",
+      limit: 100000,
+    });
+    const existingByExternalId = new Map(
+      existingClients.map((client) => [client.uniplus_id, client]),
+    );
+    await this.client.upsert(
+      "crm_clientes",
+      clients.map((client) => mapClient(client, existingByExternalId.get(client.id as number))),
+      "uniplus_id",
+    );
   }
 
   async upsertProducts(products: UniplusProduct[]) {
     if (products.length === 0) return;
-    await this.client.upsert("crm_produtos", uniqueProductsByCode(products).map(mapProduct), "uniplus_id");
+    const existingProducts = await this.client.select<ProductRepurchaseConfigRow>("crm_produtos", {
+      select: "id,uniplus_id,recompra_ativa,dias_recompra_padrao",
+      limit: 100000,
+    });
+    const existingByExternalId = new Map(
+      existingProducts.map((product) => [product.uniplus_id, product]),
+    );
+    await this.client.upsert(
+      "crm_produtos",
+      uniqueProductsByCode(products).map((product) =>
+        mapProduct(product, existingByExternalId.get(product.id as number)),
+      ),
+      "uniplus_id",
+    );
   }
 
   async upsertSellers(sellers: UniplusSeller[]) {
@@ -142,7 +175,7 @@ export class SupabaseCrmSyncRepository implements ICrmSyncTargetRepository {
   }
 }
 
-function mapClient(client: UniplusClient) {
+function mapClient(client: UniplusClient, existing?: ClientContactRow) {
   const quality = calculateRegistrationQuality(client);
   return {
     uniplus_id: client.id,
@@ -150,9 +183,9 @@ function mapClient(client: UniplusClient) {
     nome: client.name,
     razao_social: client.legalName ?? null,
     cpf_cnpj: client.document ?? null,
-    telefone: client.phone ?? null,
-    celular: client.mobile ?? null,
-    whatsapp: client.whatsapp ?? null,
+    telefone: existing?.telefone || client.phone || null,
+    celular: existing?.celular || client.mobile || null,
+    whatsapp: existing?.whatsapp || client.whatsapp || null,
     email: client.email ?? null,
     endereco: client.address ?? null,
     bairro: client.neighborhood ?? null,
@@ -170,7 +203,7 @@ function mapClient(client: UniplusClient) {
   };
 }
 
-function mapProduct(product: UniplusProduct) {
+function mapProduct(product: UniplusProduct, existing?: ProductRepurchaseConfigRow) {
   return {
     uniplus_id: product.id,
     codigo: product.code ?? null,
@@ -184,7 +217,8 @@ function mapProduct(product: UniplusProduct) {
     data_ultima_compra: product.lastPurchaseAt ?? null,
     tipo_produto: product.productType ?? null,
     utiliza_crm: product.usesCrm,
-    recompra_ativa: product.usesCrm,
+    recompra_ativa: existing?.recompra_ativa ?? false,
+    dias_recompra_padrao: existing?.dias_recompra_padrao ?? null,
   };
 }
 
