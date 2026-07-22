@@ -387,9 +387,10 @@ class SupabaseTarget {
   async getLastSuccessfulSync() {
     const rows = await this.request("crm_sincronizacoes", {
       query: {
-        select: "fim",
+        select: "fim,total_lidos",
         origem: `eq.${SYNC_ORIGIN}`,
         status: "eq.concluida",
+        total_lidos: "gt.0",
         order: "fim.desc",
         limit: "1",
       },
