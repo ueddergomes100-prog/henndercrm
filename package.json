@@ -20,6 +20,7 @@
     "sync:uniplus": "node scripts/hennder-sync.mjs --dry-run",
     "sync:uniplus:apply": "node scripts/hennder-sync.mjs --apply",
     "sync:uniplus:auto": "node scripts/hennder-sync.mjs --since auto --apply",
+    "sync:uniplus:reconcile": "node scripts/hennder-sync-reconcile.mjs",
     "notifications:dispatch": "node scripts/dispatch-crm-notifications.mjs"
   },
   "dependencies": {

@@ -40,6 +40,9 @@ async function main() {
   const dryRun = !options.apply;
   const limit = positiveInteger(options.limit) ?? positiveInteger(process.env.UNIPLUS_SYNC_BATCH_SIZE) ?? DEFAULT_LIMIT;
   const since = await resolveSince(options.since);
+  if (options.cleanupStaleSales && since) {
+    throw new Error("--cleanup-stale-sales deve ser usado com --date ou --from/--to, nao com --since.");
+  }
   const dateWindow = since ? undefined : resolveDateWindow(options);
   const minimumSaleDate = since ? resolveMinimumSaleDate() : undefined;
   const startedAt = new Date().toISOString();
@@ -80,6 +83,9 @@ async function main() {
     await target.upsertSellers(selected.sellers);
     await target.upsertSales(selected.sales, selected.items);
     await target.saveIgnoredSales(selected.ignoredSales);
+    const reconciliation = options.cleanupStaleSales
+      ? await target.removeStaleSales(selected.sales, dateWindow)
+      : null;
 
     const summary = {
       dryRun,
@@ -102,6 +108,7 @@ async function main() {
       },
       ignoredSales: selected.ignoredSales.length,
       ignoredReasons: countBy(selected.ignoredSales.map((sale) => sale.reason)),
+      reconciliation,
       digest: digestRows(result.rows),
     };
 
@@ -145,6 +152,7 @@ function parseArgs(args) {
     else if (arg === "--sql") options.sqlPath = args[++index];
     else if (arg === "--output") options.output = args[++index];
     else if (arg === "--reference-date") options.referenceDate = args[++index];
+    else if (arg === "--cleanup-stale-sales") options.cleanupStaleSales = true;
     else throw new Error(`Argumento desconhecido: ${arg}`);
   }
   return options;
@@ -172,6 +180,7 @@ Opcoes:
   --sql <arquivo>        SQL de extracao. Padrao ${DEFAULT_SQL_PATH}.
   --output <arquivo>     Salva resumo JSON.
   --reference-date <dia> Data de referencia para regras demo, YYYY-MM-DD.
+  --cleanup-stale-sales  Remove do Supabase vendas da janela que nao existem mais na regra valida do Uniplus.
 `);
 }
 
@@ -368,6 +377,14 @@ class DryRunTarget {
   async upsertSellers() {}
   async upsertSales() {}
   async saveIgnoredSales() {}
+  async removeStaleSales() {
+    return {
+      staleSales: 0,
+      deletedAlerts: 0,
+      deletedOpportunities: 0,
+      deletedSales: 0,
+    };
+  }
   async finishSync() {}
   async failSync() {}
 }
@@ -526,6 +543,57 @@ class SupabaseTarget {
     for (const item of staleItems) {
       await this.delete("crm_itens_venda", { id: item.id });
     }
+  }
+
+  async removeStaleSales(sales, dateWindow) {
+    if (!dateWindow) {
+      return {
+        staleSales: 0,
+        deletedAlerts: 0,
+        deletedOpportunities: 0,
+        deletedSales: 0,
+      };
+    }
+
+    const expectedSaleIds = new Set(sales.map((sale) => sale.id));
+    const storedSales = await this.selectAll("crm_vendas", {
+      select: "id,uniplus_id,data_venda",
+      data_venda: `gte.${dateWindow.from}`,
+      data_venda: `lt.${dateWindow.to}`,
+    });
+    const staleSales = storedSales.filter((sale) =>
+      sale.uniplus_id !== null &&
+      sale.uniplus_id !== undefined &&
+      !expectedSaleIds.has(Number(sale.uniplus_id)),
+    );
+
+    const summary = {
+      staleSales: staleSales.length,
+      deletedAlerts: 0,
+      deletedOpportunities: 0,
+      deletedSales: 0,
+    };
+
+    for (const sale of staleSales) {
+      const [alerts, opportunities] = await Promise.all([
+        this.selectAll("crm_alertas_recompra", { select: "id", venda_id: `eq.${sale.id}` }),
+        this.selectAll("crm_oportunidades", { select: "id", venda_id: `eq.${sale.id}` }),
+      ]);
+
+      for (const alert of alerts) {
+        await this.delete("crm_alertas_recompra", { id: alert.id });
+      }
+      for (const opportunity of opportunities) {
+        await this.delete("crm_oportunidades", { id: opportunity.id });
+      }
+      await this.delete("crm_vendas", { id: sale.id });
+
+      summary.deletedAlerts += alerts.length;
+      summary.deletedOpportunities += opportunities.length;
+      summary.deletedSales += 1;
+    }
+
+    return summary;
   }
 
   async saveIgnoredSales(ignoredSales) {

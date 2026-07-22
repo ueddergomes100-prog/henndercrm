@@ -116,26 +116,35 @@ sao descartadas e substituidas por inclusao ou alteracao validas.
 O CRM nao carrega mais fixture mockada. O front-end le o snapshot comercial do
 Supabase, e o agente real fica em `src/hennder-sync`.
 
-Em 20/07/2026, a rotina local Windows esta ativa no Agendador de Tarefas a cada
+Em 22/07/2026, a rotina local Windows esta ativa no Agendador de Tarefas a cada
 5 minutos com `npm run sync:uniplus:auto`. A consulta incremental validada leva
 cerca de 2 segundos e usa uma sobreposicao de 15 minutos para capturar vendas
 faturadas ou alteradas entre execucoes sem criar duplicidades.
+
+Tambem existe uma tarefa diaria separada no Agendador do Windows:
+`Hennder CRM Reconcile`, executada as 20:30 com
+`npm.cmd run sync:uniplus:reconcile`. Essa rotina reprocessa a janela desde
+`UNIPLUS_SYNC_RECONCILE_FROM` ou `UNIPLUS_SYNC_START_DATE` (padrao
+`2026-05-01`) ate o dia seguinte, faz upsert das vendas validas e remove do
+Supabase vendas da janela que nao existem mais na regra valida do Uniplus.
+Use essa rotina como conferencia pesada de fechamento; nao substituir o sync
+incremental de 5 minutos por ela.
 
 A tela **Vendas** usa `crm_vendas.updated_at` para separar as vendas tocadas
 pela ultima sincronizacao da lista completa. A aba **Todas** continua
 disponivel, mas a interface aplica busca, filtros e carregamento incremental
 para evitar uma tabela grande demais.
 
-Reconciliacao historica aplicada e auditada:
+Reconciliacao historica aplicada e auditada em 22/07/2026:
 
 ```bash
-node scripts/hennder-sync.mjs --from 2026-05-01 --to 2026-07-21 --apply --limit 100000
+npm.cmd run sync:uniplus:reconcile
 ```
 
-Resultado final conferido em 20/07/2026: 6.403 vendas, 12.055 itens e
-R$ 1.318.641,45 tanto no Uniplus quanto no Supabase. A auditoria encontrou zero
-vendas ou itens faltantes, excedentes ou divergentes e zero clientes com
-`data_ultima_compra` desatualizada.
+Resultado final conferido em 22/07/2026, janela `2026-05-01` ate `2026-07-23`
+exclusivo: 6.549 vendas validas no Uniplus e 6.549 vendas no Supabase. A
+auditoria encontrou zero vendas faltantes, zero excedentes e zero divergencias
+de data, valor ou status. A regra ignorou 6 vendas por cliente inativo.
 
 O caso `PATRICIA WERNER` foi validado com as vendas 326958, de 05/06/2026, e
 335452, de 11/07/2026. O snapshot passou a exibir ultima compra em 11/07,

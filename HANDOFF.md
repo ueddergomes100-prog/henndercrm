@@ -301,6 +301,8 @@ Implementar em etapas:
 Atualizacao em 10/07/2026:
 
 - Hennder Sync local esta ativo no Agendador do Windows, rodando `npm run sync:uniplus:auto`.
+- A tarefa `Hennder CRM Reconcile` roda diariamente as 20:30 com `npm.cmd run sync:uniplus:reconcile`, reprocessando desde 2026-05-01 ate o dia seguinte e limpando vendas obsoletas da janela.
+- Conferencia de 22/07/2026: 6.549 vendas validas no Uniplus, 6.549 no Supabase, 0 faltantes, 0 excedentes, 0 divergencias; 6 vendas ignoradas por cliente inativo.
 - Ultima sincronizacao do dia concluiu com 25 vendas importadas, 36 itens e 0 vendas ignoradas.
 - `/api/crm/sync/logs` retorna status `ok` e consolida um unico log diario por origem.
 - `/api/crm/snapshot` le Supabase real e agora inclui `updatedAt` nas vendas para identificar o lote tocado pela ultima sincronizacao.

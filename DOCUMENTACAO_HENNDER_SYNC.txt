@@ -30,6 +30,19 @@ O CRM nao carrega mais fixture mockada. Os arquivos mockados, bootstrap
 demonstrativo e preview mockado foram removidos. O agente real fica em
 src/hennder-sync e o front-end le o snapshot comercial pelo Supabase.
 
+ATUALIZACAO 22/07/2026:
+- O sync incremental continua no Agendador do Windows a cada 5 minutos com
+  `npm run sync:uniplus:auto`.
+- Foi adicionada a rotina diaria `Hennder CRM Reconcile`, as 20:30, chamando
+  `npm.cmd run sync:uniplus:reconcile`.
+- Essa rotina reprocessa desde `2026-05-01` ate o dia seguinte, atualiza as
+  vendas validas e remove vendas obsoletas da janela que nao existem mais na
+  regra valida do Uniplus.
+- Conferencia final da janela 2026-05-01 ate 2026-07-23 exclusivo:
+  6.549 vendas validas no Uniplus, 6.549 vendas no Supabase, 0 faltantes,
+  0 excedentes e 0 divergencias de data/valor/status. 6 vendas foram
+  corretamente ignoradas por cliente inativo.
+
 ATUALIZACAO 10/07/2026:
 - Hennder Sync local esta rodando no Agendador do Windows a cada 5 minutos.
 - Ultima sincronizacao do dia importou 25 vendas e 36 itens, sem vendas
