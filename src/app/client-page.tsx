@@ -138,6 +138,9 @@ type SellerRow = CrmSeller;
 type QuickAction = "manual-alert" | "manual-customer" | "opportunity" | "agenda" | "contact";
 const LIST_PAGE_SIZE = 20;
 const OPPORTUNITY_PAGE_SIZE = 20;
+const SESSION_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
+const SESSION_IDLE_WARNING_MS = 2 * 60 * 1000;
+const SESSION_IDLE_CHECK_INTERVAL_MS = 5 * 1000;
 const crmResultsVisualTokens = {
   "--background": "Canvas",
   "--foreground": "CanvasText",
@@ -408,6 +411,9 @@ export default function Home() {
   const [resultsRefreshing, setResultsRefreshing] = useState(false);
   const [resultsUpdatedAt, setResultsUpdatedAt] = useState<string | null>(null);
   const [resultsRefreshError, setResultsRefreshError] = useState("");
+  const [idleWarningRemainingMs, setIdleWarningRemainingMs] = useState<number | null>(null);
+  const sessionIdleLogoutRef = useRef(false);
+  const renewIdleSessionRef = useRef<() => void>(() => undefined);
 
   useEffect(() => {
     let active = true;
@@ -450,6 +456,92 @@ export default function Home() {
       controller.abort();
     };
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const activityStorageKey = getSessionActivityStorageKey(user.id);
+    let lastActivityAt = readSessionActivity(activityStorageKey) ?? Date.now();
+    let lastPersistedAt = lastActivityAt;
+    let active = true;
+    sessionIdleLogoutRef.current = false;
+    writeSessionActivity(activityStorageKey, lastActivityAt);
+
+    const expireIdleSession = async () => {
+      if (sessionIdleLogoutRef.current) return;
+      sessionIdleLogoutRef.current = true;
+      clearSessionActivity(activityStorageKey);
+
+      try {
+        await fetch("/api/auth/session", { method: "DELETE" });
+      } finally {
+        if (!active) return;
+        setIdleWarningRemainingMs(null);
+        setDismissedNotificationIds([]);
+        setUser(null);
+        setActiveView("dashboard");
+      }
+    };
+
+    const checkIdleSession = () => {
+      if (!active || sessionIdleLogoutRef.current) return;
+      const remainingMs = SESSION_IDLE_TIMEOUT_MS - (Date.now() - lastActivityAt);
+      if (remainingMs <= 0) {
+        void expireIdleSession();
+        return;
+      }
+      setIdleWarningRemainingMs(remainingMs <= SESSION_IDLE_WARNING_MS ? remainingMs : null);
+    };
+
+    const recordActivity = () => {
+      if (!active || sessionIdleLogoutRef.current) return;
+      const now = Date.now();
+      lastActivityAt = now;
+      setIdleWarningRemainingMs(null);
+      if (now - lastPersistedAt >= 15_000) {
+        lastPersistedAt = now;
+        writeSessionActivity(activityStorageKey, now);
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") checkIdleSession();
+    };
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== activityStorageKey) return;
+      if (!event.newValue) {
+        void expireIdleSession();
+        return;
+      }
+      const sharedActivityAt = Number(event.newValue);
+      if (!Number.isFinite(sharedActivityAt) || sharedActivityAt <= lastActivityAt) return;
+      lastActivityAt = sharedActivityAt;
+      lastPersistedAt = sharedActivityAt;
+      setIdleWarningRemainingMs(null);
+    };
+
+    renewIdleSessionRef.current = recordActivity;
+    document.addEventListener("pointerdown", recordActivity, { passive: true });
+    document.addEventListener("keydown", recordActivity);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", checkIdleSession);
+    window.addEventListener("storage", handleStorage);
+    const timer = window.setInterval(checkIdleSession, SESSION_IDLE_CHECK_INTERVAL_MS);
+    const initialCheckTimer = window.setTimeout(checkIdleSession, 0);
+
+    return () => {
+      active = false;
+      renewIdleSessionRef.current = () => undefined;
+      document.removeEventListener("pointerdown", recordActivity);
+      document.removeEventListener("keydown", recordActivity);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", checkIdleSession);
+      window.removeEventListener("storage", handleStorage);
+      window.clearInterval(timer);
+      window.clearTimeout(initialCheckTimer);
+    };
+  }, [user]);
 
   useEffect(() => {
     if (!user) return;
@@ -691,6 +783,7 @@ export default function Home() {
                 throw new Error(result.error ?? "Não foi possível entrar.");
               }
               setTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
+              writeSessionActivity(getSessionActivityStorageKey(result.user.id), Date.now());
               setDismissedNotificationIds(readDismissedNotificationIds(result.user.id, crmReferenceDate));
               setUser(result.user);
             },
@@ -749,6 +842,7 @@ export default function Home() {
             runWithLoading(
               async () => {
                 await fetch("/api/auth/session", { method: "DELETE" });
+                clearSessionActivity(getSessionActivityStorageKey(user.id));
                 setDismissedNotificationIds([]);
                 setUser(null);
                 setActiveView("dashboard");
@@ -1097,6 +1191,7 @@ export default function Home() {
               runWithLoading(
                 async () => {
                   await fetch("/api/auth/session", { method: "DELETE" });
+                  clearSessionActivity(getSessionActivityStorageKey(user.id));
                   setDismissedNotificationIds([]);
                   setUser(null);
                   setActiveView("dashboard");
@@ -1307,6 +1402,23 @@ export default function Home() {
         onCreateOpportunity={saveOpportunity}
         onCreateContact={registerContact}
       />
+      <AnimatePresence>
+        {idleWarningRemainingMs !== null && (
+          <SessionIdleWarning
+            remainingMs={idleWarningRemainingMs}
+            onContinue={() => renewIdleSessionRef.current()}
+            onLogout={() => {
+              clearSessionActivity(getSessionActivityStorageKey(user.id));
+              void fetch("/api/auth/session", { method: "DELETE" }).finally(() => {
+                setIdleWarningRemainingMs(null);
+                setDismissedNotificationIds([]);
+                setUser(null);
+                setActiveView("dashboard");
+              });
+            }}
+          />
+        )}
+      </AnimatePresence>
     </main>
   );
 }
@@ -1545,6 +1657,35 @@ function getNotificationStorageKey(userId: string, referenceDate: string) {
   return `hennder-crm-notifications:${userId}:${referenceDate}`;
 }
 
+function getSessionActivityStorageKey(userId: string) {
+  return `hennder-crm-session-activity:${userId}`;
+}
+
+function readSessionActivity(storageKey: string) {
+  try {
+    const activityAt = Number(localStorage.getItem(storageKey));
+    return Number.isFinite(activityAt) && activityAt > 0 ? activityAt : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeSessionActivity(storageKey: string, activityAt: number) {
+  try {
+    localStorage.setItem(storageKey, String(activityAt));
+  } catch {
+    // The in-memory timer still enforces inactivity when storage is unavailable.
+  }
+}
+
+function clearSessionActivity(storageKey: string) {
+  try {
+    localStorage.removeItem(storageKey);
+  } catch {
+    // The cookie deletion still closes the current session when storage is unavailable.
+  }
+}
+
 function readDismissedNotificationIds(userId: string, referenceDate: string) {
   try {
     const stored = localStorage.getItem(getNotificationStorageKey(userId, referenceDate));
@@ -1746,6 +1887,83 @@ function SystemEmptyScreen({
         <p className="mt-3 text-sm leading-6 text-slate-300">{detail}</p>
       </div>
     </main>
+  );
+}
+
+function SessionIdleWarning({
+  remainingMs,
+  onContinue,
+  onLogout,
+}: {
+  remainingMs: number;
+  onContinue: () => void;
+  onLogout: () => void;
+}) {
+  const remainingSeconds = Math.max(1, Math.ceil(remainingMs / 1000));
+  const remainingLabel =
+    remainingSeconds >= 60
+      ? `${Math.ceil(remainingSeconds / 60)} min`
+      : `${remainingSeconds} s`;
+
+  return (
+    <motion.div
+      role="alertdialog"
+      aria-modal="true"
+      aria-labelledby="session-idle-title"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[90] flex items-end justify-center bg-slate-950/55 p-3 backdrop-blur-sm sm:items-center sm:p-6"
+    >
+      <motion.section
+        initial={{ opacity: 0, y: 24, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 12, scale: 0.98 }}
+        transition={{ duration: 0.22 }}
+        className="w-full max-w-md overflow-hidden rounded-xl border border-blue-100 bg-white shadow-2xl"
+      >
+        <div className="flex items-start gap-4 p-5 sm:p-6">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-[#0753a6]">
+            <Clock3 size={22} aria-hidden="true" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wide text-cyan-700">Sessão protegida</p>
+                <h2 id="session-idle-title" className="mt-1 text-xl font-bold text-[#18334d]">
+                  Você ainda está usando o CRM?
+                </h2>
+              </div>
+              <span className="rounded-lg bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-700">
+                {remainingLabel}
+              </span>
+            </div>
+            <p className="mt-3 text-sm leading-6 text-slate-600">
+              A sessão será encerrada por inatividade. Toque em continuar para permanecer conectado neste aparelho.
+            </p>
+          </div>
+        </div>
+        <div className="grid gap-2 border-t border-blue-50 bg-[#f8fbff] p-4 sm:grid-cols-[auto_1fr]">
+          <button
+            type="button"
+            onClick={onLogout}
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-blue-100 px-4 text-sm font-semibold text-slate-600 transition hover:bg-white"
+          >
+            <LogOut size={17} aria-hidden="true" />
+            Sair agora
+          </button>
+          <button
+            type="button"
+            onClick={onContinue}
+            autoFocus
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-[#0753a6] px-5 text-sm font-bold text-white shadow-sm transition hover:bg-[#06498f] focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:ring-offset-2"
+          >
+            <Clock3 size={17} aria-hidden="true" />
+            Continuar conectado
+          </button>
+        </div>
+      </motion.section>
+    </motion.div>
   );
 }
 
