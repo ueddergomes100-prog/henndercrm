@@ -12,7 +12,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "node server.js",
+    "start": "next start",
     "lint": "eslint",
     "test": "node --test scripts/*.test.mjs",
     "sync:uniplus": "node scripts/hennder-sync.mjs --dry-run",
