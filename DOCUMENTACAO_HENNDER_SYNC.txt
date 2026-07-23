@@ -35,7 +35,7 @@ ATUALIZACAO 22/07/2026:
   `npm run sync:uniplus:auto`.
 - Foi adicionada a rotina diaria `Hennder CRM Reconcile`, as 20:30, chamando
   `npm.cmd run sync:uniplus:reconcile`.
-- Essa rotina reprocessa desde `2026-05-01` ate o dia seguinte, atualiza as
+- Essa rotina reprocessa desde `2026-03-01` ate o dia seguinte, atualiza as
   vendas validas e remove vendas obsoletas da janela que nao existem mais na
   regra valida do Uniplus.
 - Conferencia final da janela 2026-05-01 ate 2026-07-23 exclusivo:
@@ -486,6 +486,10 @@ UNIPLUS_DATABASE_URL=postgres://USUARIO:SENHA@HOST:PORTA/BANCO
 UNIPLUS_SSL=false
 UNIPLUS_SYNC_BATCH_SIZE=5000
 UNIPLUS_SYNC_MODE=incremental
+UNIPLUS_SYNC_START_DATE=2026-03-01
+UNIPLUS_SYNC_ONLY_PLATFORM_SELLERS=true
+UNIPLUS_SYNC_ADDITIONAL_SELLER_IDS=
+UNIPLUS_SYNC_SELLER_REASSIGNMENTS=
 HENNDER_SYNC_LOG_DIR=.data/hennder-sync-logs
 
 Ja existentes:
@@ -622,6 +626,34 @@ O ultimo horario concluido pode ser buscado em:
 crm_sincronizacoes
 
 onde status = 'concluida'.
+
+Desde 23/07/2026, o Sync tambem restringe por padrao a importacao aos
+vendedores com usuario ativo vinculado na plataforma
+(`crm_usuarios.ativo = true` e `crm_usuarios.vendedor_id` preenchido). Vendas de
+representantes sem esse vinculo sao ignoradas com o motivo
+`vendedor_nao_cadastrado`.
+
+Excecoes controladas:
+- UNIPLUS_SYNC_ADDITIONAL_SELLER_IDS libera representantes sem login ativo.
+- UNIPLUS_SYNC_SELLER_REASSIGNMENTS transfere vendas de um representante para
+  um vendedor ativo usando o formato vendedor_origem:vendedor_destino.
+- Quando uma venda antes ignorada passa a ser importada, o Sync remove
+  automaticamente o registro antigo de crm_vendas_ignoradas.
+- Vendas de representantes fora da plataforma continuam excluidas da
+  importacao, mas nao sao exibidas como erro. A tela de Logs e Sincronizacao
+  mostra somente falhas relacionadas aos vendedores ativos.
+
+Configuracao Shopping Rural em 23/07/2026:
+- Juliano permanece elegivel durante as ferias, mesmo sem login:
+  UNIPLUS_SYNC_ADDITIONAL_SELLER_IDS=18090
+- Representantes removidos sao consolidados no Daniel (9473):
+  UNIPLUS_SYNC_SELLER_REASSIGNMENTS=1143:9473,4252:9473,5774:9473,6320:9473,6422:9473,10608:9473,17931:9473,21820:9473
+- O login antigo chamado Juliano, que estava ligado por engano ao representante
+  Adriano, foi removido. Um novo login deve ser criado e vinculado ao
+  representante Juliano (18090) quando ele retornar.
+- A reconciliacao de 01/03/2026 a 23/07/2026 deixou 11.294 vendas validas, sem
+  duplicidade. Foram consolidadas no Daniel 466 vendas validas de representantes
+  removidos, somando R$ 277.611,31 e 302 clientes.
 
 7.11 Ponto mais importante do SQL
 
@@ -1539,7 +1571,7 @@ node scripts/hennder-sync.mjs --dry-run
 Por seguranca operacional, o comando sem parametros sincroniza somente vendas
 de hoje pelo campo d.data. Para carga retroativa controlada, usar uma janela:
 
-node scripts/hennder-sync.mjs --from 2026-05-10 --to 2026-07-11 --dry-run
+node scripts/hennder-sync.mjs --from 2026-03-01 --to 2026-07-11 --dry-run
 
 Etapa 5 - Enviar para Supabase
 

@@ -155,11 +155,7 @@ export class SupabaseCrmSyncRepository implements ICrmSyncTargetRepository {
     if (newRows.length === 0) return;
     await this.client.insert(
       "crm_vendas_ignoradas",
-      newRows.map((sale) => ({
-        uniplus_venda_id: sale.saleId,
-        motivo: sale.reason,
-        dados: sale.data,
-      })),
+      newRows.map(mapIgnoredSaleForStorage),
       false,
     );
   }
@@ -283,4 +279,38 @@ function mapSeller(seller: UniplusSeller) {
     inativo: seller.inactive,
     perfil_id: seller.profileId ?? null,
   };
+}
+
+function mapIgnoredSaleForStorage(sale: IgnoredSale) {
+  const reason = normalizeIgnoredReasonForStorage(sale.reason);
+  return {
+    uniplus_venda_id: sale.saleId,
+    motivo: reason,
+    dados: reason === sale.reason ? sale.data : withStoredIgnoredReason(sale.data, sale.reason),
+  };
+}
+
+function normalizeIgnoredReasonForStorage(reason: IgnoredSale["reason"]) {
+  if (
+    reason === "vendedor_nao_cadastrado" &&
+    !parseBoolean(process.env.UNIPLUS_SYNC_STORE_PLATFORM_SELLER_REASON, false)
+  ) {
+    return "dados_incompletos";
+  }
+  return reason;
+}
+
+function withStoredIgnoredReason(data: unknown, reason: IgnoredSale["reason"]) {
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    return { ...data, crm_ignored_reason: reason };
+  }
+  return { crm_ignored_reason: reason, data };
+}
+
+function parseBoolean(value: unknown, fallback = false) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (!normalized) return fallback;
+  if (["1", "true", "t", "sim", "s", "yes", "y"].includes(normalized)) return true;
+  if (["0", "false", "f", "nao", "não", "n", "no"].includes(normalized)) return false;
+  return fallback;
 }

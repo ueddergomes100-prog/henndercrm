@@ -46,6 +46,8 @@ const headers = [
   "vendedor_supervisor",
   "vendedor_inativo",
   "vendedor_perfil_id",
+  "operador_usuario_id",
+  "operador_usuario_nome",
   "uniplus_item_id",
   "item_uniplus_venda_id",
   "uniplus_produto_id",
@@ -102,6 +104,8 @@ function row(overrides = {}) {
         vendedor_celular: "33977777777",
         vendedor_whatsapp: "33966666666",
         vendedor_inativo: "0",
+        operador_usuario_id: "22",
+        operador_usuario_nome: "OPERADOR REAL",
         uniplus_item_id: "40",
         item_uniplus_venda_id: "10",
         uniplus_produto_id: "50",
@@ -158,6 +162,13 @@ test("one sale with multiple item ids creates one sale and many items", () => {
   assert.equal(result.items.every((item) => item.saleId === 10), true);
   assert.equal(result.metadata.multiItemSales, 1);
   assert.equal(result.metadata.maxItemsPerSale, 3);
+});
+
+test("sale keeps the Uniplus operator for controlled seller reassignment", () => {
+  const result = transformRows([row()], { referenceDate: "2026-06-15" });
+
+  assert.equal(result.sales[0].operatorId, 22);
+  assert.equal(result.sales[0].operatorName, "OPERADOR REAL");
 });
 
 test("Uniplus status 2 is billed and status 1 is not billed", () => {

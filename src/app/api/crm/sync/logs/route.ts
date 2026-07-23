@@ -112,7 +112,7 @@ export async function GET() {
           type: "ignored_sale",
           at: row.created_at,
           saleId: row.uniplus_venda_id,
-          reason: row.motivo,
+          reason: resolveIgnoredReason(row),
           message: describeIgnoredSale(row),
         })),
       ],
@@ -171,7 +171,16 @@ function resolveDailyStatus(
 
 function describeIgnoredSale(row: IgnoredSaleRow) {
   const sale = row.uniplus_venda_id ? `Venda ${row.uniplus_venda_id}` : "Venda sem ID";
-  return `${sale}: ${describeIgnoredReason(row.motivo)}`;
+  return `${sale}: ${describeIgnoredReason(resolveIgnoredReason(row))}`;
+}
+
+function resolveIgnoredReason(row: IgnoredSaleRow) {
+  const details = row.dados;
+  if (details && typeof details === "object" && "crm_ignored_reason" in details) {
+    const reason = (details as { crm_ignored_reason?: unknown }).crm_ignored_reason;
+    if (typeof reason === "string" && reason.trim()) return reason;
+  }
+  return row.motivo;
 }
 
 function describeIgnoredReason(reason: string) {
@@ -179,6 +188,7 @@ function describeIgnoredReason(reason: string) {
     cliente_nao_identificado: "cliente nao identificado",
     venda_cancelada: "venda cancelada",
     venda_nao_faturada: "venda nao faturada",
+    vendedor_nao_cadastrado: "vendedor nao cadastrado na plataforma",
     item_sem_produto: "item sem produto",
     cliente_inativo: "cliente inativo",
     dados_incompletos: "dados incompletos",

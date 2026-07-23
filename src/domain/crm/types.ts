@@ -84,6 +84,8 @@ export interface UniplusSale {
   clientName?: string;
   clientDocument?: string;
   sellerId?: number;
+  operatorId?: number;
+  operatorName?: string;
   totalValue: number;
   discountValue: number;
   status: string;
@@ -319,6 +321,7 @@ export interface IgnoredSale {
     | "cliente_nao_identificado"
     | "venda_cancelada"
     | "venda_nao_faturada"
+    | "vendedor_nao_cadastrado"
     | "item_sem_produto"
     | "cliente_inativo"
     | "dados_incompletos";

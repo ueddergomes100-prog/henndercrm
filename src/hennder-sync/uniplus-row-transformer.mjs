@@ -94,6 +94,7 @@ export function transformRows(rows, options = {}) {
     const productId = integer(row.uniplus_produto_id);
     const clientId = integer(row.uniplus_cliente_id);
     const sellerId = integer(row.uniplus_vendedor_id);
+    const operatorId = integer(row.operador_usuario_id);
     const soldAtValue = resolveSaleDate(row);
 
     if (!saleId || !itemId || !productId || !clientId || !soldAtValue) {
@@ -204,6 +205,8 @@ export function transformRows(rows, options = {}) {
         clientName: clients.get(clientId).name,
         clientDocument: clients.get(clientId).document,
         sellerId,
+        operatorId,
+        operatorName: text(row.operador_usuario_nome) || undefined,
         totalValue: decimal(row.valor_venda),
         discountValue: decimal(row.valor_desconto),
         status: saleStatus(row.venda_status),

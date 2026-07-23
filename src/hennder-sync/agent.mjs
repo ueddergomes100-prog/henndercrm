@@ -9,7 +9,9 @@ import { transformRows } from "./uniplus-row-transformer.mjs";
 const DEFAULT_SQL_PATH = "docs/sql/uniplus_exportacao_crm_corrigida.sql";
 const DEFAULT_LIMIT = 5000;
 const DEFAULT_SYNC_LOOKBACK_MINUTES = 15;
-const DEFAULT_SYNC_START_DATE = "2026-05-01";
+const DEFAULT_SYNC_START_DATE = "2026-03-01";
+const DEFAULT_ONLY_PLATFORM_SELLERS = true;
+const SUPABASE_WRITE_CHUNK_SIZE = 1000;
 const UNIPLUS_TIME_ZONE = "America/Sao_Paulo";
 const SYNC_ORIGIN = "uniplus";
 const RESOLVED_SALE_DATE_SQL = `COALESCE(
@@ -74,7 +76,12 @@ async function main() {
       referenceDate: options.referenceDate ?? new Date().toISOString().slice(0, 10),
       sourceName: "postgres-uniplus",
     });
-    const selected = selectValidRecords(transformed);
+    const allowedSellerIds = await resolvePlatformSellerFilter();
+    const sellerReassignments = parseIdMap(process.env.UNIPLUS_SYNC_SELLER_REASSIGNMENTS);
+    const selected = selectValidRecords(transformed, {
+      allowedSellerIds,
+      sellerReassignments,
+    });
     target = dryRun ? new DryRunTarget() : new SupabaseTarget();
     syncId = await target.beginSync(SYNC_ORIGIN);
 
@@ -108,6 +115,19 @@ async function main() {
       },
       ignoredSales: selected.ignoredSales.length,
       ignoredReasons: countBy(selected.ignoredSales.map((sale) => sale.reason)),
+      excludedSales: selected.excludedSales.length,
+      excludedReasons: countBy(selected.excludedSales.map((sale) => sale.reason)),
+      platformSellerFilter: allowedSellerIds
+        ? {
+            active: true,
+            sellerCount: allowedSellerIds.size,
+            reassignedSellerCount: sellerReassignments.size,
+          }
+        : {
+            active: false,
+            sellerCount: null,
+            reassignedSellerCount: sellerReassignments.size,
+          },
       reconciliation,
       digest: digestRows(result.rows),
     };
@@ -165,7 +185,7 @@ Uso:
   node scripts/hennder-sync.mjs --dry-run
   node scripts/hennder-sync.mjs --apply
   node scripts/hennder-sync.mjs --date 2026-07-10 --dry-run
-  node scripts/hennder-sync.mjs --from 2026-05-10 --to 2026-07-11 --dry-run
+  node scripts/hennder-sync.mjs --from 2026-03-01 --to 2026-07-11 --dry-run
   node scripts/hennder-sync.mjs --since auto --limit 5000 --dry-run
   node scripts/hennder-sync.mjs --since 2026-07-01T00:00:00-03:00 --apply
 
@@ -311,7 +331,27 @@ function normalizeValue(value) {
   return value;
 }
 
-function selectValidRecords(data) {
+async function resolvePlatformSellerFilter() {
+  if (!parseBoolean(process.env.UNIPLUS_SYNC_ONLY_PLATFORM_SELLERS, DEFAULT_ONLY_PLATFORM_SELLERS)) {
+    return undefined;
+  }
+
+  const target = new SupabaseTarget();
+  const allowedSellerIds = await target.getActivePlatformSellerUniplusIds();
+  for (const sellerId of parseIdList(process.env.UNIPLUS_SYNC_ADDITIONAL_SELLER_IDS)) {
+    allowedSellerIds.add(sellerId);
+  }
+  if (allowedSellerIds.size === 0) {
+    throw new Error(
+      "Nenhum vendedor ativo vinculado em crm_usuarios. Cadastre/vincule os vendedores ou defina UNIPLUS_SYNC_ONLY_PLATFORM_SELLERS=false para carga tecnica.",
+    );
+  }
+  return allowedSellerIds;
+}
+
+function selectValidRecords(data, options = {}) {
+  const allowedSellerIds = options.allowedSellerIds;
+  const sellerReassignments = options.sellerReassignments ?? new Map();
   const clientMap = new Map(data.clients.map((client) => [client.id, client]));
   const productMap = new Map(data.products.map((product) => [product.id, product]));
   const itemsBySale = new Map();
@@ -322,11 +362,24 @@ function selectValidRecords(data) {
   }
 
   const ignoredSales = [];
+  const excludedSales = [];
   const sales = [];
-  for (const sale of data.sales) {
-    const reason = getIgnoredReason(sale, itemsBySale.get(sale.id) ?? [], clientMap, productMap);
-    if (reason) ignoredSales.push({ saleId: sale.id, reason, data: sale });
-    else sales.push(sale);
+  for (const sourceSale of data.sales) {
+    const sale = reassignSaleSeller(sourceSale, sellerReassignments);
+    const reason = getIgnoredReason(
+      sale,
+      itemsBySale.get(sale.id) ?? [],
+      clientMap,
+      productMap,
+      allowedSellerIds,
+    );
+    if (reason === "vendedor_nao_cadastrado") {
+      excludedSales.push({ saleId: sale.id, reason, data: sale });
+    } else if (reason) {
+      ignoredSales.push({ saleId: sale.id, reason, data: sale });
+    } else {
+      sales.push(sale);
+    }
   }
 
   const saleIds = new Set(sales.map((sale) => sale.id));
@@ -342,13 +395,17 @@ function selectValidRecords(data) {
     sales,
     items,
     ignoredSales,
+    excludedSales,
   };
 }
 
-function getIgnoredReason(sale, items, clients, products) {
+function getIgnoredReason(sale, items, clients, products, allowedSellerIds) {
   if (!sale.clientId || !sale.clientName?.trim()) return "cliente_nao_identificado";
   if (sale.cancelledAt || sale.status.toLocaleUpperCase("pt-BR").includes("CANCEL")) return "venda_cancelada";
   if (!isBilledSale(sale.status)) return "venda_nao_faturada";
+  if (allowedSellerIds && (!sale.sellerId || !allowedSellerIds.has(sale.sellerId))) {
+    return "vendedor_nao_cadastrado";
+  }
   const client = clients.get(sale.clientId);
   if (!client) return "dados_incompletos";
   if (client.inactive) return "cliente_inativo";
@@ -481,6 +538,28 @@ class SupabaseTarget {
     await this.upsert("crm_vendedores", sellers.map(mapSeller), "uniplus_id");
   }
 
+  async getActivePlatformSellerUniplusIds() {
+    const [users, sellers] = await Promise.all([
+      this.selectAll("crm_usuarios", {
+        select: "vendedor_id",
+        ativo: "eq.true",
+        vendedor_id: "not.is.null",
+      }),
+      this.selectAll("crm_vendedores", {
+        select: "id,uniplus_id,inativo",
+        inativo: "eq.false",
+      }),
+    ]);
+    const userSellerIds = new Set(users.map((user) => user.vendedor_id).filter(Boolean));
+    return new Set(
+      sellers.flatMap((seller) =>
+        userSellerIds.has(seller.id) && seller.uniplus_id !== null && seller.uniplus_id !== undefined
+          ? [Number(seller.uniplus_id)]
+          : [],
+      ),
+    );
+  }
+
   async upsertSales(sales, items) {
     if (sales.length === 0) return;
     const [clients, sellers, products] = await Promise.all([
@@ -535,6 +614,18 @@ class SupabaseTarget {
       })),
       "uniplus_id",
     );
+    await this.removeImportedIgnoredSales(sales);
+  }
+
+  async removeImportedIgnoredSales(sales) {
+    const saleIds = [...new Set(sales.map((sale) => sale.id).filter(Boolean))];
+    for (const chunk of chunkRows(saleIds, SUPABASE_WRITE_CHUNK_SIZE)) {
+      await this.request("crm_vendas_ignoradas", {
+        method: "DELETE",
+        query: { uniplus_venda_id: `in.(${chunk.join(",")})` },
+        prefer: "return=minimal",
+      });
+    }
   }
 
   async removeStaleSaleItems(sales, items, saleIds) {
@@ -626,11 +717,7 @@ class SupabaseTarget {
     if (rows.length === 0) return;
     await this.insert(
       "crm_vendas_ignoradas",
-      rows.map((sale) => ({
-        uniplus_venda_id: sale.saleId,
-        motivo: sale.reason,
-        dados: sale.data,
-      })),
+      rows.map(mapIgnoredSaleForStorage),
       false,
     );
   }
@@ -668,20 +755,31 @@ class SupabaseTarget {
   }
 
   async insert(table, rows, returnRepresentation = true) {
-    return this.request(table, {
-      method: "POST",
-      body: rows,
-      prefer: returnRepresentation ? "return=representation" : "return=minimal",
-    });
+    const chunks = chunkRows(rows, SUPABASE_WRITE_CHUNK_SIZE);
+    const inserted = [];
+    for (const chunk of chunks) {
+      inserted.push(
+        ...(await this.request(table, {
+          method: "POST",
+          body: chunk,
+          prefer: returnRepresentation ? "return=representation" : "return=minimal",
+        })),
+      );
+    }
+    return inserted;
   }
 
   async upsert(table, rows, conflictColumn) {
-    return this.request(table, {
-      method: "POST",
-      query: { on_conflict: conflictColumn },
-      body: rows,
-      prefer: "resolution=merge-duplicates,return=representation",
-    });
+    const chunks = chunkRows(rows, SUPABASE_WRITE_CHUNK_SIZE);
+    for (const chunk of chunks) {
+      await this.request(table, {
+        method: "POST",
+        query: { on_conflict: conflictColumn },
+        body: chunk,
+        prefer: "resolution=merge-duplicates,return=minimal",
+      });
+    }
+    return [];
   }
 
   async update(table, filters, values) {
@@ -824,6 +922,14 @@ function completeRow(row) {
   );
 }
 
+function chunkRows(rows, size) {
+  const chunks = [];
+  for (let index = 0; index < rows.length; index += size) {
+    chunks.push(rows.slice(index, index + size));
+  }
+  return chunks;
+}
+
 function mapSeller(seller) {
   return {
     uniplus_id: seller.id,
@@ -835,6 +941,64 @@ function mapSeller(seller) {
     inativo: seller.inactive,
     perfil_id: seller.profileId ?? null,
   };
+}
+
+function mapIgnoredSaleForStorage(sale) {
+  const reason = normalizeIgnoredReasonForStorage(sale.reason);
+  return {
+    uniplus_venda_id: sale.saleId,
+    motivo: reason,
+    dados: reason === sale.reason ? sale.data : withStoredIgnoredReason(sale.data, sale.reason),
+  };
+}
+
+function reassignSaleSeller(sale, sellerReassignments) {
+  const targetSellerId = sale.sellerId
+    ? sellerReassignments.get(Number(sale.sellerId))
+    : undefined;
+  if (!targetSellerId || targetSellerId === sale.sellerId) return sale;
+  return {
+    ...sale,
+    originalSellerId: sale.sellerId,
+    sellerId: targetSellerId,
+  };
+}
+
+function parseIdList(value) {
+  return new Set(
+    String(value ?? "")
+      .split(",")
+      .map((entry) => positiveInteger(entry.trim()))
+      .filter(Boolean),
+  );
+}
+
+function parseIdMap(value) {
+  const mappings = new Map();
+  for (const entry of String(value ?? "").split(",")) {
+    const [source, target] = entry
+      .split(":")
+      .map((part) => positiveInteger(part.trim()));
+    if (source && target) mappings.set(source, target);
+  }
+  return mappings;
+}
+
+function normalizeIgnoredReasonForStorage(reason) {
+  if (
+    reason === "vendedor_nao_cadastrado" &&
+    !parseBoolean(process.env.UNIPLUS_SYNC_STORE_PLATFORM_SELLER_REASON, false)
+  ) {
+    return "dados_incompletos";
+  }
+  return reason;
+}
+
+function withStoredIgnoredReason(data, reason) {
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    return { ...data, crm_ignored_reason: reason };
+  }
+  return { crm_ignored_reason: reason, data };
 }
 
 function calculateRegistrationQuality(client) {
@@ -900,8 +1064,12 @@ function subtractMinutes(value, minutes) {
   return date.toISOString();
 }
 
-function parseBoolean(value) {
-  return ["1", "true", "t", "sim", "s", "yes", "y"].includes(String(value ?? "").trim().toLowerCase());
+function parseBoolean(value, fallback = false) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (!normalized) return fallback;
+  if (["1", "true", "t", "sim", "s", "yes", "y"].includes(normalized)) return true;
+  if (["0", "false", "f", "nao", "não", "n", "no"].includes(normalized)) return false;
+  return fallback;
 }
 
 function loadEnvFile(path) {

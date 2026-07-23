@@ -40,6 +40,7 @@ import {
   ShoppingBag,
   SlidersHorizontal,
   Sparkles,
+  Star,
   Sun,
   Target,
   Trophy,
@@ -63,6 +64,7 @@ import {
   YAxis,
 } from "recharts";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import dynamic from "next/dynamic";
 import Image from "next/image";
 import {
   AppInlineLoading,
@@ -108,6 +110,7 @@ import { buildCrmAttributionSummary, type CrmAttributedSale } from "@/services/c
 type View =
   | "dashboard"
   | "resultados"
+  | "avaliacoes"
   | "clientes"
   | "vendas"
   | "produtos"
@@ -141,6 +144,19 @@ const OPPORTUNITY_PAGE_SIZE = 20;
 const SESSION_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
 const SESSION_IDLE_WARNING_MS = 2 * 60 * 1000;
 const SESSION_IDLE_CHECK_INTERVAL_MS = 5 * 1000;
+const AttendanceEvaluationsModule = dynamic(
+  () =>
+    import(
+      "@/features/attendance-evaluations/attendance-evaluations-module"
+    ),
+  {
+    loading: () => (
+      <div className="min-h-80">
+        <AppInlineLoading label="Carregando avaliações de atendimento" />
+      </div>
+    ),
+  },
+);
 const crmResultsVisualTokens = {
   "--background": "Canvas",
   "--foreground": "CanvasText",
@@ -353,6 +369,7 @@ const navGroups: NavGroup[] = [
     items: [
       { id: "saude", label: "Saúde da base", description: "Monitore a qualidade dos cadastros dos clientes.", icon: ShieldCheck },
       { id: "atividades", label: "Atividades", description: "Histórico de contatos, retornos e ações realizadas.", icon: Phone },
+      { id: "avaliacoes", label: "Avaliações", description: "Qualidade do atendimento e performance por vendedor.", icon: Star },
       { id: "campanhas", label: "Campanhas", description: "Ações comerciais em lote e públicos de recompra.", icon: Sparkles },
       { id: "ia", label: "IA Comercial", description: "Receba análises e recomendações para vender melhor.", icon: Bot },
       { id: "relatorios", label: "Relatórios", description: "Analise resultados, recuperação e recorrência.", icon: PieChart },
@@ -1360,6 +1377,16 @@ export default function Home() {
             {visibleView === "vendedores" && <SellersModule customers={appCustomers} alerts={appAlerts} />}
             {visibleView === "saude" && <DataHealth customers={appCustomers} openProfile={openProfile} />}
             {visibleView === "atividades" && <ActivitiesModule contactRecords={appContactRecords} user={user} />}
+            {visibleView === "avaliacoes" && (
+              <AttendanceEvaluationsModule
+                sellers={scopedData.sellers}
+                sales={scopedData.sales}
+                saleItems={scopedData.saleItems}
+                products={scopedData.products}
+                customers={appCustomers}
+                referenceDate={crmReferenceDate}
+              />
+            )}
             {visibleView === "campanhas" && (
               <CampaignsModule
                 customers={appCustomers}
@@ -4665,6 +4692,7 @@ function SyncModule() {
   }[logs?.summary.status ?? "sem_execucao"];
   const latestSale = logs?.sales?.latest;
   const todayLatestSale = logs?.sales?.todayLatest;
+  const visibleErrors = logs?.errors.slice(0, 5) ?? [];
 
   if (loading) {
     return (
@@ -4760,10 +4788,14 @@ function SyncModule() {
         )}
       </Panel>
 
-      <Panel title="Erros e vendas ignoradas do dia" icon={AlertTriangle}>
-        {logs?.errors.length ? (
+      <Panel
+        title="Erros e vendas ignoradas do dia"
+        icon={AlertTriangle}
+        action={logs?.errors.length ? `${visibleErrors.length} de ${logs.errors.length}` : undefined}
+      >
+        {visibleErrors.length ? (
           <div className="space-y-3">
-            {logs.errors.map((item) => (
+            {visibleErrors.map((item) => (
               <div key={item.id} className="rounded-xl border border-red-100 bg-red-50/70 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="font-black text-red-900">

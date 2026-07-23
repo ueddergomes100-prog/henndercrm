@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import process from "node:process";
 
-const DEFAULT_RECONCILE_FROM = "2026-05-01";
+const DEFAULT_RECONCILE_FROM = "2026-03-01";
 
 const from =
   process.env.UNIPLUS_SYNC_RECONCILE_FROM?.trim() ||
