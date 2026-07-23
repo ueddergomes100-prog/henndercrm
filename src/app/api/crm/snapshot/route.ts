@@ -135,10 +135,7 @@ function scopeSnapshotForUser(snapshot: CrmSnapshot, user: CrmSessionUser): CrmS
   const customerIds = getSellerCustomerIds(seller.id, snapshot);
   const sales = snapshot.sales.filter((sale) => sale.sellerId === seller.id);
   const saleIds = new Set(sales.map((sale) => sale.id));
-  const saleCustomerIds = new Set(sales.map((sale) => sale.customerId));
-  const alerts = snapshot.alerts.filter(
-    (alert) => alert.sellerId === seller.id || saleCustomerIds.has(alert.customerId),
-  );
+  const alerts = snapshot.alerts.filter((alert) => alert.sellerId === seller.id);
   for (const alert of alerts) customerIds.add(alert.customerId);
   const opportunities = snapshot.opportunities.filter(
     (opportunity) => opportunity.sellerId === seller.id || customerIds.has(opportunity.customerId),

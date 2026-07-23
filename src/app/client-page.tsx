@@ -1522,8 +1522,7 @@ function buildScopedCrmData(
   const scopedAlerts = baseData.alerts.filter(
     (alert) =>
       alert.sellerId === scopedSellerId ||
-      (seller ? alert.seller === seller.name : false) ||
-      saleCustomerIds.has(alert.customerId),
+      (seller ? alert.seller === seller.name : false),
   );
   const alertCustomerIds = new Set(scopedAlerts.map((alert) => alert.customerId));
   const scopedOpportunities = opportunityItems.filter(
@@ -4495,9 +4494,13 @@ function RepurchaseEngineModule({ alerts, user }: { alerts: AlertRow[]; user: Cr
     }
   }
 
+  const normalizedQuery = query.trim().toLowerCase();
   const filteredProducts = configurableProducts.filter((product) => {
-    const normalized = query.trim().toLowerCase();
-    return !normalized || product.name.toLowerCase().includes(normalized) || product.code.toLowerCase().includes(normalized);
+    if (!normalizedQuery) return configuredProductIds.has(product.id);
+    return (
+      product.name.toLowerCase().includes(normalizedQuery) ||
+      product.code.toLowerCase().includes(normalizedQuery)
+    );
   });
   const totalPages = Math.max(1, Math.ceil(filteredProducts.length / LIST_PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
@@ -4517,7 +4520,7 @@ function RepurchaseEngineModule({ alerts, user }: { alerts: AlertRow[]; user: Cr
       </div>
       <div className="grid gap-5 xl:grid-cols-[1.25fr_0.75fr]">
         <Panel
-          title="Dias por produto"
+          title="Produtos configurados"
           icon={SlidersHorizontal}
           action={visibleProducts.length + " de " + filteredProducts.length + " produtos"}
         >
@@ -4529,7 +4532,7 @@ function RepurchaseEngineModule({ alerts, user }: { alerts: AlertRow[]; user: Cr
                 setQuery(event.target.value);
                 setPage(1);
               }}
-              placeholder="Buscar produto ou codigo"
+              placeholder="Buscar no catalogo para adicionar produto"
               className="w-full bg-transparent text-sm outline-none"
             />
           </div>
@@ -4587,7 +4590,15 @@ function RepurchaseEngineModule({ alerts, user }: { alerts: AlertRow[]; user: Cr
                 </div>
               );
             })}
-            {!filteredProducts.length && <EmptyState text="Nenhum produto encontrado." />}
+            {!filteredProducts.length && (
+              <EmptyState
+                text={
+                  normalizedQuery
+                    ? "Nenhum produto encontrado no catalogo."
+                    : "Nenhum produto configurado. Use a busca acima para adicionar o primeiro."
+                }
+              />
+            )}
           </div>
           <PaginationControls
             page={currentPage}
@@ -4600,9 +4611,11 @@ function RepurchaseEngineModule({ alerts, user }: { alerts: AlertRow[]; user: Cr
           <SimpleRows
             rows={[
               ["Regra obrigatoria", "Cada produto precisa de um prazo definido pelo gestor", "Manual"],
+              ["Lista principal", "Exibe somente os produtos configurados manualmente", "Organizado"],
+              ["Adicionar produto", "Use a busca para localizar qualquer item do catalogo", "Manual"],
               ["Produto sem prazo", "Nao gera alerta nem notificacao de recompra", "Inativo"],
               ["Nova compra", "Reinicia a contagem usando a venda faturada mais recente", "Automatico"],
-              ["Janela de exibicao", "O alerta aparece quando faltam ate 15 dias", "Operacional"],
+              ["Janela de exibicao", "O alerta aparece quando o prazo definido vence", "Operacional"],
               ["Alertas manuais", String(manualAlerts.length) + " alerta(s) cadastrado(s)", "Separado"],
             ]}
             empty="Sem informacoes para exibir."
@@ -6239,15 +6252,11 @@ function RepurchaseAlerts({
   const [page, setPage] = useState(1);
   const [contactAlert, setContactAlert] = useState<AlertRow | null>(null);
   const pageSize = 20;
-  const nextSevenDays = addIsoDays(crmReferenceDate, 7);
   const pendingAlerts = alerts.filter(
     (alert) => (alertStatuses[alert.id] ?? alert.status) === "pendente",
   );
   const filteredAlerts = pendingAlerts.filter((alert) => {
     if (filter === "hoje") return alert.recommendedIso === crmReferenceDate;
-    if (filter === "7dias") {
-      return alert.recommendedIso >= crmReferenceDate && alert.recommendedIso <= nextSevenDays;
-    }
     if (filter === "atrasados") return alert.recommendedIso < crmReferenceDate;
     if (["alta", "media", "baixa"].includes(filter)) return alert.priorityCode === filter;
     return true;
@@ -6257,7 +6266,7 @@ function RepurchaseAlerts({
 
   return (
     <div className="space-y-5">
-      <PageTitle eyebrow="Operação do dia" title="Alertas de recompra" description="Fila calculada por produto, departamento, palavra-chave e histórico individual." />
+      <PageTitle eyebrow="Operação do dia" title="Alertas de recompra" description="Clientes com prazo manual vencido e sem recompra do mesmo produto." />
       <ManualAlertPanel
         customers={customers}
         products={products}
@@ -6270,7 +6279,6 @@ function RepurchaseAlerts({
           {[
             ["todos", "Todos"],
             ["hoje", "Hoje"],
-            ["7dias", "Próximos 7 dias"],
             ["atrasados", "Atrasados"],
             ["alta", "Alta"],
             ["media", "Média"],

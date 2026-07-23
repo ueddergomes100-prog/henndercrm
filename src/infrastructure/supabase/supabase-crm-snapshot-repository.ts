@@ -30,6 +30,9 @@ import type {
 import type { ICrmSnapshotRepository } from "@/infrastructure/crm-snapshot-repository";
 import { SupabaseRestClient } from "./supabase-rest-client";
 
+const REPURCHASE_ANALYSIS_START_DATE =
+  process.env.UNIPLUS_SYNC_START_DATE?.slice(0, 10) || "2026-03-01";
+
 type ClientRow = {
   id: string;
   uniplus_id: number | null;
@@ -305,7 +308,18 @@ export class SupabaseCrmSnapshotRepository implements ICrmSnapshotRepository {
     const currentAlerts = currentRepurchaseAlerts(existingAlerts, sales);
     const currentIds = new Set(currentAlerts.map((alert) => alert.id));
     const manualAlerts = currentAlerts.filter((alert) => alert.origem === "manual");
-    const rows = buildDerivedRepurchaseAlertRows(sales, items, products, referenceDate);
+    const manualKeys = new Set(manualAlerts.map(alertUniqueKey));
+    const existingGeneratedByKey = new Map(
+      currentAlerts
+        .filter((alert) => alert.origem !== "manual")
+        .map((alert) => [alertUniqueKey(alert), alert]),
+    );
+    const rows = buildDerivedRepurchaseAlertRows(sales, items, products, referenceDate)
+      .filter((row) => !manualKeys.has(alertUniqueKey(row)))
+      .map((row) => {
+        const existing = existingGeneratedByKey.get(alertUniqueKey(row));
+        return existing ? { ...row, status: existing.status } : row;
+      });
     const desiredKeys = new Set(rows.map(alertUniqueKey));
     const staleAlerts = existingAlerts.filter((alert) =>
       !currentIds.has(alert.id) ||
@@ -536,6 +550,7 @@ function currentRepurchaseAlerts(alerts: AlertRow[], sales: SaleRow[]) {
   }
 
   return alerts.filter((alert) => {
+    if (alert.origem !== "manual") return true;
     const latestSale = latestSaleByCustomer.get(alert.cliente_id);
     return !latestSale || latestSale <= dateOnly(alert.data_compra);
   });
@@ -608,22 +623,15 @@ function buildDerivedRepurchaseAlertRows(
 ) {
   const salesById = new Map(sales.map((sale) => [sale.id, sale]));
   const productsById = new Map(products.map((product) => [product.id, product]));
-  const latestSaleDateByCustomer = new Map<string, string>();
-  for (const sale of sales) {
-    if (!sale.aprovado) continue;
-    const soldAt = dateOnly(sale.data_venda);
-    const current = latestSaleDateByCustomer.get(sale.cliente_id);
-    if (!current || soldAt > current) latestSaleDateByCustomer.set(sale.cliente_id, soldAt);
-  }
+  const preferredSellerIdByCustomer = buildPreferredSellerIdByCustomer(sales);
   const latestByCustomerProduct = new Map<string, { sale: SaleRow; item: SaleItemRow; product: ProductRow }>();
-  const horizonDate = addDays(referenceDate, 15);
 
   for (const item of items) {
     if (!item.produto_id) continue;
     const sale = salesById.get(item.venda_id);
     const product = productsById.get(item.produto_id);
     if (!sale || !product || !sale.aprovado) continue;
-    if (dateOnly(sale.data_venda) !== latestSaleDateByCustomer.get(sale.cliente_id)) continue;
+    if (dateOnly(sale.data_venda) < REPURCHASE_ANALYSIS_START_DATE) continue;
     if (
       !product.recompra_ativa ||
       !product.dias_recompra_padrao ||
@@ -642,26 +650,62 @@ function buildDerivedRepurchaseAlertRows(
       const repurchaseDays = product.dias_recompra_padrao as number;
       const purchaseDate = dateOnly(sale.data_venda);
       const expectedDate = addDays(purchaseDate, repurchaseDays);
-      if (expectedDate > horizonDate) return null;
+      if (expectedDate > referenceDate) return null;
 
       return {
         cliente_id: sale.cliente_id,
         produto_id: product.id,
         venda_id: sale.id,
         item_venda_id: item.id,
-        vendedor_responsavel_id: sale.vendedor_id,
+        vendedor_responsavel_id:
+          preferredSellerIdByCustomer.get(sale.cliente_id) ?? sale.vendedor_id,
         data_compra: sale.data_venda,
         data_prevista_recompra: expectedDate,
         dias_recompra: repurchaseDays,
         status: "pendente",
         prioridade: resolveAlertPriority(expectedDate, referenceDate),
         origem: "regra_produto",
-        observacao: "Gerado automaticamente pelo Hennder CRM a partir das vendas reais.",
+        observacao:
+          "Prazo manual vencido sem recompra do mesmo produto. Compras de outros itens nao encerram este alerta.",
       };
     })
     .filter((row): row is NonNullable<typeof row> => Boolean(row))
-    .sort((left, right) => left.data_prevista_recompra.localeCompare(right.data_prevista_recompra))
-    .slice(0, 500);
+    .sort((left, right) => left.data_prevista_recompra.localeCompare(right.data_prevista_recompra));
+}
+
+function buildPreferredSellerIdByCustomer(sales: SaleRow[]) {
+  const statsByCustomer = new Map<
+    string,
+    Map<string, { count: number; value: number; lastPurchaseAt: string }>
+  >();
+
+  for (const sale of sales) {
+    if (!sale.aprovado || !sale.vendedor_id) continue;
+    const sellerStats = statsByCustomer.get(sale.cliente_id) ?? new Map();
+    const current = sellerStats.get(sale.vendedor_id) ?? {
+      count: 0,
+      value: 0,
+      lastPurchaseAt: sale.data_venda,
+    };
+    current.count += 1;
+    current.value += Number(sale.valor_total ?? 0);
+    if (sale.data_venda > current.lastPurchaseAt) {
+      current.lastPurchaseAt = sale.data_venda;
+    }
+    sellerStats.set(sale.vendedor_id, current);
+    statsByCustomer.set(sale.cliente_id, sellerStats);
+  }
+
+  return new Map(
+    [...statsByCustomer.entries()].flatMap(([customerId, sellerStats]) => {
+      const preferred = [...sellerStats.entries()].sort((left, right) => {
+        if (right[1].count !== left[1].count) return right[1].count - left[1].count;
+        if (right[1].value !== left[1].value) return right[1].value - left[1].value;
+        return right[1].lastPurchaseAt.localeCompare(left[1].lastPurchaseAt);
+      })[0];
+      return preferred ? [[customerId, preferred[0]] as const] : [];
+    }),
+  );
 }
 
 function buildDerivedOpportunityRows(
