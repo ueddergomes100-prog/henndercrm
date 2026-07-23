@@ -787,8 +787,8 @@ function normalizeOpportunityProductName(value: string) {
 }
 
 function resolveAlertPriority(expectedDate: string, referenceDate: string): CrmRepurchaseAlert["priority"] {
-  if (expectedDate <= referenceDate) return "alta";
-  if (expectedDate <= addDays(referenceDate, 7)) return "media";
+  if (expectedDate < addDays(referenceDate, -30)) return "alta";
+  if (expectedDate < addDays(referenceDate, -7)) return "media";
   return "baixa";
 }
 

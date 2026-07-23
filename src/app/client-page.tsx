@@ -6248,21 +6248,66 @@ function RepurchaseAlerts({
     options?: CustomerContactUpdateOptions,
   ) => Promise<void>;
 }) {
+  const [queue, setQueue] = useState<"pendentes" | "contatados">("pendentes");
   const [filter, setFilter] = useState("todos");
   const [page, setPage] = useState(1);
   const [contactAlert, setContactAlert] = useState<AlertRow | null>(null);
+  const [updatingAlertId, setUpdatingAlertId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState("");
   const pageSize = 20;
-  const pendingAlerts = alerts.filter(
-    (alert) => (alertStatuses[alert.id] ?? alert.status) === "pendente",
+  const queueAlerts = alerts.filter(
+    (alert) =>
+      (alertStatuses[alert.id] ?? alert.status) ===
+      (queue === "pendentes" ? "pendente" : "contatado"),
   );
-  const filteredAlerts = pendingAlerts.filter((alert) => {
-    if (filter === "hoje") return alert.recommendedIso === crmReferenceDate;
-    if (filter === "atrasados") return alert.recommendedIso < crmReferenceDate;
-    if (["alta", "media", "baixa"].includes(filter)) return alert.priorityCode === filter;
+  const pendingCount = alerts.filter(
+    (alert) => (alertStatuses[alert.id] ?? alert.status) === "pendente",
+  ).length;
+  const contactedCount = alerts.filter(
+    (alert) => (alertStatuses[alert.id] ?? alert.status) === "contatado",
+  ).length;
+  const filteredAlerts = queueAlerts.filter((alert) => {
+    const overdueDays = alertOverdueDays(alert.recommendedIso, crmReferenceDate);
+    if (filter === "hoje") return overdueDays === 0;
+    if (filter === "ate7") return overdueDays >= 1 && overdueDays <= 7;
+    if (filter === "8a30") return overdueDays >= 8 && overdueDays <= 30;
+    if (filter === "mais30") return overdueDays > 30;
     return true;
   });
   const totalPages = Math.max(1, Math.ceil(filteredAlerts.length / pageSize));
   const visibleAlerts = filteredAlerts.slice((page - 1) * pageSize, page * pageSize);
+
+  async function markAlertAsContacted(alert: AlertRow, customer?: CustomerRow) {
+    if (updatingAlertId) return;
+    setUpdatingAlertId(alert.id);
+    setActionError("");
+    try {
+      if (customer) {
+        await onRegisterContact({
+          customerId: customer.id,
+          customerName: customer.name,
+          outcome: "no_answer",
+          note: `Registro automático: alerta de recompra marcado como contatado para ${alert.product}.`,
+          nextContact: "",
+          contactedAt: new Date().toISOString(),
+          channel: normalizeBrazilianWhatsAppNumber(customer.whatsapp)
+            ? "WhatsApp"
+            : "Telefone",
+          responsible: alert.seller,
+          sellerId: alert.sellerId,
+        });
+      }
+      await onStatusChange(alert.id, "contatado");
+    } catch (error) {
+      setActionError(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível mover o alerta para Contatados.",
+      );
+    } finally {
+      setUpdatingAlertId(null);
+    }
+  }
 
   return (
     <div className="space-y-5">
@@ -6274,15 +6319,42 @@ function RepurchaseAlerts({
         user={user}
         onCreateAlert={onCreateAlert}
       />
-      <Panel title="Alertas priorizados" icon={Bell} action={`${filteredAlerts.length} alertas`}>
+      <Panel
+        title={queue === "pendentes" ? "Alertas pendentes" : "Clientes contatados"}
+        icon={Bell}
+        action={`${filteredAlerts.length} alertas`}
+      >
+        <div className="mb-4 grid grid-cols-2 gap-2 rounded-xl border border-blue-100 bg-[#f8fbff] p-1.5 sm:w-fit">
+          {[
+            ["pendentes", `Pendentes (${pendingCount})`],
+            ["contatados", `Contatados (${contactedCount})`],
+          ].map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => {
+                setQueue(value as "pendentes" | "contatados");
+                setFilter("todos");
+                setPage(1);
+                setActionError("");
+              }}
+              className={`rounded-lg px-4 py-2 text-sm font-bold transition ${
+                queue === value
+                  ? "bg-[#0753a6] text-white shadow-sm"
+                  : "text-slate-600 hover:bg-white"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         <div className="mb-4 flex flex-wrap gap-2">
           {[
             ["todos", "Todos"],
             ["hoje", "Hoje"],
-            ["atrasados", "Atrasados"],
-            ["alta", "Alta"],
-            ["media", "Média"],
-            ["baixa", "Baixa"],
+            ["ate7", "Atrasados até 7 dias"],
+            ["8a30", "Atrasados de 8 a 30 dias"],
+            ["mais30", "Atrasados há mais de 30 dias"],
           ].map(([value, label]) => (
             <button
               key={value}
@@ -6301,10 +6373,16 @@ function RepurchaseAlerts({
             </button>
           ))}
         </div>
+        {actionError && (
+          <p className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">
+            {actionError}
+          </p>
+        )}
         <div className="grid gap-3">
           {visibleAlerts.map((alert) => {
             const customer = customers.find((item) => item.id === alert.customerId);
             const status = alertStatuses[alert.id] ?? alert.status;
+            const overdueDays = alertOverdueDays(alert.recommendedIso, crmReferenceDate);
 
             return (
               <div key={alert.id} className="rounded-lg border border-blue-100 bg-[#f8fbff] p-4 transition hover:bg-white hover:shadow-md">
@@ -6314,7 +6392,10 @@ function RepurchaseAlerts({
                   <Metric label="Vendedor" value={alert.seller} />
                   <Metric label="Compra" value={alert.buyDate} />
                   <Metric label="Recompra prevista" value={alert.recommended} />
-                  <Priority value={alert.priority} />
+                  <Metric
+                    label="Atraso"
+                    value={overdueDays === 0 ? "Vence hoje" : `${overdueDays} dia(s)`}
+                  />
                 </div>
                 <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-blue-100 pt-3">
                   <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600">
@@ -6325,37 +6406,40 @@ function RepurchaseAlerts({
                       <WhatsAppButton
                         customer={customer}
                         user={user}
-                        message={`Olá! Aqui é da Hennder CRM. Notamos que pode estar próximo o momento de recomprar ${alert.product}. Podemos ajudar?`}
+                        sellerName={alert.seller}
+                        repurchaseProduct={alert.product}
                         onUpdateContact={onUpdateContact}
                         onRegisterContact={onRegisterContact}
                         compact
                       />
                     )}
-                    {customer && <AlertAction label="Registrar retorno" onClick={() => setContactAlert(alert)} />}
-                    <AlertAction
-                      label="Contatado"
-                      onClick={() => {
-                        if (customer) {
-                          void onRegisterContact({
-                            customerId: customer.id,
-                            customerName: customer.name,
-                            outcome: "no_answer",
-                            note: `Registro automático: alerta de recompra marcado como contatado para ${alert.product}.`,
-                            nextContact: "",
-                            contactedAt: new Date().toISOString(),
-                            channel: customer.whatsapp ? "WhatsApp" : "Telefone",
-                            responsible: alert.seller,
-                          });
-                        }
-                        void onStatusChange(alert.id, "contatado");
-                      }}
-                    />
-                    <AlertAction label="Ignorar" onClick={() => void onStatusChange(alert.id, "ignorado")} />
+                    {customer && (
+                      <AlertAction
+                        label={queue === "pendentes" ? "Registrar retorno" : "Atualizar retorno"}
+                        onClick={() => setContactAlert(alert)}
+                      />
+                    )}
+                    {queue === "pendentes" && (
+                      <AlertAction
+                        label={updatingAlertId === alert.id ? "Movendo..." : "Contatado"}
+                        disabled={updatingAlertId !== null}
+                        onClick={() => void markAlertAsContacted(alert, customer)}
+                      />
+                    )}
                   </div>
                 </div>
               </div>
             );
           })}
+          {!visibleAlerts.length && (
+            <EmptyState
+              text={
+                queue === "pendentes"
+                  ? "Nenhum alerta pendente para este filtro."
+                  : "Nenhum cliente contatado para este filtro."
+              }
+            />
+          )}
         </div>
         {totalPages > 1 && (
           <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-blue-100 pt-4">
@@ -8567,12 +8651,21 @@ function QualityBadge({
   );
 }
 
-function AlertAction({ label, onClick }: { label: string; onClick: () => void }) {
+function AlertAction({
+  label,
+  onClick,
+  disabled = false,
+}: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="h-10 rounded-lg border border-blue-100 bg-white px-3 text-xs font-semibold text-[#0753a6] hover:border-cyan-400 hover:bg-cyan-50"
+      disabled={disabled}
+      className="h-10 rounded-lg border border-blue-100 bg-white px-3 text-xs font-semibold text-[#0753a6] hover:border-cyan-400 hover:bg-cyan-50 disabled:cursor-not-allowed disabled:opacity-50"
     >
       {label}
     </button>
@@ -8621,11 +8714,6 @@ function Score({ value }: { value: number }) {
       <span className="font-semibold text-slate-800">{value}</span>
     </div>
   );
-}
-
-function Priority({ value }: { value: string }) {
-  const style = value === "Alta" ? "bg-red-50 text-red-700" : value === "Média" ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-700";
-  return <span className={`self-center rounded-full px-3 py-1 text-xs font-semibold ${style}`}>{value}</span>;
 }
 
 function ModalFrame({
@@ -9462,6 +9550,7 @@ function WhatsAppButton({
   customer,
   user,
   sellerName,
+  repurchaseProduct,
   onUpdateContact,
   onRegisterContact,
   onContactIntent,
@@ -9471,6 +9560,7 @@ function WhatsAppButton({
   message?: string;
   user?: CrmSessionUser;
   sellerName?: string;
+  repurchaseProduct?: string;
   onUpdateContact?: (
     customer: CustomerRow,
     phone: string,
@@ -9483,7 +9573,9 @@ function WhatsAppButton({
   const [editingContact, setEditingContact] = useState(false);
   const responsibleName = resolveWhatsAppResponsibleName(user, customer, sellerName);
   const sellerFirstName = firstName(responsibleName);
-  const resolvedMessage = buildShoppingRuralWhatsAppMessage(sellerFirstName);
+  const resolvedMessage = repurchaseProduct
+    ? buildShoppingRuralRepurchaseMessage(sellerFirstName, repurchaseProduct)
+    : buildShoppingRuralWhatsAppMessage(sellerFirstName);
   const phone = normalizeBrazilianWhatsAppNumber(customer.whatsapp);
 
   if (!phone) {
@@ -9661,6 +9753,32 @@ function buildShoppingRuralWhatsAppMessage(sellerName: string) {
     "Passei aqui porque lembrei de você e vi que já tem um tempinho que não passa por aqui…",
     "Fico a disposição para te atender, está precisando de algo?",
   ].join("\n");
+}
+
+function buildShoppingRuralRepurchaseMessage(
+  sellerName: string,
+  productName: string,
+) {
+  const product = formatWhatsAppProductName(productName);
+  return [
+    `Bom dia! Tudo bem? Aqui é o ${sellerName} do Shopping Rural 🤠.`,
+    "",
+    `Passei aqui porque lembrei de você e do item ${product} que levou conosco.`,
+    "Como o período de recompra já chegou, queria saber se está precisando dele novamente.",
+    "Fico à disposição para te atender.",
+  ].join("\n");
+}
+
+function formatWhatsAppProductName(value: string) {
+  const normalized = value.trim().toLocaleLowerCase("pt-BR");
+  return normalized.replace(/^./u, (letter) => letter.toLocaleUpperCase("pt-BR"));
+}
+
+function alertOverdueDays(expectedDate: string, referenceDate: string) {
+  const expected = Date.parse(`${expectedDate}T12:00:00Z`);
+  const reference = Date.parse(`${referenceDate}T12:00:00Z`);
+  if (!Number.isFinite(expected) || !Number.isFinite(reference)) return 0;
+  return Math.max(0, Math.round((reference - expected) / 86_400_000));
 }
 
 function CustomerContactModal({
