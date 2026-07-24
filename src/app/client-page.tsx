@@ -144,6 +144,9 @@ const OPPORTUNITY_PAGE_SIZE = 20;
 const SESSION_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
 const SESSION_IDLE_WARNING_MS = 2 * 60 * 1000;
 const SESSION_IDLE_CHECK_INTERVAL_MS = 5 * 1000;
+const DASHBOARD_FULL_SNAPSHOT_DELAY_MS = 15 * 1000;
+const DASHBOARD_SNAPSHOT_TIMEOUT_MS = 30 * 1000;
+const FULL_SNAPSHOT_TIMEOUT_MS = 45 * 1000;
 const AttendanceEvaluationsModule = dynamic(
   () =>
     import(
@@ -406,8 +409,12 @@ export default function Home() {
   const [user, setUser] = useState<CrmSessionUser | null>(null);
   const [authChecking, setAuthChecking] = useState(true);
   const [snapshotChecking, setSnapshotChecking] = useState(true);
+  const [snapshotError, setSnapshotError] = useState("");
+  const [snapshotReloadKey, setSnapshotReloadKey] = useState(0);
   const [fullSnapshotChecking, setFullSnapshotChecking] = useState(false);
   const [fullSnapshotReady, setFullSnapshotReady] = useState(false);
+  const [fullSnapshotError, setFullSnapshotError] = useState("");
+  const [fullSnapshotReloadKey, setFullSnapshotReloadKey] = useState(0);
   const [dashboardInsights, setDashboardInsights] = useState<CrmDashboardInsights>();
   const [, refreshRuntimeViewModel] = useState(0);
   const [activeView, setActiveView] = useState<View>("dashboard");
@@ -568,43 +575,84 @@ export default function Home() {
     if (!user) return;
     const sessionUser = user;
     let active = true;
+    let requestController: AbortController | undefined;
 
     async function loadSnapshot() {
       setSnapshotChecking(true);
+      setSnapshotError("");
       setFullSnapshotReady(false);
+      setFullSnapshotError("");
       setDashboardInsights(undefined);
-      const response = await fetch("/api/crm/snapshot?mode=dashboard", { cache: "no-store" });
-      const result = (await response.json()) as CrmSnapshot & { error?: string };
-      if (!response.ok) throw new Error(result.error ?? "Não foi possível carregar o snapshot.");
-      if (!active) return;
-      const nextViewModel = crmViewService.getViewModel(result);
-      setRuntimeViewModel(nextViewModel);
-      setDashboardInsights(result.dashboardInsights);
-      setDismissedNotificationIds(readDismissedNotificationIds(sessionUser.id, nextViewModel.snapshot.referenceDate));
-      setAgendaItems(nextViewModel.snapshot.agenda);
-      setOpportunityItems(nextViewModel.snapshot.opportunities);
-      setSelectedCustomer(nextViewModel.customers[0]);
-      refreshRuntimeViewModel((version) => version + 1);
-      setSnapshotChecking(false);
+
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        requestController = new AbortController();
+        const timeout = window.setTimeout(
+          () => requestController?.abort(),
+          DASHBOARD_SNAPSHOT_TIMEOUT_MS,
+        );
+
+        try {
+          const response = await fetch("/api/crm/snapshot?mode=dashboard", {
+            cache: "no-store",
+            signal: requestController.signal,
+          });
+          const result = (await response.json()) as CrmSnapshot & { error?: string };
+          if (!response.ok) {
+            throw new Error(result.error ?? "Não foi possível carregar os dados do CRM.");
+          }
+          if (!active) return;
+          const nextViewModel = crmViewService.getViewModel(result);
+          setRuntimeViewModel(nextViewModel);
+          setDashboardInsights(result.dashboardInsights);
+          setDismissedNotificationIds(
+            readDismissedNotificationIds(sessionUser.id, nextViewModel.snapshot.referenceDate),
+          );
+          setAgendaItems(nextViewModel.snapshot.agenda);
+          setOpportunityItems(nextViewModel.snapshot.opportunities);
+          setSelectedCustomer(nextViewModel.customers[0]);
+          refreshRuntimeViewModel((version) => version + 1);
+          setSnapshotChecking(false);
+          return;
+        } catch (error) {
+          if (!active) return;
+          if (attempt === 0) {
+            await new Promise((resolve) => window.setTimeout(resolve, 900));
+            if (!active) return;
+            continue;
+          }
+          setSnapshotError(
+            error instanceof DOMException && error.name === "AbortError"
+              ? "O carregamento demorou além do esperado."
+              : error instanceof Error
+                ? error.message
+                : "Não foi possível carregar os dados do CRM.",
+          );
+        } finally {
+          window.clearTimeout(timeout);
+        }
+      }
+
+      if (active) setSnapshotChecking(false);
     }
 
-    void loadSnapshot().catch(() => {
-      if (active) setSnapshotChecking(false);
-    });
+    void loadSnapshot();
 
     return () => {
       active = false;
+      requestController?.abort();
     };
-  }, [user]);
+  }, [snapshotReloadKey, user]);
 
   useEffect(() => {
     if (!user || snapshotChecking || fullSnapshotReady) return;
     const sessionUser = user;
     let active = true;
     const controller = new AbortController();
-    const delay = activeView === "dashboard" ? 700 : 0;
+    const delay = activeView === "dashboard" ? DASHBOARD_FULL_SNAPSHOT_DELAY_MS : 0;
     const timer = window.setTimeout(async () => {
       setFullSnapshotChecking(true);
+      setFullSnapshotError("");
+      const timeout = window.setTimeout(() => controller.abort(), FULL_SNAPSHOT_TIMEOUT_MS);
       try {
         const response = await fetch("/api/crm/snapshot", {
           cache: "no-store",
@@ -630,10 +678,18 @@ export default function Home() {
         refreshRuntimeViewModel((version) => version + 1);
         setFullSnapshotReady(true);
       } catch (error) {
-        if (active && !(error instanceof DOMException && error.name === "AbortError")) {
+        if (active) {
           setFullSnapshotReady(false);
+          setFullSnapshotError(
+            error instanceof DOMException && error.name === "AbortError"
+              ? "O carregamento dos dados detalhados demorou além do esperado."
+              : error instanceof Error
+                ? error.message
+                : "Não foi possível carregar os dados detalhados.",
+          );
         }
       } finally {
+        window.clearTimeout(timeout);
         if (active) setFullSnapshotChecking(false);
       }
     }, delay);
@@ -643,7 +699,7 @@ export default function Home() {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [activeView, fullSnapshotReady, snapshotChecking, user]);
+  }, [activeView, fullSnapshotReady, fullSnapshotReloadKey, snapshotChecking, user]);
 
   useEffect(() => {
     if (!user || snapshotChecking) return;
@@ -871,6 +927,17 @@ export default function Home() {
               { label: "Encerrando sessão" },
             )
           }
+        />
+      );
+    }
+
+    if (snapshotError) {
+      return (
+        <SystemEmptyScreen
+          label="Não foi possível carregar o CRM"
+          detail={`${snapshotError} Verifique sua conexão e tente novamente.`}
+          actionLabel="Tentar novamente"
+          onAction={() => setSnapshotReloadKey((current) => current + 1)}
         />
       );
     }
@@ -1264,7 +1331,12 @@ export default function Home() {
             className="mx-auto w-full max-w-[1560px] px-3 py-4 sm:px-5 lg:px-6"
           >
             {fullDataViewLoading ? (
-              <DeferredDataLoading activeView={visibleView} loading={fullSnapshotChecking} />
+              <DeferredDataLoading
+                activeView={visibleView}
+                loading={fullSnapshotChecking}
+                error={fullSnapshotError}
+                onRetry={() => setFullSnapshotReloadKey((current) => current + 1)}
+              />
             ) : (
               <>
             {visibleView === "dashboard" && (
@@ -1918,22 +1990,42 @@ function AuthenticatedLoadingShell({
 function DeferredDataLoading({
   activeView,
   loading,
+  error,
+  onRetry,
 }: {
   activeView: View;
   loading: boolean;
+  error: string;
+  onRetry: () => void;
 }) {
   const item = navGroups.flatMap((group) => group.items).find((candidate) => candidate.id === activeView);
   return (
     <div className="space-y-5">
       <PageTitle
         eyebrow="Dados comerciais"
-        title={item?.label ?? "Carregando mÃ³dulo"}
-        description="A Dashboard jÃ¡ estÃ¡ pronta. Finalizando os dados detalhados desta tela."
+        title={item?.label ?? "Carregando módulo"}
+        description="A Dashboard já está pronta. Finalizando os dados detalhados desta tela."
       />
       <div className="min-h-64 rounded-xl border border-blue-100 bg-white/70">
-        <AppInlineLoading
-          label={loading ? "Carregando dados detalhados" : "Preparando dados detalhados"}
-        />
+        {error && !loading ? (
+          <div className="flex min-h-64 flex-col items-center justify-center px-6 text-center">
+            <AlertTriangle size={28} className="text-amber-500" aria-hidden="true" />
+            <p className="mt-4 font-semibold text-slate-900">A carga detalhada foi interrompida</p>
+            <p className="mt-2 max-w-md text-sm text-slate-600">{error}</p>
+            <button
+              type="button"
+              onClick={onRetry}
+              className="mt-5 inline-flex h-10 items-center gap-2 rounded-lg bg-[#0753a6] px-4 text-sm font-semibold text-white transition hover:bg-[#06488f]"
+            >
+              <RefreshCcw size={16} aria-hidden="true" />
+              Tentar novamente
+            </button>
+          </div>
+        ) : (
+          <AppInlineLoading
+            label={loading ? "Carregando dados detalhados" : "Preparando dados detalhados"}
+          />
+        )}
       </div>
     </div>
   );
@@ -1942,9 +2034,13 @@ function DeferredDataLoading({
 function SystemEmptyScreen({
   label,
   detail,
+  actionLabel,
+  onAction,
 }: {
   label: string;
   detail: string;
+  actionLabel?: string;
+  onAction?: () => void;
 }) {
   return (
     <main className="flex min-h-screen items-center justify-center bg-[#02070c] px-6 text-white">
@@ -1954,6 +2050,16 @@ function SystemEmptyScreen({
         </div>
         <h1 className="mt-8 text-2xl font-bold">{label}</h1>
         <p className="mt-3 text-sm leading-6 text-slate-300">{detail}</p>
+        {actionLabel && onAction && (
+          <button
+            type="button"
+            onClick={onAction}
+            className="mt-6 inline-flex h-11 items-center gap-2 rounded-lg bg-cyan-400 px-5 text-sm font-bold text-slate-950 transition hover:bg-cyan-300"
+          >
+            <RefreshCcw size={17} aria-hidden="true" />
+            {actionLabel}
+          </button>
+        )}
       </div>
     </main>
   );
@@ -5347,12 +5453,11 @@ function Dashboard({
     (customer) => !hasFutureFollowUp(customer.id, agenda, crmReferenceDate),
   );
   const inactiveCustomers = [...customers]
-    .filter(
-      (customer) =>
-        customer.activityStatus !== "ativo" &&
-        !hasFutureFollowUp(customer.id, agenda, crmReferenceDate),
-    )
+    .filter((customer) => customer.activityStatus !== "ativo")
     .sort((a, b) => b.days - a.days);
+  const actionableInactiveCustomers = inactiveCustomers.filter(
+    (customer) => !hasFutureFollowUp(customer.id, agenda, crmReferenceDate),
+  );
   const dashboardKpis = buildDashboardKpis(customers);
   const scopedTrend = insights?.repurchaseTrend ?? buildRepurchaseTrendForSales(sales);
   const scopedCategoryData = insights?.categoryData ?? buildCategoryDataForItems(saleItems, products);
@@ -5423,7 +5528,7 @@ function Dashboard({
           </div>
         </div>
         <div className="grid gap-2 p-3 lg:grid-cols-3">
-          {inactiveCustomers.slice(0, 3).map((customer) => {
+          {actionableInactiveCustomers.slice(0, 3).map((customer) => {
             const latestContact = contactRecords.find((record) => record.customerId === customer.id);
 
             return (
@@ -5584,13 +5689,15 @@ function matchesRecoveryFilter(
   customer: CustomerRow,
   filter: RecoveryFilter,
   contactedCustomerIds: Set<string>,
+  dueFollowUpCustomerIds: Set<string>,
 ) {
   if (filter === "todos") return true;
-  if (contactedCustomerIds.has(customer.id)) return false;
+  const hasDueFollowUp = dueFollowUpCustomerIds.has(customer.id);
+  if (contactedCustomerIds.has(customer.id) && !hasDueFollowUp) return false;
   if (filter === "30-60") return customer.days >= 30 && customer.days <= 60;
   if (filter === "60-90") return customer.days > 60 && customer.days <= 90;
   if (filter === "90-plus") return customer.days > 90;
-  return true;
+  return !contactedCustomerIds.has(customer.id) || hasDueFollowUp;
 }
 
 function RecoveryCustomers({
@@ -5620,19 +5727,33 @@ function RecoveryCustomers({
   const [activeFilter, setActiveFilter] = useState<RecoveryFilter>("todos");
   const [page, setPage] = useState(1);
   const inactiveCustomers = [...customers]
-    .filter(
-      (customer) =>
-        customer.activityStatus !== "ativo" &&
-        !hasFutureFollowUp(customer.id, agenda, crmReferenceDate),
-    )
+    .filter((customer) => customer.activityStatus !== "ativo")
     .sort((a, b) => b.days - a.days);
+  const queuedInactiveCustomers = inactiveCustomers.filter(
+    (customer) => !hasFutureFollowUp(customer.id, agenda, crmReferenceDate),
+  );
   const contactedCustomerIds = new Set(
     contactRecords
       .filter((record) => record.outcome !== "invalid_number")
       .map((record) => record.customerId),
   );
-  const filteredInactiveCustomers = inactiveCustomers.filter((customer) =>
-    matchesRecoveryFilter(customer, activeFilter, contactedCustomerIds),
+  const dueFollowUpCustomerIds = new Set(
+    agenda
+      .filter(
+        (event) =>
+          isOpenAutomaticFollowUp(event) &&
+          Boolean(event.customerId) &&
+          event.date <= crmReferenceDate,
+      )
+      .map((event) => event.customerId as string),
+  );
+  const filteredInactiveCustomers = queuedInactiveCustomers.filter((customer) =>
+    matchesRecoveryFilter(
+      customer,
+      activeFilter,
+      contactedCustomerIds,
+      dueFollowUpCustomerIds,
+    ),
   );
   const totalPages = Math.max(1, Math.ceil(filteredInactiveCustomers.length / LIST_PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
@@ -5640,7 +5761,7 @@ function RecoveryCustomers({
     (currentPage - 1) * LIST_PAGE_SIZE,
     currentPage * LIST_PAGE_SIZE,
   );
-  const pendingContactCustomers = inactiveCustomers.filter(
+  const pendingContactCustomers = queuedInactiveCustomers.filter(
     (customer) => !contactedCustomerIds.has(customer.id),
   );
 
@@ -5689,7 +5810,8 @@ function RecoveryCustomers({
         </div>
         {activeFilter !== "todos" && (
           <div className="mb-4 rounded-lg border border-blue-100 bg-blue-50/60 px-4 py-3 text-sm font-medium text-slate-700">
-            Este filtro mostra apenas clientes sem contato registrado, para o vendedor continuar a fila sem perder tempo.
+            Este filtro mostra clientes ainda não contatados e retornos que já chegaram
+            à data programada.
           </div>
         )}
 
