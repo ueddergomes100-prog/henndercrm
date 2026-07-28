@@ -4346,7 +4346,8 @@ function ActivitiesModule({
     acc[record.outcome] = (acc[record.outcome] ?? 0) + 1;
     return acc;
   }, {});
-  const contactMetrics = buildSellerContactMetrics(contactRecords, new Date().toISOString().slice(0, 10));
+  const contactMetrics = buildSellerContactMetrics(contactRecords, new Date().toISOString().slice(0, 10))
+    .filter((row) => !isHiddenSellerMetricUser(row.responsible));
 
   return (
     <div className="space-y-5">
@@ -9195,6 +9196,25 @@ function normalizeContactDateIso(value: string) {
 
   const parsed = new Date(rawValue);
   return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString().slice(0, 10);
+}
+
+const hiddenSellerMetricUsers = new Set([
+  normalizeSellerMetricName("Administrador"),
+  normalizeSellerMetricName("Hennder CRM"),
+  normalizeSellerMetricName("FELLIPE DE FREITAS TEIXEIRA"),
+]);
+
+function normalizeSellerMetricName(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLocaleUpperCase("pt-BR");
+}
+
+function isHiddenSellerMetricUser(value: string) {
+  return hiddenSellerMetricUsers.has(normalizeSellerMetricName(value));
 }
 
 function buildSellerContactMetrics(contactRecords: ContactRecord[], todayIso: string) {
