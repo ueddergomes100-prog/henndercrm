@@ -54,37 +54,32 @@ export class CrmWorkspaceRepository implements ICrmWorkspaceRepository {
     };
     workspace.contacts.unshift(record);
 
-    const automaticContact = isAutomaticContactNote(input.note);
     const existingFollowUps = workspace.agenda.filter(
       (event) =>
         Boolean(event.contactId) &&
         event.customerId === input.customerId &&
         (!input.sellerId || event.sellerId === input.sellerId),
     );
-    const removedFollowUpIds = automaticContact
-      ? []
-      : existingFollowUps.map((event) => event.id);
+    const removedFollowUpIds = existingFollowUps.map((event) => event.id);
     let followUp: CrmAgendaEvent | undefined;
 
-    if (!automaticContact) {
-      workspace.agenda = workspace.agenda.filter(
-        (event) => !removedFollowUpIds.includes(event.id),
-      );
-      if (input.nextContact) {
-        followUp = {
-          id: existingFollowUps[0]?.id ?? randomUUID(),
-          date: input.nextContact,
-          time: "09:00",
-          title: `Retorno: ${input.customerName}`,
-          type: "Retorno",
-          customerId: input.customerId,
-          sellerId: input.sellerId,
-          completed: false,
-          note: followUpNote(String(record.id)),
-          contactId: String(record.id),
-        };
-        workspace.agenda.push(followUp);
-      }
+    workspace.agenda = workspace.agenda.filter(
+      (event) => !removedFollowUpIds.includes(event.id),
+    );
+    if (input.nextContact) {
+      followUp = {
+        id: existingFollowUps[0]?.id ?? randomUUID(),
+        date: input.nextContact,
+        time: "09:00",
+        title: `Retorno: ${input.customerName}`,
+        type: "Retorno",
+        customerId: input.customerId,
+        sellerId: input.sellerId,
+        completed: false,
+        note: followUpNote(String(record.id)),
+        contactId: String(record.id),
+      };
+      workspace.agenda.push(followUp);
     }
 
     await this.save(workspace);

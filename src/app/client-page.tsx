@@ -147,6 +147,13 @@ const SESSION_IDLE_CHECK_INTERVAL_MS = 5 * 1000;
 const DASHBOARD_FULL_SNAPSHOT_DELAY_MS = 15 * 1000;
 const DASHBOARD_SNAPSHOT_TIMEOUT_MS = 30 * 1000;
 const FULL_SNAPSHOT_TIMEOUT_MS = 45 * 1000;
+const AUTOMATIC_CONTACT_FOLLOW_UP_DAYS = 7;
+const DEFAULT_WHATSAPP_MESSAGE_TEMPLATE = [
+  "Bom dia! Tudo bem? Aqui é o {vendedor} do Shopping Rural 🤠.",
+  "",
+  "Passei aqui porque lembrei de você e vi que já tem um tempinho que não passa por aqui…",
+  "Fico à disposição para te atender, está precisando de algo?",
+].join("\n");
 const AttendanceEvaluationsModule = dynamic(
   () =>
     import(
@@ -188,6 +195,7 @@ type ManagedCrmUser = {
   role: CrmUserRole;
   sellerId?: string | null;
   active: boolean;
+  whatsAppMessage?: string;
 };
 type ManualCustomerSaveResult = {
   id: string;
@@ -402,6 +410,7 @@ const sellerAllowedViews: View[] = [
   "agenda",
   "ia",
   "relatorios",
+  "configuracoes",
 ];
 const supervisorBlockedViews: View[] = ["configuracoes"];
 export default function Home() {
@@ -1448,7 +1457,14 @@ export default function Home() {
             )}
             {visibleView === "vendedores" && <SellersModule customers={appCustomers} alerts={appAlerts} />}
             {visibleView === "saude" && <DataHealth customers={appCustomers} openProfile={openProfile} />}
-            {visibleView === "atividades" && <ActivitiesModule contactRecords={appContactRecords} user={user} />}
+            {visibleView === "atividades" && (
+              <ActivitiesModule
+                contactRecords={appContactRecords}
+                sales={scopedData.sales}
+                sellers={scopedData.sellers}
+                user={user}
+              />
+            )}
             {visibleView === "avaliacoes" && (
               <AttendanceEvaluationsModule
                 sellers={scopedData.sellers}
@@ -4330,9 +4346,13 @@ function SellersModule({ customers, alerts }: { customers: CustomerRow[]; alerts
 
 function ActivitiesModule({
   contactRecords,
+  sales,
+  sellers,
   user,
 }: {
   contactRecords: ContactRecord[];
+  sales: SaleRow[];
+  sellers: SellerRow[];
   user: CrmSessionUser;
 }) {
   const [page, setPage] = useState(1);
@@ -4342,47 +4362,50 @@ function ActivitiesModule({
     (currentPage - 1) * LIST_PAGE_SIZE,
     currentPage * LIST_PAGE_SIZE,
   );
-  const outcomes = contactRecords.reduce<Record<string, number>>((acc, record) => {
-    acc[record.outcome] = (acc[record.outcome] ?? 0) + 1;
-    return acc;
-  }, {});
-  const contactMetrics = buildSellerContactMetrics(contactRecords, new Date().toISOString().slice(0, 10))
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const monthPrefix = todayIso.slice(0, 7);
+  const contactMetrics = buildSellerCommercialMetrics(contactRecords, sales, sellers, todayIso)
     .filter((row) => !isHiddenSellerMetricUser(row.responsible));
+  const todayContacts = contactRecords.filter(
+    (record) => normalizeContactDateIso(record.contactedAt) === todayIso,
+  ).length;
+  const monthSales = sales.filter((sale) => normalizeContactDateIso(sale.soldAt).startsWith(monthPrefix));
+  const monthRevenue = monthSales.reduce((total, sale) => total + sale.totalValue, 0);
 
   return (
     <div className="space-y-5">
       <PageTitle eyebrow="Inteligência" title="Atividades" description="Histórico de contatos, retornos e ações feitas pela equipe." />
       <div className="grid gap-4 md:grid-cols-4">
         <MetricCard label="Atividades" value={`${contactRecords.length}`} />
-        <MetricCard label="Interessados" value={`${outcomes.interested ?? 0}`} />
-        <MetricCard label="Retornos" value={`${outcomes.follow_up ?? 0}`} />
-        <MetricCard label="Sem resposta" value={`${outcomes.no_answer ?? 0}`} />
+        <MetricCard label="Contatos hoje" value={`${todayContacts}`} />
+        <MetricCard label="Vendas do mês" value={`${monthSales.length}`} />
+        <MetricCard label="Faturamento do mês" value={formatCurrency(monthRevenue)} />
       </div>
       {user.role !== "vendedor" && (
-        <Panel title="Métricas por vendedor" icon={UsersRound} action="Hoje, semana e mês">
+        <Panel title="Métricas por vendedor" icon={UsersRound} action="Contatos e vendas">
           <div className="overflow-x-auto">
             <table className="min-w-full text-left text-sm">
               <thead className="text-xs uppercase tracking-wide text-slate-400">
                 <tr>
                   <th className="px-3 py-2">Vendedor</th>
-                  <th className="px-3 py-2">Hoje</th>
-                  <th className="px-3 py-2">Semana</th>
-                  <th className="px-3 py-2">Mês</th>
-                  <th className="px-3 py-2">Interessados</th>
-                  <th className="px-3 py-2">Retornos</th>
-                  <th className="px-3 py-2">Sem resposta</th>
+                  <th className="px-3 py-2">Contatos hoje</th>
+                  <th className="px-3 py-2">Vendas hoje</th>
+                  <th className="px-3 py-2">Vendas semana</th>
+                  <th className="px-3 py-2">Vendas mês</th>
+                  <th className="px-3 py-2">Faturamento mês</th>
+                  <th className="px-3 py-2">Ticket médio</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-blue-50">
                 {contactMetrics.map((row) => (
                   <tr key={row.responsible} className="hover:bg-cyan-50/60">
                     <td className="px-3 py-3 font-semibold text-[#123252]">{row.responsible}</td>
-                    <td className="px-3 py-3 font-black text-[#0753a6]">{row.today}</td>
-                    <td className="px-3 py-3">{row.week}</td>
-                    <td className="px-3 py-3">{row.month}</td>
-                    <td className="px-3 py-3">{row.interested}</td>
-                    <td className="px-3 py-3">{row.followUps}</td>
-                    <td className="px-3 py-3">{row.noAnswer}</td>
+                    <td className="px-3 py-3">{row.contactsToday}</td>
+                    <td className="px-3 py-3 font-black text-[#0753a6]">{row.salesToday}</td>
+                    <td className="px-3 py-3">{row.salesWeek}</td>
+                    <td className="px-3 py-3">{row.salesMonth}</td>
+                    <td className="px-3 py-3 font-bold text-[#123252]">{formatCurrency(row.monthRevenue)}</td>
+                    <td className="px-3 py-3">{formatCurrency(row.averageTicket)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -4946,8 +4969,11 @@ function SettingsModule({
 
   return (
     <div className="space-y-5">
-      <UserManagementPanel user={user} sellers={sellers} onUserChange={onUserChange} />
       <PageTitle eyebrow="Sistema" title="Configurações" description="Parâmetros operacionais, usuários, permissões e integração." />
+      <WhatsAppMessageSettings user={user} onUserChange={onUserChange} />
+      {user.role === "administrador" && (
+        <UserManagementPanel user={user} sellers={sellers} onUserChange={onUserChange} />
+      )}
       <Panel title="Central de configurações" icon={Settings}>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {settings.map((item) => (
@@ -5011,7 +5037,7 @@ function getSettingsRows(
     preferencias: [
       ["Tema", "Alternancia por icone no topo", "Salvo no navegador"],
       ["Notificacoes", "Sino com alertas de hoje, atrasos e cadastros", "Ativo"],
-      ["Mensagens automaticas", "Reservado para etapa final com automacao", "Pendente"],
+      ["Mensagens automaticas", "Personalizada individualmente por vendedor", "Ativo"],
     ],
   };
 
@@ -5963,6 +5989,97 @@ function RecoveryCustomers({
         />
       )}
     </div>
+  );
+}
+
+function WhatsAppMessageSettings({
+  user,
+  onUserChange,
+}: {
+  user: CrmSessionUser;
+  onUserChange: (user: CrmSessionUser) => void;
+}) {
+  const [messageTemplate, setMessageTemplate] = useState(
+    user.whatsAppMessage || DEFAULT_WHATSAPP_MESSAGE_TEMPLATE,
+  );
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState("");
+  const [error, setError] = useState("");
+
+  async function saveMessage() {
+    const normalizedMessage = messageTemplate.trim();
+    if (!normalizedMessage) {
+      setError("Escreva a mensagem automática antes de salvar.");
+      return;
+    }
+
+    setSaving(true);
+    setStatus("");
+    setError("");
+    try {
+      const response = await fetch("/api/crm/users", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: user.id, whatsAppMessage: normalizedMessage }),
+      });
+      const result = (await response.json()) as {
+        sessionUser?: CrmSessionUser;
+        error?: string;
+      };
+      if (!response.ok || !result.sessionUser) {
+        throw new Error(result.error ?? "Não foi possível salvar a mensagem.");
+      }
+      onUserChange(result.sessionUser);
+      setMessageTemplate(result.sessionUser.whatsAppMessage || DEFAULT_WHATSAPP_MESSAGE_TEMPLATE);
+      setStatus("Mensagem salva. Os próximos contatos usarão este texto.");
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Não foi possível salvar a mensagem.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Panel title="Mensagem automática do WhatsApp" icon={MessageCircle} action="Individual por vendedor">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <label className="block min-w-0">
+          <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Sua mensagem</span>
+          <textarea
+            value={messageTemplate}
+            onChange={(event) => setMessageTemplate(event.target.value)}
+            maxLength={1500}
+            rows={7}
+            className="mt-2 w-full resize-y rounded-xl border border-blue-100 bg-white px-4 py-3 text-sm leading-6 text-[#123252] outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100"
+          />
+        </label>
+        <div className="rounded-xl border border-blue-100 bg-[#f8fbff] p-4">
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Campos disponíveis</p>
+          <div className="mt-3 space-y-2 text-sm text-slate-600">
+            <p><strong className="text-[#123252]">{"{vendedor}"}</strong> usa o primeiro nome do vendedor.</p>
+            <p><strong className="text-[#123252]">{"{cliente}"}</strong> usa o primeiro nome do cliente.</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setMessageTemplate(DEFAULT_WHATSAPP_MESSAGE_TEMPLATE)}
+            className="mt-4 inline-flex h-10 items-center gap-2 rounded-lg border border-blue-100 bg-white px-3 text-sm font-semibold text-[#0753a6] hover:bg-cyan-50"
+          >
+            <RefreshCcw size={15} /> Restaurar padrão
+          </button>
+        </div>
+      </div>
+      {error && <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{error}</p>}
+      {status && <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">{status}</p>}
+      <div className="mt-4 flex justify-end">
+        <button
+          type="button"
+          onClick={() => void saveMessage()}
+          disabled={saving}
+          className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#0753a6] px-4 text-sm font-semibold text-white disabled:opacity-60 sm:w-auto"
+        >
+          <CheckCircle2 size={17} /> {saving ? "Salvando..." : "Salvar mensagem"}
+        </button>
+      </div>
+    </Panel>
   );
 }
 
@@ -9217,42 +9334,71 @@ function isHiddenSellerMetricUser(value: string) {
   return hiddenSellerMetricUsers.has(normalizeSellerMetricName(value));
 }
 
-function buildSellerContactMetrics(contactRecords: ContactRecord[], todayIso: string) {
+function buildSellerCommercialMetrics(
+  contactRecords: ContactRecord[],
+  sales: SaleRow[],
+  sellers: SellerRow[],
+  todayIso: string,
+) {
   const weekStartIso = addIsoDays(todayIso, -6);
   const monthPrefix = todayIso.slice(0, 7);
+  const sellersById = new Map(sellers.map((seller) => [seller.id, seller.name]));
   const rows = new Map<string, {
     responsible: string;
-    today: number;
-    week: number;
-    month: number;
-    interested: number;
-    followUps: number;
-    noAnswer: number;
+    contactsToday: number;
+    salesToday: number;
+    salesWeek: number;
+    salesMonth: number;
+    monthRevenue: number;
+    averageTicket: number;
   }>();
+
+  function getRow(responsible: string) {
+    const current = rows.get(responsible) ?? {
+      responsible,
+      contactsToday: 0,
+      salesToday: 0,
+      salesWeek: 0,
+      salesMonth: 0,
+      monthRevenue: 0,
+      averageTicket: 0,
+    };
+    rows.set(responsible, current);
+    return current;
+  }
 
   for (const record of contactRecords) {
     const dateIso = normalizeContactDateIso(record.contactedAt);
-    const responsible = record.responsible || "Sem responsável";
-    const current = rows.get(responsible) ?? {
-      responsible,
-      today: 0,
-      week: 0,
-      month: 0,
-      interested: 0,
-      followUps: 0,
-      noAnswer: 0,
-    };
-
-    if (dateIso === todayIso) current.today += 1;
-    if (dateIso >= weekStartIso && dateIso <= todayIso) current.week += 1;
-    if (dateIso.startsWith(monthPrefix)) current.month += 1;
-    if (record.outcome === "interested") current.interested += 1;
-    if (record.outcome === "follow_up") current.followUps += 1;
-    if (record.outcome === "no_answer") current.noAnswer += 1;
-    rows.set(responsible, current);
+    const responsible = record.responsible || "Sem responsavel";
+    const current = getRow(responsible);
+    if (dateIso === todayIso) current.contactsToday += 1;
   }
 
-  return [...rows.values()].sort((left, right) => right.today - left.today || right.week - left.week || right.month - left.month);
+  for (const sale of sales) {
+    const dateIso = normalizeContactDateIso(sale.soldAt);
+    const responsible = sale.sellerId ? sellersById.get(sale.sellerId) ?? "Nao atribuido" : "Nao atribuido";
+    const current = getRow(responsible);
+
+    if (dateIso === todayIso) current.salesToday += 1;
+    if (dateIso >= weekStartIso && dateIso <= todayIso) current.salesWeek += 1;
+    if (dateIso.startsWith(monthPrefix)) {
+      current.salesMonth += 1;
+      current.monthRevenue += sale.totalValue;
+    }
+  }
+
+  for (const row of rows.values()) {
+    row.averageTicket = row.salesMonth ? row.monthRevenue / row.salesMonth : 0;
+  }
+
+  return [...rows.values()].sort(
+    (left, right) =>
+      right.monthRevenue - left.monthRevenue ||
+      right.salesMonth - left.salesMonth ||
+      right.salesWeek - left.salesWeek ||
+      right.salesToday - left.salesToday ||
+      right.contactsToday - left.contactsToday,
+  );
 }
 
 function addIsoDays(value: string, days: number) {
@@ -9722,6 +9868,7 @@ function formatGenericList(items: string[]) {
 }
 function WhatsAppButton({
   customer,
+  message,
   user,
   sellerName,
   repurchaseProduct,
@@ -9749,7 +9896,11 @@ function WhatsAppButton({
   const sellerFirstName = firstName(responsibleName);
   const resolvedMessage = repurchaseProduct
     ? buildShoppingRuralRepurchaseMessage(sellerFirstName, repurchaseProduct)
-    : buildShoppingRuralWhatsAppMessage(sellerFirstName);
+    : resolvePersonalizedWhatsAppMessage(
+        user?.whatsAppMessage || message || buildShoppingRuralWhatsAppMessage("{vendedor}"),
+        sellerFirstName,
+        customer.name,
+      );
   const phone = normalizeBrazilianWhatsAppNumber(customer.whatsapp);
 
   if (!phone) {
@@ -9791,7 +9942,13 @@ function WhatsAppButton({
         rel="noopener noreferrer"
         onClick={() => {
           onContactIntent?.(customer);
-          recordAutomaticContactIntent(customer, resolvedMessage, responsibleName, onRegisterContact);
+          recordAutomaticContactIntent(
+            customer,
+            resolvedMessage,
+            responsibleName,
+            user ? resolveContactSellerId(user, customer) : customer.preferredSellerId,
+            onRegisterContact,
+          );
         }}
         aria-label={`Chamar ${customer.name} no WhatsApp`}
         title={`Chamar ${customer.name} no WhatsApp`}
@@ -9831,6 +9988,7 @@ function recordAutomaticContactIntent(
   customer: CustomerRow,
   message: string,
   responsibleName: string,
+  sellerId?: string,
   onRegisterContact?: (record: Omit<ContactRecord, "id">) => Promise<void>,
 ) {
   const storageKey = automaticContactIntentStorageKey(customer.id);
@@ -9846,10 +10004,11 @@ function recordAutomaticContactIntent(
     customerName: customer.name,
     outcome: "no_answer",
     note: `Registro automático: clique no WhatsApp. Mensagem sugerida: ${message}`,
-    nextContact: "",
+    nextContact: addDaysIso(new Date(), AUTOMATIC_CONTACT_FOLLOW_UP_DAYS),
     contactedAt: new Date().toISOString(),
     channel: "WhatsApp",
     responsible: responsibleName || customer.preferredSeller || "Hennder CRM",
+    sellerId,
   } satisfies Omit<ContactRecord, "id">;
 
   if (onRegisterContact) {
@@ -9921,12 +10080,23 @@ function firstName(value: string) {
 }
 
 function buildShoppingRuralWhatsAppMessage(sellerName: string) {
-  return [
-    `Bom dia! Tudo bem? Aqui é o ${sellerName} do Shopping Rural 🤠.`,
-    "",
-    "Passei aqui porque lembrei de você e vi que já tem um tempinho que não passa por aqui…",
-    "Fico a disposição para te atender, está precisando de algo?",
-  ].join("\n");
+  return DEFAULT_WHATSAPP_MESSAGE_TEMPLATE.replaceAll("{vendedor}", sellerName);
+}
+
+function resolvePersonalizedWhatsAppMessage(
+  template: string,
+  sellerName: string,
+  customerName: string,
+) {
+  return template
+    .replaceAll("{vendedor}", sellerName)
+    .replaceAll("{cliente}", firstName(customerName));
+}
+
+function addDaysIso(date: Date, days: number) {
+  const nextDate = new Date(date);
+  nextDate.setDate(nextDate.getDate() + days);
+  return nextDate.toISOString().slice(0, 10);
 }
 
 function buildShoppingRuralRepurchaseMessage(

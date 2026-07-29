@@ -22,6 +22,7 @@ export interface CrmSessionUser {
   email: string;
   role: CrmUserRole;
   sellerId?: string;
+  whatsAppMessage?: string;
 }
 
 export interface UniplusClient {

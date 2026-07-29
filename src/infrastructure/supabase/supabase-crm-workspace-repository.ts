@@ -225,7 +225,16 @@ export class SupabaseCrmWorkspaceRepository implements ICrmWorkspaceRepository {
         responsible: existingAutomaticContact.responsavel_nome ?? responsible,
         sellerId: existingAutomaticContact.vendedor_id ?? sellerId ?? undefined,
       };
-      return { contact, removedFollowUpIds: [] };
+      const followUpResult = sellerId
+        ? await this.saveContactFollowUp(
+            customer.id,
+            customer.nome,
+            sellerId,
+            input.nextContact,
+            existingAutomaticContact.id,
+          )
+        : { removedFollowUpIds: [] };
+      return { contact, ...followUpResult };
     }
 
     const [row] = await this.client.insert<{ id: string }>(
@@ -248,46 +257,18 @@ export class SupabaseCrmWorkspaceRepository implements ICrmWorkspaceRepository {
       sellerId: sellerId ?? undefined,
     };
 
-    if (automaticContact || !sellerId) {
+    if (!sellerId) {
       return { contact, removedFollowUpIds: [] };
     }
 
-    const existingFollowUps = await this.findOpenFollowUps(customer.id, sellerId);
-    const removedFollowUpIds = existingFollowUps.map((event) => event.id);
-    let followUp: CrmAgendaEvent | undefined;
-
-    if (input.nextContact) {
-      const values = {
-        titulo: `Retorno: ${customer.nome}`,
-        tipo: "Retorno" as const,
-        data_evento: input.nextContact,
-        hora_evento: "09:00",
-        cliente_id: customer.id,
-        vendedor_id: sellerId,
-        concluido: false,
-        observacao: followUpNote(row.id),
-      };
-      const savedRows = existingFollowUps[0]
-        ? await this.client.update<AgendaRow>(
-            "crm_agenda_eventos",
-            { id: existingFollowUps[0].id },
-            values,
-          )
-        : await this.client.insert<AgendaRow>("crm_agenda_eventos", [values]);
-      const savedRow = savedRows[0];
-      if (!savedRow) throw new Error("Nao foi possivel agendar o retorno.");
-      followUp = mapAgendaRow(savedRow);
-
-      for (const duplicate of existingFollowUps.slice(1)) {
-        await this.client.delete("crm_agenda_eventos", { id: duplicate.id });
-      }
-    } else {
-      for (const event of existingFollowUps) {
-        await this.client.delete("crm_agenda_eventos", { id: event.id });
-      }
-    }
-
-    return { contact, followUp, removedFollowUpIds };
+    const followUpResult = await this.saveContactFollowUp(
+      customer.id,
+      customer.nome,
+      sellerId,
+      input.nextContact,
+      row.id,
+    );
+    return { contact, ...followUpResult };
   }
 
   async createManualCustomer(input: ManualCustomerInput): Promise<ManualCustomerResult> {
@@ -517,6 +498,50 @@ export class SupabaseCrmWorkspaceRepository implements ICrmWorkspaceRepository {
       order: "data_evento.asc,hora_evento.asc",
     });
     return rows.filter((row) => Boolean(contactIdFromFollowUpNote(row.observacao)));
+  }
+
+  private async saveContactFollowUp(
+    customerId: string,
+    customerName: string,
+    sellerId: string,
+    nextContact: string,
+    contactId: string,
+  ): Promise<Pick<CrmContactSaveResult, "followUp" | "removedFollowUpIds">> {
+    const existingFollowUps = await this.findOpenFollowUps(customerId, sellerId);
+    const removedFollowUpIds = existingFollowUps.map((event) => event.id);
+
+    if (!nextContact) {
+      for (const event of existingFollowUps) {
+        await this.client.delete("crm_agenda_eventos", { id: event.id });
+      }
+      return { removedFollowUpIds };
+    }
+
+    const values = {
+      titulo: `Retorno: ${customerName}`,
+      tipo: "Retorno" as const,
+      data_evento: nextContact,
+      hora_evento: "09:00",
+      cliente_id: customerId,
+      vendedor_id: sellerId,
+      concluido: false,
+      observacao: followUpNote(contactId),
+    };
+    const savedRows = existingFollowUps[0]
+      ? await this.client.update<AgendaRow>(
+          "crm_agenda_eventos",
+          { id: existingFollowUps[0].id },
+          values,
+        )
+      : await this.client.insert<AgendaRow>("crm_agenda_eventos", [values]);
+    const savedRow = savedRows[0];
+    if (!savedRow) throw new Error("Nao foi possivel agendar o retorno.");
+
+    for (const duplicate of existingFollowUps.slice(1)) {
+      await this.client.delete("crm_agenda_eventos", { id: duplicate.id });
+    }
+
+    return { followUp: mapAgendaRow(savedRow), removedFollowUpIds };
   }
 
   private async removePurchasedFollowUps(

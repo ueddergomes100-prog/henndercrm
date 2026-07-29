@@ -2,6 +2,7 @@ import type { CrmContactRecord, CrmSale } from "@/domain/crm/types";
 import type { CustomerViewModel } from "@/services/crm-view-service";
 
 const DAY_IN_MS = 86_400_000;
+export const CRM_ATTRIBUTION_MAX_DAYS = 30;
 
 export const crmAttributionWindows = [
   {
@@ -115,7 +116,7 @@ export function buildCrmAttributionSummary({
           contact,
           days: daysBetween(contact.date, saleDate),
         }))
-        .filter((item) => item.days >= 0 && item.days <= 30)
+        .filter((item) => item.days >= 0 && item.days <= CRM_ATTRIBUTION_MAX_DAYS)
         .sort((left, right) => left.days - right.days)[0];
 
       if (!candidate) return [];

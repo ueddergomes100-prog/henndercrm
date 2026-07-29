@@ -15,6 +15,7 @@ type CrmUserRow = {
   perfil: CrmUserRole;
   vendedor_id: string | null;
   ativo: boolean;
+  mensagem_whatsapp?: string | null;
 };
 
 type SupabaseAuthUser = {
@@ -28,6 +29,7 @@ type CreateUserBody = {
   password?: string;
   role?: CrmUserRole;
   sellerId?: string;
+  whatsAppMessage?: string;
 };
 
 type UpdateUserBody = {
@@ -36,6 +38,7 @@ type UpdateUserBody = {
   role?: CrmUserRole;
   sellerId?: string | null;
   password?: string;
+  whatsAppMessage?: string | null;
 };
 
 export async function GET() {
@@ -43,9 +46,7 @@ export async function GET() {
   if (user instanceof Response) return user;
 
   try {
-    const users = await supabaseRequest<CrmUserRow[]>(
-      "/rest/v1/crm_usuarios?select=id,auth_user_id,nome,email,perfil,vendedor_id,ativo&order=nome.asc",
-    );
+    const users = await listCrmUsers();
 
     return Response.json({
       users: users.map(toResponseUser),
@@ -108,7 +109,7 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const currentUser = await requireAdmin();
+  const currentUser = await requireAuthenticatedUser();
   if (currentUser instanceof Response) return currentUser;
 
   const body = (await request.json()) as UpdateUserBody;
@@ -118,9 +119,25 @@ export async function PATCH(request: Request) {
   const hasSellerId = Object.prototype.hasOwnProperty.call(body, "sellerId");
   const sellerId = body.sellerId?.trim() || null;
   const password = body.password?.trim();
+  const hasWhatsAppMessage = Object.prototype.hasOwnProperty.call(body, "whatsAppMessage");
+  const whatsAppMessage = body.whatsAppMessage?.trim() || null;
+  const updatesProfileFields =
+    body.name !== undefined ||
+    body.role !== undefined ||
+    hasSellerId ||
+    body.password !== undefined;
 
   if (!id) {
     return Response.json({ error: "Informe o usuario." }, { status: 400 });
+  }
+  if (
+    currentUser.role !== "administrador" &&
+    (id !== currentUser.id || updatesProfileFields || !hasWhatsAppMessage)
+  ) {
+    return Response.json(
+      { error: "Voce pode alterar somente a sua mensagem automatica." },
+      { status: 403 },
+    );
   }
   if (body.name !== undefined && !name) {
     return Response.json({ error: "Informe o nome do usuario." }, { status: 400 });
@@ -133,6 +150,9 @@ export async function PATCH(request: Request) {
   }
   if (password && password.length < 8) {
     return Response.json({ error: "A senha deve ter pelo menos 8 caracteres." }, { status: 400 });
+  }
+  if (whatsAppMessage && whatsAppMessage.length > 1500) {
+    return Response.json({ error: "A mensagem deve ter no maximo 1500 caracteres." }, { status: 400 });
   }
 
   try {
@@ -158,6 +178,7 @@ export async function PATCH(request: Request) {
         : hasSellerId
           ? { vendedor_id: sellerId }
           : {}),
+      ...(hasWhatsAppMessage ? { mensagem_whatsapp: whatsAppMessage } : {}),
     };
 
     if (Object.keys(profilePatch).length === 0 && !password) {
@@ -184,6 +205,7 @@ export async function PATCH(request: Request) {
           name: updatedProfile.nome,
           role: updatedProfile.perfil,
           sellerId: updatedProfile.vendedor_id ?? undefined,
+          whatsAppMessage: updatedProfile.mensagem_whatsapp?.trim() || undefined,
         }
       : undefined;
 
@@ -238,13 +260,31 @@ export async function DELETE(request: Request) {
 }
 
 async function requireAdmin(): Promise<CrmSessionUser | Response> {
-  const cookieStore = await cookies();
-  const user = readSessionToken(cookieStore.get(CRM_SESSION_COOKIE)?.value);
-  if (!user) return Response.json({ error: "Sessao expirada." }, { status: 401 });
+  const user = await requireAuthenticatedUser();
+  if (user instanceof Response) return user;
   if (user.role !== "administrador") {
     return Response.json({ error: "Somente administradores podem gerenciar usuarios." }, { status: 403 });
   }
   return user;
+}
+
+async function requireAuthenticatedUser(): Promise<CrmSessionUser | Response> {
+  const cookieStore = await cookies();
+  const user = readSessionToken(cookieStore.get(CRM_SESSION_COOKIE)?.value);
+  if (!user) return Response.json({ error: "Sessao expirada." }, { status: 401 });
+  return user;
+}
+
+async function listCrmUsers() {
+  try {
+    return await supabaseRequest<CrmUserRow[]>(
+      "/rest/v1/crm_usuarios?select=id,auth_user_id,nome,email,perfil,vendedor_id,ativo,mensagem_whatsapp&order=nome.asc",
+    );
+  } catch {
+    return supabaseRequest<CrmUserRow[]>(
+      "/rest/v1/crm_usuarios?select=id,auth_user_id,nome,email,perfil,vendedor_id,ativo&order=nome.asc",
+    );
+  }
 }
 
 async function deleteAuthUser(authUserId: string) {
@@ -337,6 +377,7 @@ function toResponseUser(user: CrmUserRow) {
     role: user.perfil,
     sellerId: user.vendedor_id,
     active: user.ativo,
+    whatsAppMessage: user.mensagem_whatsapp?.trim() || undefined,
   };
 }
 

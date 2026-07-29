@@ -50,6 +50,7 @@ type CrmUserProfileRow = {
   perfil: string;
   vendedor_id: string | null;
   ativo: boolean;
+  mensagem_whatsapp?: string | null;
 };
 
 export async function authenticateCrmUser(
@@ -106,23 +107,12 @@ async function authenticateSupabaseUser(
   const accessToken = authResult.access_token;
   if (!authUserId || !accessToken) return null;
 
-  const profileUrl = new URL("/rest/v1/crm_usuarios", baseUrl);
-  profileUrl.searchParams.set(
-    "select",
-    "id,nome,email,perfil,vendedor_id,ativo",
+  const [profile] = await fetchCrmUserProfile(
+    baseUrl,
+    apiKey,
+    accessToken,
+    authUserId,
   );
-  profileUrl.searchParams.set("auth_user_id", `eq.${authUserId}`);
-  profileUrl.searchParams.set("ativo", "eq.true");
-  profileUrl.searchParams.set("limit", "1");
-
-  const profileResponse = await fetch(profileUrl, {
-    headers: supabaseHeaders(apiKey, accessToken),
-    cache: "no-store",
-  });
-
-  if (!profileResponse.ok) return null;
-
-  const [profile] = (await profileResponse.json()) as CrmUserProfileRow[];
   if (!profile || !isCrmUserRole(profile.perfil)) return null;
 
   return {
@@ -131,7 +121,36 @@ async function authenticateSupabaseUser(
     email: profile.email,
     role: profile.perfil,
     sellerId: profile.vendedor_id ?? undefined,
+    whatsAppMessage: profile.mensagem_whatsapp?.trim() || undefined,
   };
+}
+
+async function fetchCrmUserProfile(
+  baseUrl: string,
+  apiKey: string,
+  accessToken: string,
+  authUserId: string,
+) {
+  const selectOptions = [
+    "id,nome,email,perfil,vendedor_id,ativo,mensagem_whatsapp",
+    "id,nome,email,perfil,vendedor_id,ativo",
+  ];
+
+  for (const select of selectOptions) {
+    const profileUrl = new URL("/rest/v1/crm_usuarios", baseUrl);
+    profileUrl.searchParams.set("select", select);
+    profileUrl.searchParams.set("auth_user_id", `eq.${authUserId}`);
+    profileUrl.searchParams.set("ativo", "eq.true");
+    profileUrl.searchParams.set("limit", "1");
+
+    const response = await fetch(profileUrl, {
+      headers: supabaseHeaders(apiKey, accessToken),
+      cache: "no-store",
+    });
+    if (response.ok) return (await response.json()) as CrmUserProfileRow[];
+  }
+
+  return [];
 }
 
 function isSupabaseAuthConfigured() {
