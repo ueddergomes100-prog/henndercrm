@@ -193,10 +193,12 @@ export async function PATCH(request: Request) {
         })
       : [target];
     if (!updatedProfile) throw new Error("Usuario nao retornado apos atualizacao.");
-    await updateAuthUser(target.auth_user_id, {
-      name: name ?? updatedProfile.nome,
-      password,
-    });
+    if (name !== undefined || password) {
+      await updateAuthUser(target.auth_user_id, {
+        name,
+        password,
+      });
+    }
 
     const responseUser = toResponseUser(updatedProfile);
     const sessionUser = updatedProfile.id === currentUser.id
@@ -305,7 +307,7 @@ async function updateAuthUser(
   };
   if (Object.keys(body).length === 0) return;
   await supabaseRequest(`/auth/v1/admin/users/${encodeURIComponent(authUserId)}`, {
-    method: "PATCH",
+    method: "PUT",
     body,
   });
 }
@@ -336,7 +338,7 @@ async function getAuthUserByEmail(email: string) {
 async function supabaseRequest<T>(
   path: string,
   options: {
-    method?: "GET" | "POST" | "PATCH" | "DELETE";
+    method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
     body?: unknown;
     prefer?: string;
   } = {},
@@ -352,6 +354,7 @@ async function supabaseRequest<T>(
     method: options.method ?? "GET",
     headers: {
       apikey: secretKey,
+      authorization: `Bearer ${secretKey}`,
       "content-type": "application/json",
       ...(options.prefer ? { prefer: options.prefer } : {}),
     },

@@ -106,6 +106,7 @@ import {
   crmViewService,
 } from "@/services/crm-view-service";
 import { buildCrmAttributionSummary, type CrmAttributedSale } from "@/services/crm-attribution-service";
+import { resolveWhatsAppGreeting } from "@/services/crm-whatsapp-message-service";
 
 type View =
   | "dashboard"
@@ -149,7 +150,7 @@ const DASHBOARD_SNAPSHOT_TIMEOUT_MS = 30 * 1000;
 const FULL_SNAPSHOT_TIMEOUT_MS = 45 * 1000;
 const AUTOMATIC_CONTACT_FOLLOW_UP_DAYS = 7;
 const DEFAULT_WHATSAPP_MESSAGE_TEMPLATE = [
-  "Bom dia! Tudo bem? Aqui é o {vendedor} do Shopping Rural 🤠.",
+  "{saudacao}! Tudo bem? Aqui é o {vendedor} do Shopping Rural 🤠.",
   "",
   "Passei aqui porque lembrei de você e vi que já tem um tempinho que não passa por aqui…",
   "Fico à disposição para te atender, está precisando de algo?",
@@ -3970,7 +3971,8 @@ function SalesModule({
   const [viewMode, setViewMode] = useState<"latest" | "all">("latest");
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("todos");
-  const [dateFilter, setDateFilter] = useState("");
+  const [dateFromFilter, setDateFromFilter] = useState("");
+  const [dateToFilter, setDateToFilter] = useState("");
   const [visibleLimit, setVisibleLimit] = useState(25);
   const [syncLogs, setSyncLogs] = useState<SyncLogResponse | null>(null);
   const [selectedSaleId, setSelectedSaleId] = useState(sales[0]?.id ?? "");
@@ -4015,8 +4017,9 @@ function SalesModule({
       String(sale.uniplusId).includes(normalizedQuery) ||
       saleCustomer?.name.toLowerCase().includes(normalizedQuery);
     const matchesStatus = statusFilter === "todos" || statusLabel === statusFilter;
-    const matchesDate = !dateFilter || sale.soldAt === dateFilter;
-    return matchesQuery && matchesStatus && matchesDate;
+    const matchesDateFrom = !dateFromFilter || sale.soldAt >= dateFromFilter;
+    const matchesDateTo = !dateToFilter || sale.soldAt <= dateToFilter;
+    return matchesQuery && matchesStatus && matchesDateFrom && matchesDateTo;
   });
   const displayedSales = filteredSales.slice(0, visibleLimit);
   const selectedSale =
@@ -4024,8 +4027,8 @@ function SalesModule({
     filteredSales[0] ??
     baseSales[0];
   const selectedItems = selectedSale ? itemsBySale.get(selectedSale.id) ?? [] : [];
-  const filteredRevenue = filteredSales.reduce((total, sale) => total + sale.totalValue, 0);
-  const filteredAverageTicket = filteredSales.length ? filteredRevenue / filteredSales.length : 0;
+  const displayedRevenue = displayedSales.reduce((total, sale) => total + sale.totalValue, 0);
+  const displayedAverageTicket = displayedSales.length ? displayedRevenue / displayedSales.length : 0;
   const latestSyncLabel = syncLogs?.latest
     ? formatDateTime(syncLogs.latest.inicio)
     : "Sem registro";
@@ -4035,9 +4038,9 @@ function SalesModule({
       <PageTitle eyebrow="Comercial" title="Vendas" description="Conferência das vendas importadas do ERP, respeitando uma venda para vários itens." />
       <div className="grid gap-4 md:grid-cols-4">
         <MetricCard label="Vendas importadas" value={String(sales.length)} />
-        <MetricCard label="Vendas no filtro" value={String(filteredSales.length)} />
-        <MetricCard label="Faturamento filtrado" value={formatCurrency(filteredRevenue)} />
-        <MetricCard label="Ticket médio filtrado" value={formatCurrency(filteredAverageTicket)} />
+        <MetricCard label="Vendas no cálculo" value={`${displayedSales.length} de ${filteredSales.length}`} />
+        <MetricCard label="Faturamento filtrado" value={formatCurrency(displayedRevenue)} />
+        <MetricCard label="Ticket médio filtrado" value={formatCurrency(displayedAverageTicket)} />
       </div>
       <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
         <Panel title="Listagem de vendas" icon={ShoppingBag} action={displayedSales.length + " de " + filteredSales.length + " registros"}>
@@ -4050,7 +4053,10 @@ function SalesModule({
                 <button
                   key={mode}
                   type="button"
-                  onClick={() => setViewMode(mode as "latest" | "all")}
+                  onClick={() => {
+                    setViewMode(mode as "latest" | "all");
+                    setVisibleLimit(25);
+                  }}
                   className={
                     "h-9 flex-1 rounded-md px-3 text-xs font-bold transition sm:flex-none " +
                     (viewMode === mode ? "bg-[#0753a6] text-white shadow-sm" : "text-slate-500 hover:bg-white")
@@ -4060,26 +4066,53 @@ function SalesModule({
                 </button>
               ))}
             </div>
-            <div className="grid gap-3 md:grid-cols-[1.2fr_0.8fr_0.7fr]">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[1.2fr_0.8fr_0.7fr_0.7fr]">
               <div className="flex h-11 items-center gap-2 rounded-lg border border-blue-100 bg-[#f8fbff] px-3 focus-within:border-cyan-400">
                 <Search size={17} className="text-slate-400" />
                 <input
                   value={query}
-                  onChange={(event) => setQuery(event.target.value)}
+                  onChange={(event) => {
+                    setQuery(event.target.value);
+                    setVisibleLimit(25);
+                  }}
                   placeholder="Venda ou cliente"
                   className="w-full bg-transparent text-sm outline-none"
                 />
               </div>
-              <FilterSelect label="Status" value={statusFilter} onChange={setStatusFilter}>
+              <FilterSelect
+                label="Status"
+                value={statusFilter}
+                onChange={(value) => {
+                  setStatusFilter(value);
+                  setVisibleLimit(25);
+                }}
+              >
                 <option value="todos">Todos os status</option>
                 {statusOptions.map((status) => <option key={status} value={status}>{status}</option>)}
               </FilterSelect>
               <label className="block">
-                <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Data</span>
+                <span className="text-xs font-bold uppercase tracking-wide text-slate-500">De</span>
                 <input
                   type="date"
-                  value={dateFilter}
-                  onChange={(event) => setDateFilter(event.target.value)}
+                  value={dateFromFilter}
+                  max={dateToFilter || undefined}
+                  onChange={(event) => {
+                    setDateFromFilter(event.target.value);
+                    setVisibleLimit(25);
+                  }}
+                  className="mt-2 h-11 w-full rounded-lg border border-blue-100 bg-[#f8fbff] px-3 text-sm outline-none focus:border-cyan-400"
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Até</span>
+                <input
+                  type="date"
+                  value={dateToFilter}
+                  min={dateFromFilter || undefined}
+                  onChange={(event) => {
+                    setDateToFilter(event.target.value);
+                    setVisibleLimit(25);
+                  }}
                   className="mt-2 h-11 w-full rounded-lg border border-blue-100 bg-[#f8fbff] px-3 text-sm outline-none focus:border-cyan-400"
                 />
               </label>
@@ -5659,7 +5692,6 @@ function Dashboard({
                 <WhatsAppButton
                   customer={customer}
                   user={user}
-                  message={`Olá! Aqui é da Hennder CRM. Identificamos uma oportunidade de recompra e gostaríamos de conversar com você.`}
                   onUpdateContact={onUpdateContact}
                   onRegisterContact={onRegisterContact}
                   compact
@@ -5927,7 +5959,6 @@ function RecoveryCustomers({
                   <WhatsAppButton
                     customer={customer}
                     user={user}
-                    message="Olá! Aqui é da Hennder CRM. Sentimos sua falta e gostaríamos de ajudar com sua próxima compra. Podemos conversar?"
                     onUpdateContact={onUpdateContact}
                     onRegisterContact={onRegisterContact}
                     onContactIntent={setLastWhatsAppCustomer}
@@ -6055,6 +6086,7 @@ function WhatsAppMessageSettings({
         <div className="rounded-xl border border-blue-100 bg-[#f8fbff] p-4">
           <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Campos disponíveis</p>
           <div className="mt-3 space-y-2 text-sm text-slate-600">
+            <p><strong className="text-[#123252]">{"{saudacao}"}</strong> usa Bom dia, Boa tarde ou Boa noite conforme o horário.</p>
             <p><strong className="text-[#123252]">{"{vendedor}"}</strong> usa o primeiro nome do vendedor.</p>
             <p><strong className="text-[#123252]">{"{cliente}"}</strong> usa o primeiro nome do cliente.</p>
           </div>
@@ -6328,7 +6360,6 @@ function CustomerProfile({
                 <WhatsAppButton
                   customer={customer}
                   user={user}
-                  message={`Olá, ${customer.name}! Aqui é da Hennder CRM. Gostaria de conversar sobre suas próximas compras e oportunidades comerciais.`}
                   onUpdateContact={onUpdateContact}
                   onRegisterContact={onRegisterContact}
                 />
@@ -10089,6 +10120,7 @@ function resolvePersonalizedWhatsAppMessage(
   customerName: string,
 ) {
   return template
+    .replaceAll("{saudacao}", resolveWhatsAppGreeting())
     .replaceAll("{vendedor}", sellerName)
     .replaceAll("{cliente}", firstName(customerName));
 }
@@ -10105,7 +10137,7 @@ function buildShoppingRuralRepurchaseMessage(
 ) {
   const product = formatWhatsAppProductName(productName);
   return [
-    `Bom dia! Tudo bem? Aqui é o ${sellerName} do Shopping Rural 🤠.`,
+    `${resolveWhatsAppGreeting()}! Tudo bem? Aqui é o ${sellerName} do Shopping Rural 🤠.`,
     "",
     `Passei aqui porque lembrei de você e do item ${product} que levou conosco.`,
     "Como o período de recompra já chegou, queria saber se está precisando dele novamente.",
