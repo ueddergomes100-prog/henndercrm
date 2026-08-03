@@ -63,7 +63,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import {
@@ -183,7 +183,12 @@ const crmResultsVisualTokens = {
   "--destructive": "light-dark(var(--color-red-700), var(--color-red-400))",
   "--ring": "var(--primary)",
 } as CSSProperties & Record<`--${string}`, string>;
-const crmResultsMixColors = ["var(--primary)", "var(--accent)", "var(--secondary)"] as const;
+const crmResultsMixColors = [
+  "var(--primary)",
+  "var(--accent)",
+  "var(--secondary)",
+  "var(--muted-foreground)",
+] as const;
 type ChatMessage = {
   id: string;
   role: "user" | "ai";
@@ -1370,7 +1375,6 @@ export default function Home() {
             {visibleView === "resultados" && (
               <CrmResults
                 customers={appCustomers}
-                alerts={appAlerts}
                 contactRecords={appContactRecords}
                 sales={scopedData.sales}
                 sellers={scopedData.sellers}
@@ -3279,7 +3283,6 @@ function Topbar({
 
 function CrmResults({
   customers,
-  alerts,
   contactRecords,
   sales,
   sellers,
@@ -3289,7 +3292,6 @@ function CrmResults({
   onRefresh,
 }: {
   customers: CustomerRow[];
-  alerts: AlertRow[];
   contactRecords: ContactRecord[];
   sales: SaleRow[];
   sellers: SellerRow[];
@@ -3298,16 +3300,39 @@ function CrmResults({
   refreshError: string;
   onRefresh: () => Promise<void>;
 }) {
-  const attribution = buildCrmAttributionSummary({ customers, sales, contactRecords });
-  const convertedAlerts = alerts.filter((alert) => alert.status === "convertido");
+  const currentMonth = crmReferenceDate.slice(0, 7);
+  const [selectedMonth, setSelectedMonth] = useState(currentMonth);
+  const availableMonths = useMemo(
+    () => sales
+      .filter((sale) => sale.approved)
+      .map((sale) => sale.soldAt.slice(0, 7))
+      .filter((month) => /^\d{4}-\d{2}$/u.test(month))
+      .sort(),
+    [sales],
+  );
+  const firstAvailableMonth = availableMonths[0] ?? currentMonth;
+  const selectedMonthLabel = formatCrmResultMonth(selectedMonth);
+  const allAttribution = useMemo(
+    () => buildCrmAttributionSummary({ customers, sales, contactRecords }),
+    [contactRecords, customers, sales],
+  );
+  const attribution = useMemo(
+    () => buildCrmAttributionSummary({
+      customers,
+      sales,
+      contactRecords,
+      saleMonth: selectedMonth,
+    }),
+    [contactRecords, customers, sales, selectedMonth],
+  );
   const roi = attribution.totalAttributedRevenue ? Math.max(1, Math.round(attribution.totalAttributedRevenue / 350)) : 0;
-  const latestAttributedSales = attribution.attributedSales
+  const latestTrackedSales = attribution.trackedSales
     .slice()
     .sort((left, right) => right.sale.soldAt.localeCompare(left.sale.soldAt) || right.sale.uniplusId - left.sale.uniplusId)
     .slice(0, 8);
-  const attributionTrend = buildAttributionTrend(attribution.attributedSales);
-  const sellerResultRows = buildSellerResultRows(attribution.attributedSales, sellers);
-  const sellerRecoveryRanking = sellerResultRows.slice(0, 5);
+  const attributionTrend = buildAttributionTrend(allAttribution.trackedSales);
+  const sellerResultRows = buildSellerResultRows(attribution.trackedSales, sellers);
+  const sellerRecoveryRanking = sellerResultRows.filter((row) => row.totalRevenue > 0).slice(0, 5);
   const attributionMixData = attribution.windowRows.map((row, index) => ({
     ...row,
     color: crmResultsMixColors[index] ?? "var(--primary)",
@@ -3322,7 +3347,10 @@ function CrmResults({
   const influencedShare = attribution.totalAttributedRevenue > 0
     ? (attribution.influencedRevenue / attribution.totalAttributedRevenue) * 100
     : 0;
-  const convertedAlertShare = alerts.length > 0 ? (convertedAlerts.length / alerts.length) * 100 : 0;
+  const trackedRevenue = attribution.totalAttributedRevenue + attribution.relationshipRevenue;
+  const relationshipShare = trackedRevenue > 0
+    ? (attribution.relationshipRevenue / trackedRevenue) * 100
+    : 0;
 
   return (
     <div
@@ -3339,12 +3367,27 @@ function CrmResults({
             Ganhos reais atribuídos a contatos e ações comerciais antes do ciclo de compra.
           </p>
         </div>
-        <ResultsRefreshControl
-          refreshing={refreshing}
-          refreshedAt={refreshedAt}
-          error={refreshError}
-          onRefresh={onRefresh}
-        />
+        <div className="flex max-w-full flex-col gap-2 sm:items-end">
+          <label className="flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs font-medium text-[var(--muted-foreground)] shadow-sm">
+            <CalendarDays size={16} className="text-[var(--primary)]" aria-hidden="true" />
+            <span className="sr-only">Mes dos resultados</span>
+            <input
+              type="month"
+              value={selectedMonth}
+              min={firstAvailableMonth}
+              max={currentMonth}
+              onInput={(event) => setSelectedMonth(event.currentTarget.value || currentMonth)}
+              aria-label="Mes dos resultados do CRM"
+              className="min-w-0 bg-transparent font-semibold text-[var(--foreground)] outline-none"
+            />
+          </label>
+          <ResultsRefreshControl
+            refreshing={refreshing}
+            refreshedAt={refreshedAt}
+            error={refreshError}
+            onRefresh={onRefresh}
+          />
+        </div>
       </header>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -3364,7 +3407,7 @@ function CrmResults({
         <CrmResultsMetricCard
           label="Total atribuído"
           value={formatCurrency(attribution.totalAttributedRevenue)}
-          detail={`${attribution.attributedSales.length} venda(s) atribuída(s)`}
+          detail={`${attribution.attributedSales.length} venda(s) em ${selectedMonthLabel}`}
           progress={attribution.totalAttributedRevenue > 0 ? 100 : 0}
         />
         <CrmResultsMetricCard
@@ -3381,10 +3424,10 @@ function CrmResults({
           tone="accent"
         />
         <CrmResultsMetricCard
-          label="Alertas convertidos"
-          value={`${convertedAlerts.length}`}
-          detail={`${alerts.length} alerta(s) monitorado(s)`}
-          progress={convertedAlertShare}
+          label="Receita de relacionamento"
+          value={formatCurrency(attribution.relationshipRevenue)}
+          detail={`${attribution.relationshipSales.length} compra(s) após 30 dias`}
+          progress={relationshipShare}
           tone="secondary"
         />
         <CrmResultsMetricCard
@@ -3406,11 +3449,11 @@ function CrmResults({
         <Card className="overflow-hidden lg:col-span-2">
           <CardHeader className="flex-col justify-between sm:flex-row sm:items-center">
             <div className="min-w-0 space-y-1">
-              <CardTitle>Faturamento atribuído por mês</CardTitle>
-              <CardDescription>Comparativo dos últimos seis meses</CardDescription>
+              <CardTitle>Compras após contato por mês</CardTitle>
+              <CardDescription>Últimos seis meses · valores destacados de {selectedMonthLabel}</CardDescription>
             </div>
             <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[var(--muted)] text-[var(--primary)]">
-              <BarChart3 size={18} role="img" aria-label="Faturamento atribuído por mês" />
+              <BarChart3 size={18} role="img" aria-label="Compras após contato por mês" />
             </span>
           </CardHeader>
           <CardContent>
@@ -3430,6 +3473,15 @@ function CrmResults({
                   <span className="block text-xs text-[var(--muted-foreground)]">Influenciado · 11 a 30 dias</span>
                   <strong className="mt-0.5 block text-sm font-semibold text-[var(--foreground)]">
                     {formatCurrency(attribution.influencedRevenue)}
+                  </strong>
+                </span>
+              </span>
+              <span className="inline-flex items-center gap-2.5">
+                <span className="size-2.5 rounded-full bg-[var(--muted-foreground)]" />
+                <span>
+                  <span className="block text-xs text-[var(--muted-foreground)]">Relacionamento · após 30 dias</span>
+                  <strong className="mt-0.5 block text-sm font-semibold text-[var(--foreground)]">
+                    {formatCurrency(attribution.relationshipRevenue)}
                   </strong>
                 </span>
               </span>
@@ -3472,6 +3524,12 @@ function CrmResults({
                     <Bar
                       dataKey="influenciado"
                       fill="var(--primary)"
+                      radius={[6, 6, 2, 2]}
+                      maxBarSize={34}
+                    />
+                    <Bar
+                      dataKey="relacionamento"
+                      fill="var(--muted-foreground)"
                       radius={[6, 6, 2, 2]}
                       maxBarSize={34}
                     />
@@ -3527,7 +3585,7 @@ function CrmResults({
                 <div key={row.id} className="flex items-center gap-3 text-xs">
                   <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: row.color }} />
                   <span className="min-w-0 flex-1 truncate text-[var(--muted-foreground)]">
-                    {row.label} · {Math.round(row.weight * 100)}%
+                    {row.label} · {row.kind === "relationship" ? "observado" : `${Math.round(row.weight * 100)}%`}
                   </span>
                   <span className="shrink-0 font-medium">{formatCurrency(row.weightedValue)}</span>
                 </div>
@@ -3542,7 +3600,7 @@ function CrmResults({
             <div className="min-w-0 space-y-1">
               <CardTitle>Resultado por vendedor</CardTitle>
               <CardDescription>
-                Receita recuperada e influenciada pelas ações comerciais de cada vendedor.
+                Resultado de {selectedMonthLabel}, separado por tipo de contribuição comercial.
               </CardDescription>
             </div>
             <div className="flex shrink-0 items-center gap-3">
@@ -3559,6 +3617,7 @@ function CrmResults({
                   <TableHead className="w-[62%] sm:w-[46%] lg:w-[34%]">Vendedor</TableHead>
                   <TableHead className="hidden md:table-cell">Recuperado</TableHead>
                   <TableHead className="hidden lg:table-cell">Influenciado</TableHead>
+                  <TableHead className="hidden lg:table-cell">Relacionamento</TableHead>
                   <TableHead className="text-right">Total atribuído</TableHead>
                   <TableHead className="hidden text-center xl:table-cell">Clientes</TableHead>
                   <TableHead className="hidden text-center xl:table-cell">Vendas</TableHead>
@@ -3600,10 +3659,18 @@ function CrmResults({
                           <UiBadge variant="primary">Influência</UiBadge>
                         </div>
                       </TableCell>
+                      <TableCell className="hidden lg:table-cell">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="whitespace-nowrap font-semibold text-[var(--muted-foreground)]">
+                            {formatCurrency(row.relationshipRevenue)}
+                          </span>
+                          <UiBadge variant="secondary">Após 30 dias</UiBadge>
+                        </div>
+                      </TableCell>
                       <TableCell className="text-right">
                         <p className="whitespace-nowrap font-semibold">{formatCurrency(row.totalRevenue)}</p>
                         <p className="mt-1 text-xs text-[var(--muted-foreground)] md:hidden">
-                          {formatCurrency(row.recoveredRevenue)} recuperado
+                          {formatCurrency(row.recoveredRevenue)} recuperado · {formatCurrency(row.relationshipRevenue)} relacionamento
                         </p>
                       </TableCell>
                       <TableCell className="hidden text-center xl:table-cell">{row.customers}</TableCell>
@@ -3625,7 +3692,7 @@ function CrmResults({
         <CardHeader className="items-center justify-between">
           <div className="min-w-0 space-y-1">
             <CardTitle>Ranking por recuperação</CardTitle>
-            <CardDescription>{sellerRecoveryRanking.length} vendedor(es) com receita atribuída.</CardDescription>
+            <CardDescription>{sellerRecoveryRanking.length} vendedor(es) com receita atribuída em {selectedMonthLabel}.</CardDescription>
           </div>
           <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-[var(--muted)] text-[var(--primary)]">
             <Trophy size={19} role="img" aria-label="Ranking por recuperação" />
@@ -3675,24 +3742,24 @@ function CrmResults({
         </CardContent>
       </Card>
       <div className="grid gap-5 xl:grid-cols-2">
-        <Panel title="Top clientes com venda atribuída" icon={CheckCircle2}>
+        <Panel title={`Top clientes após contato · ${selectedMonthLabel}`} icon={CheckCircle2}>
           <SimpleRows
             rows={attribution.customerRows.slice(0, 6).map((customer) => [
               customer.customerName,
               formatCurrency(customer.weightedValue),
               `${customer.sales} venda(s) · ${customer.bestWindow}`,
             ])}
-            empty="Nenhuma venda atribuída ao CRM ainda."
+            empty="Nenhuma compra após contato neste mês."
           />
         </Panel>
-        <Panel title="Últimas vendas atribuídas" icon={ShoppingBag}>
+        <Panel title={`Últimas compras após contato · ${selectedMonthLabel}`} icon={ShoppingBag}>
           <SimpleRows
-            rows={latestAttributedSales.map((item) => [
+            rows={latestTrackedSales.map((item) => [
               `#${item.sale.uniplusId} · ${item.customer?.name ?? item.contact.customerName}`,
               formatCurrency(item.weightedValue),
-              `${item.daysAfterContact} dia(s) após contato`,
+              `${item.daysAfterContact} dia(s) após contato · ${item.window.kind === "relationship" ? "relacionamento" : "atribuída"}`,
             ])}
-            empty="Nenhuma venda atribuída dentro da janela de 30 dias."
+            empty="Nenhuma compra após contato neste mês."
           />
         </Panel>
       </div>
@@ -3774,7 +3841,11 @@ function CrmResultsChartTooltip({
       <div className="space-y-1.5">
         {payload.map((item) => {
           const itemKey = String(item.dataKey ?? item.name ?? "valor");
-          const itemLabel = itemKey === "recuperado" ? "Recuperado" : "Influenciado";
+          const itemLabel = itemKey === "recuperado"
+            ? "Recuperado"
+            : itemKey === "influenciado"
+              ? "Influenciado"
+              : "Relacionamento";
 
           return (
             <div key={itemKey} className="flex items-center justify-between gap-4 text-xs">
@@ -3798,6 +3869,17 @@ function formatResultsAxisValue(value: number) {
     notation: "compact",
     maximumFractionDigits: 1,
   }).format(value);
+}
+
+function formatCrmResultMonth(month: string) {
+  const match = month.match(/^(\d{4})-(\d{2})$/u);
+  if (!match) return month;
+
+  return new Intl.DateTimeFormat("pt-BR", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, 1)));
 }
 
 function CrmResultsMixTooltip({
@@ -3880,7 +3962,12 @@ function buildAttributionTrend(attributedSales: CrmAttributedSale[]) {
   const referenceMatch = crmReferenceDate.match(/^(\d{4})-(\d{2})/u);
   const referenceYear = Number(referenceMatch?.[1] ?? new Date().getFullYear());
   const referenceMonth = Number(referenceMatch?.[2] ?? new Date().getMonth() + 1) - 1;
-  const rows = new Map<string, { mes: string; recuperado: number; influenciado: number }>();
+  const rows = new Map<string, {
+    mes: string;
+    recuperado: number;
+    influenciado: number;
+    relacionamento: number;
+  }>();
 
   for (let offset = 5; offset >= 0; offset -= 1) {
     const date = new Date(Date.UTC(referenceYear, referenceMonth - offset, 1));
@@ -3889,6 +3976,7 @@ function buildAttributionTrend(attributedSales: CrmAttributedSale[]) {
       mes: labels[date.getUTCMonth()],
       recuperado: 0,
       influenciado: 0,
+      relacionamento: 0,
     });
   }
 
@@ -3899,8 +3987,10 @@ function buildAttributionTrend(attributedSales: CrmAttributedSale[]) {
 
     if (item.window.kind === "recovered") {
       current.recuperado += item.weightedValue;
-    } else {
+    } else if (item.window.kind === "influenced") {
       current.influenciado += item.weightedValue;
+    } else {
+      current.relacionamento += item.sale.totalValue;
     }
   }
 
@@ -3909,6 +3999,7 @@ function buildAttributionTrend(attributedSales: CrmAttributedSale[]) {
       mes: row.mes,
       recuperado: Math.round(row.recuperado),
       influenciado: Math.round(row.influenciado),
+      relacionamento: Math.round(row.relacionamento),
     }));
 }
 
@@ -3917,6 +4008,7 @@ function buildSellerResultRows(attributedSales: CrmAttributedSale[], availableSe
     name: string;
     recoveredRevenue: number;
     influencedRevenue: number;
+    relationshipRevenue: number;
     totalRevenue: number;
     sales: number;
     customerIds: Set<string>;
@@ -3931,6 +4023,7 @@ function buildSellerResultRows(attributedSales: CrmAttributedSale[], availableSe
       name,
       recoveredRevenue: 0,
       influencedRevenue: 0,
+      relationshipRevenue: 0,
       totalRevenue: 0,
       sales: 0,
       customerIds: new Set<string>(),
@@ -3938,10 +4031,14 @@ function buildSellerResultRows(attributedSales: CrmAttributedSale[], availableSe
 
     if (item.window.kind === "recovered") {
       current.recoveredRevenue += item.weightedValue;
-    } else {
+    } else if (item.window.kind === "influenced") {
       current.influencedRevenue += item.weightedValue;
+    } else {
+      current.relationshipRevenue += item.sale.totalValue;
     }
-    current.totalRevenue += item.weightedValue;
+    if (item.window.kind !== "relationship") {
+      current.totalRevenue += item.weightedValue;
+    }
     current.sales += 1;
     current.customerIds.add(item.sale.customerId);
     rows.set(name, current);
@@ -3952,6 +4049,7 @@ function buildSellerResultRows(attributedSales: CrmAttributedSale[], availableSe
       name: row.name,
       recoveredRevenue: Math.round(row.recoveredRevenue),
       influencedRevenue: Math.round(row.influencedRevenue),
+      relationshipRevenue: Math.round(row.relationshipRevenue),
       totalRevenue: Math.round(row.totalRevenue),
       sales: row.sales,
       customers: row.customerIds.size,

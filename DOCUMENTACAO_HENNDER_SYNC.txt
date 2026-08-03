@@ -1632,3 +1632,19 @@ O CRM hospedado nao acessa o PostgreSQL do Uniplus.
 Quem acessa o PostgreSQL e o Hennder Sync rodando na VPS Linux/ambiente com
 rede para o banco. O front-end web exibe os dados que ja foram sincronizados no
 Supabase.
+
+================================================================================
+19. ATUALIZACAO 03/08/2026 - RESULTADOS MENSAIS E RELACIONAMENTO
+================================================================================
+
+- A tela Resultados do CRM abre no mes corrente e permite selecionar outro mes.
+- Cards, resultado por vendedor, ranking e listas usam o mes da venda selecionado.
+- O grafico historico continua comparando os ultimos seis meses.
+- Compra ate 10 dias apos contato: 100% como faturamento recuperado.
+- Compra entre 11 e 20 dias: 75% como faturamento influenciado.
+- Compra entre 21 e 30 dias: 50% como faturamento influenciado.
+- Compra depois de 30 dias de um contato valido: receita de relacionamento.
+- Receita de relacionamento exibe o valor bruto observado da compra.
+- Receita de relacionamento nao entra no Total atribuido nem no ROI estimado.
+- Cada venda continua ligada somente ao contato valido mais proximo anterior a ela.
+- Contato com numero invalido continua fora da atribuicao e do relacionamento.

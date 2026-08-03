@@ -37,7 +37,7 @@ function contact(id, contactedAt, outcome = "no_answer") {
   };
 }
 
-test("atribui venda apos contato sem resposta ate o 30o dia", () => {
+test("separa compra posterior a 30 dias como receita de relacionamento", () => {
   const summary = buildCrmAttributionSummary({
     customers: [customer],
     sales: [
@@ -51,7 +51,29 @@ test("atribui venda apos contato sem resposta ate o 30o dia", () => {
   assert.equal(summary.attributedSales.length, 1);
   assert.equal(summary.attributedSales[0].sale.id, "sale-day-30");
   assert.equal(summary.attributedSales[0].window.id, "influenced_30");
+  assert.equal(summary.relationshipSales.length, 1);
+  assert.equal(summary.relationshipSales[0].sale.id, "sale-day-31");
+  assert.equal(summary.relationshipRevenue, 300);
+  assert.equal(summary.trackedSales.length, 2);
   assert.equal(summary.totalAttributedRevenue, 100);
+});
+
+test("recorta o resultado pelo mes da venda sem perder o contato historico", () => {
+  const summary = buildCrmAttributionSummary({
+    customers: [customer],
+    sales: [
+      sale("sale-july", "2026-07-31T12:00:00Z", 200),
+      sale("sale-august", "2026-08-02T12:00:00Z", 300),
+    ],
+    contactRecords: [contact("contact-1", "2026-07-31T09:00:00Z")],
+    saleMonth: "2026-08",
+  });
+
+  assert.equal(summary.trackedSales.length, 1);
+  assert.equal(summary.trackedSales[0].sale.id, "sale-august");
+  assert.equal(summary.recoveredRevenue, 300);
+  assert.equal(summary.contactedCustomers, 1);
+  assert.equal(summary.convertedCustomers, 1);
 });
 
 test("uma venda entra uma unica vez mesmo com varios contatos", () => {
@@ -68,4 +90,3 @@ test("uma venda entra uma unica vez mesmo com varios contatos", () => {
   assert.equal(summary.attributedSales[0].contact.id, "contact-2");
   assert.equal(summary.totalAttributedRevenue, 500);
 });
-

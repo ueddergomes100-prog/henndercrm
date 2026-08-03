@@ -32,6 +32,15 @@ export const crmAttributionWindows = [
     weight: 0.5,
     kind: "influenced",
   },
+  {
+    id: "relationship_after_30",
+    label: "31+ dias",
+    description: "Compra posterior a 30 dias de um contato comercial registrado.",
+    minDays: 31,
+    maxDays: Number.POSITIVE_INFINITY,
+    weight: 1,
+    kind: "relationship",
+  },
 ] as const;
 
 export type CrmAttributionWindow = (typeof crmAttributionWindows)[number];
@@ -48,11 +57,14 @@ export type CrmAttributedSale = {
 export type CrmAttributionSummary = {
   recoveredRevenue: number;
   influencedRevenue: number;
+  relationshipRevenue: number;
   totalAttributedRevenue: number;
   grossAttributedRevenue: number;
   recoveredSales: CrmAttributedSale[];
   influencedSales: CrmAttributedSale[];
+  relationshipSales: CrmAttributedSale[];
   attributedSales: CrmAttributedSale[];
+  trackedSales: CrmAttributedSale[];
   contactedCustomers: number;
   convertedCustomers: number;
   conversionRate: number;
@@ -83,10 +95,12 @@ export function buildCrmAttributionSummary({
   customers,
   sales,
   contactRecords,
+  saleMonth,
 }: {
   customers: CustomerViewModel[];
   sales: CrmSale[];
   contactRecords: CrmContactRecord[];
+  saleMonth?: string;
 }): CrmAttributionSummary {
   const customersById = new Map(customers.map((customer) => [customer.id, customer]));
   const eligibleContacts = contactRecords
@@ -105,60 +119,67 @@ export function buildCrmAttributionSummary({
     contacts.sort((left, right) => right.date.getTime() - left.date.getTime());
   }
 
-  const attributedSales = sales
-    .filter((sale) => sale.approved)
+  const trackedSales = sales
+    .filter((sale) => sale.approved && (!saleMonth || crmMonth(sale.soldAt) === saleMonth))
     .flatMap((sale): CrmAttributedSale[] => {
       const saleDate = parseCrmDate(sale.soldAt);
       if (!saleDate) return [];
 
-      const candidate = (contactsByCustomer.get(sale.customerId) ?? [])
-        .map((contact) => ({
-          contact,
-          days: daysBetween(contact.date, saleDate),
-        }))
-        .filter((item) => item.days >= 0 && item.days <= CRM_ATTRIBUTION_MAX_DAYS)
-        .sort((left, right) => left.days - right.days)[0];
+      const candidateContact = (contactsByCustomer.get(sale.customerId) ?? [])
+        .find((contact) => contact.date.getTime() <= saleDate.getTime());
 
-      if (!candidate) return [];
+      if (!candidateContact) return [];
+      const daysAfterContact = daysBetween(candidateContact.date, saleDate);
 
       const window = crmAttributionWindows.find(
-        (item) => candidate.days >= item.minDays && candidate.days <= item.maxDays,
+        (item) => daysAfterContact >= item.minDays && daysAfterContact <= item.maxDays,
       );
       if (!window) return [];
 
       return [{
         sale,
         customer: customersById.get(sale.customerId),
-        contact: candidate.contact.record,
-        daysAfterContact: candidate.days,
+        contact: candidateContact.record,
+        daysAfterContact,
         window,
         weightedValue: roundCurrency(sale.totalValue * window.weight),
       }];
     });
 
-  const recoveredSales = attributedSales.filter((item) => item.window.kind === "recovered");
-  const influencedSales = attributedSales.filter((item) => item.window.kind === "influenced");
+  const recoveredSales = trackedSales.filter((item) => item.window.kind === "recovered");
+  const influencedSales = trackedSales.filter((item) => item.window.kind === "influenced");
+  const relationshipSales = trackedSales.filter((item) => item.window.kind === "relationship");
+  const attributedSales = trackedSales.filter((item) => item.window.kind !== "relationship");
   const recoveredRevenue = sum(recoveredSales.map((item) => item.weightedValue));
   const influencedRevenue = sum(influencedSales.map((item) => item.weightedValue));
-  const convertedCustomerIds = new Set(attributedSales.map((item) => item.sale.customerId));
-  const contactedCustomerIds = new Set(eligibleContacts.map((item) => item.record.customerId));
+  const relationshipRevenue = sum(relationshipSales.map((item) => item.sale.totalValue));
+  const convertedCustomerIds = new Set(trackedSales.map((item) => item.sale.customerId));
+  const contactedCustomerIds = new Set(
+    eligibleContacts
+      .filter((item) => !saleMonth || crmMonth(item.record.contactedAt) === saleMonth)
+      .map((item) => item.record.customerId),
+  );
+  for (const customerId of convertedCustomerIds) contactedCustomerIds.add(customerId);
 
   return {
     recoveredRevenue,
     influencedRevenue,
+    relationshipRevenue,
     totalAttributedRevenue: roundCurrency(recoveredRevenue + influencedRevenue),
     grossAttributedRevenue: sum(attributedSales.map((item) => item.sale.totalValue)),
     recoveredSales,
     influencedSales,
+    relationshipSales,
     attributedSales,
+    trackedSales,
     contactedCustomers: contactedCustomerIds.size,
     convertedCustomers: convertedCustomerIds.size,
     conversionRate: contactedCustomerIds.size
       ? Math.round((convertedCustomerIds.size / contactedCustomerIds.size) * 100)
       : 0,
     averageRecoveredTicket: recoveredSales.length ? roundCurrency(recoveredRevenue / recoveredSales.length) : 0,
-    windowRows: buildWindowRows(attributedSales),
-    customerRows: buildCustomerRows(attributedSales),
+    windowRows: buildWindowRows(trackedSales),
+    customerRows: buildCustomerRows(trackedSales),
   };
 }
 
@@ -194,13 +215,19 @@ function buildCustomerRows(attributedSales: CrmAttributedSale[]): CrmAttribution
     current.sales += 1;
     current.grossValue = roundCurrency(current.grossValue + item.sale.totalValue);
     current.weightedValue = roundCurrency(current.weightedValue + item.weightedValue);
-    if (item.window.weight > (crmAttributionWindows.find((window) => window.label === current.bestWindow)?.weight ?? 0)) {
+    if (item.window.minDays < (crmAttributionWindows.find((window) => window.label === current.bestWindow)?.minDays ?? Infinity)) {
       current.bestWindow = item.window.label;
     }
     rows.set(item.sale.customerId, current);
   }
 
   return [...rows.values()].sort((left, right) => right.weightedValue - left.weightedValue);
+}
+
+function crmMonth(value: string) {
+  const parsed = parseCrmDate(value);
+  if (!parsed) return "";
+  return `${parsed.getUTCFullYear()}-${String(parsed.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
 function parseCrmDate(value: string) {
