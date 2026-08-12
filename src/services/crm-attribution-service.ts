@@ -7,8 +7,8 @@ export const CRM_ATTRIBUTION_MAX_DAYS = 30;
 export const crmAttributionWindows = [
   {
     id: "recovered_10",
-    label: "0-10 dias",
-    description: "Compra ate 10 dias apos contato ou acao registrada.",
+    label: "Recuperado",
+    description: "Compra ate 10 dias apos contato ou no mes seguinte ao contato.",
     minDays: 0,
     maxDays: 10,
     weight: 1,
@@ -131,9 +131,7 @@ export function buildCrmAttributionSummary({
       if (!candidateContact) return [];
       const daysAfterContact = daysBetween(candidateContact.date, saleDate);
 
-      const window = crmAttributionWindows.find(
-        (item) => daysAfterContact >= item.minDays && daysAfterContact <= item.maxDays,
-      );
+      const window = resolveAttributionWindow(candidateContact.date, saleDate, daysAfterContact);
       if (!window) return [];
 
       return [{
@@ -200,6 +198,22 @@ function buildWindowRows(attributedSales: CrmAttributedSale[]): CrmAttributionSu
   });
 }
 
+function resolveAttributionWindow(contactDate: Date, saleDate: Date, daysAfterContact: number) {
+  const monthDistance = crmMonthDistance(contactDate, saleDate);
+
+  if (monthDistance === 1) {
+    return crmAttributionWindows[0];
+  }
+
+  if (monthDistance > 1) {
+    return crmAttributionWindows[3];
+  }
+
+  return crmAttributionWindows.find(
+    (item) => daysAfterContact >= item.minDays && daysAfterContact <= item.maxDays,
+  );
+}
+
 function buildCustomerRows(attributedSales: CrmAttributedSale[]): CrmAttributionSummary["customerRows"] {
   const rows = new Map<string, CrmAttributionSummary["customerRows"][number]>();
   for (const item of attributedSales) {
@@ -227,7 +241,17 @@ function buildCustomerRows(attributedSales: CrmAttributedSale[]): CrmAttribution
 function crmMonth(value: string) {
   const parsed = parseCrmDate(value);
   if (!parsed) return "";
+  return crmMonthFromDate(parsed);
+}
+
+function crmMonthFromDate(parsed: Date) {
   return `${parsed.getUTCFullYear()}-${String(parsed.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function crmMonthDistance(start: Date, end: Date) {
+  const startMonth = start.getUTCFullYear() * 12 + start.getUTCMonth();
+  const endMonth = end.getUTCFullYear() * 12 + end.getUTCMonth();
+  return endMonth - startMonth;
 }
 
 function parseCrmDate(value: string) {

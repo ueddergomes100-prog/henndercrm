@@ -37,7 +37,7 @@ function contact(id, contactedAt, outcome = "no_answer") {
   };
 }
 
-test("separa compra posterior a 30 dias como receita de relacionamento", () => {
+test("classifica compra em mes posterior ao contato como faturamento recuperado", () => {
   const summary = buildCrmAttributionSummary({
     customers: [customer],
     sales: [
@@ -48,14 +48,44 @@ test("separa compra posterior a 30 dias como receita de relacionamento", () => {
   });
 
   assert.equal(CRM_ATTRIBUTION_MAX_DAYS, 30);
-  assert.equal(summary.attributedSales.length, 1);
+  assert.equal(summary.attributedSales.length, 2);
   assert.equal(summary.attributedSales[0].sale.id, "sale-day-30");
   assert.equal(summary.attributedSales[0].window.id, "influenced_30");
-  assert.equal(summary.relationshipSales.length, 1);
-  assert.equal(summary.relationshipSales[0].sale.id, "sale-day-31");
-  assert.equal(summary.relationshipRevenue, 300);
+  assert.equal(summary.attributedSales[1].sale.id, "sale-day-31");
+  assert.equal(summary.attributedSales[1].window.id, "recovered_10");
+  assert.equal(summary.recoveredRevenue, 300);
+  assert.equal(summary.relationshipSales.length, 0);
+  assert.equal(summary.relationshipRevenue, 0);
   assert.equal(summary.trackedSales.length, 2);
-  assert.equal(summary.totalAttributedRevenue, 100);
+  assert.equal(summary.totalAttributedRevenue, 400);
+});
+
+test("mantem venda influenciada somente quando contato e compra estao no mesmo mes", () => {
+  const summary = buildCrmAttributionSummary({
+    customers: [customer],
+    sales: [sale("sale-same-month", "2026-08-21T12:00:00Z", 200)],
+    contactRecords: [contact("contact-1", "2026-08-01T09:00:00Z")],
+  });
+
+  assert.equal(summary.attributedSales.length, 1);
+  assert.equal(summary.attributedSales[0].window.id, "influenced_20");
+  assert.equal(summary.influencedRevenue, 150);
+  assert.equal(summary.recoveredRevenue, 0);
+});
+
+test("classifica compras futuras de cliente ja contatado como relacionamento", () => {
+  const summary = buildCrmAttributionSummary({
+    customers: [customer],
+    sales: [sale("sale-future-month", "2026-09-05T12:00:00Z", 250)],
+    contactRecords: [contact("contact-1", "2026-07-01T09:00:00Z")],
+  });
+
+  assert.equal(summary.attributedSales.length, 0);
+  assert.equal(summary.relationshipSales.length, 1);
+  assert.equal(summary.relationshipSales[0].sale.id, "sale-future-month");
+  assert.equal(summary.relationshipSales[0].window.id, "relationship_after_30");
+  assert.equal(summary.relationshipRevenue, 250);
+  assert.equal(summary.totalAttributedRevenue, 0);
 });
 
 test("recorta o resultado pelo mes da venda sem perder o contato historico", () => {

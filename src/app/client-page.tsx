@@ -3461,7 +3461,7 @@ function CrmResults({
               <span className="inline-flex items-center gap-2.5">
                 <span className="size-2.5 rounded-full bg-[var(--secondary)]" />
                 <span>
-                  <span className="block text-xs text-[var(--muted-foreground)]">Recuperado · até 10 dias</span>
+                  <span className="block text-xs text-[var(--muted-foreground)]">Recuperado · até 10 dias ou mês seguinte</span>
                   <strong className="mt-0.5 block text-sm font-semibold text-[var(--foreground)]">
                     {formatCurrency(attribution.recoveredRevenue)}
                   </strong>
