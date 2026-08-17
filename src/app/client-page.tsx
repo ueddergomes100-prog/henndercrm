@@ -118,6 +118,7 @@ type View =
   | "perfil"
   | "recuperacao"
   | "recompra"
+  | "alerta-manual"
   | "carteira"
   | "vendedores"
   | "saude"
@@ -384,6 +385,7 @@ const navGroups: NavGroup[] = [
       { id: "vendas", label: "Vendas", description: "Vendas importadas, itens e rastreabilidade do ERP.", icon: ShoppingBag },
       { id: "produtos", label: "Produtos", description: "Produtos, recompra ativa e potencial recorrente.", icon: ClipboardList },
       { id: "recompra", label: "Alertas", description: "Acompanhe clientes no momento ideal de recompra.", icon: Bell },
+      { id: "alerta-manual", label: "Criar alerta", description: "Cadastre alerta manual de recompra em uma tela separada.", icon: Plus },
       { id: "oportunidades", label: "Oportunidades", description: "Veja sugestões de vendas e produtos relacionados.", icon: Target },
       { id: "agenda", label: "Agenda", description: "Organize contatos, visitas e retornos comerciais.", icon: CalendarDays },
     ],
@@ -424,6 +426,7 @@ const sellerAllowedViews: View[] = [
   "perfil",
   "recuperacao",
   "recompra",
+  "alerta-manual",
   "carteira",
   "atividades",
   "oportunidades",
@@ -1465,15 +1468,21 @@ export default function Home() {
               <RepurchaseAlerts
                 alerts={appAlerts}
                 customers={appCustomers}
-                products={scopedData.products}
-                sellers={scopedData.sellers}
                 user={user}
                 productCampaigns={productCampaigns}
                 alertStatuses={alertStatuses}
                 onStatusChange={updateAlertStatus}
                 onRegisterContact={registerContact}
-                onCreateAlert={createManualAlert}
                 onUpdateContact={updateCustomerContact}
+              />
+            )}
+            {visibleView === "alerta-manual" && (
+              <ManualAlertPage
+                customers={appCustomers}
+                products={scopedData.products}
+                sellers={scopedData.sellers}
+                user={user}
+                onCreateAlert={createManualAlert}
               />
             )}
             {visibleView === "carteira" && (
@@ -6894,26 +6903,20 @@ function CustomerProfile({
 function RepurchaseAlerts({
   alerts,
   customers,
-  products,
-  sellers,
   user,
   productCampaigns,
   alertStatuses,
   onStatusChange,
   onRegisterContact,
-  onCreateAlert,
   onUpdateContact,
 }: {
   alerts: AlertRow[];
   customers: CustomerRow[];
-  products: ProductRow[];
-  sellers: SellerRow[];
   user: CrmSessionUser;
   productCampaigns: ProductCampaign[];
   alertStatuses: Record<string, RepurchaseAlertStatus>;
   onStatusChange: (id: string, status: RepurchaseAlertStatus) => Promise<void>;
   onRegisterContact: (record: Omit<ContactRecord, "id">) => Promise<void>;
-  onCreateAlert: (alert: AlertRow, note?: string) => Promise<void>;
   onUpdateContact: (
     customer: CustomerRow,
     phone: string,
@@ -7058,13 +7061,6 @@ function RepurchaseAlerts({
   return (
     <div className="space-y-5">
       <PageTitle eyebrow="Operação do dia" title="Alertas de recompra" description="Clientes com prazo manual vencido e sem recompra do mesmo produto." />
-      <ManualAlertPanel
-        customers={customers}
-        products={products}
-        sellers={sellers}
-        user={user}
-        onCreateAlert={onCreateAlert}
-      />
       <Panel
         title={queue === "pendentes" ? "Alertas pendentes" : "Clientes contatados"}
         icon={Bell}
@@ -7291,6 +7287,37 @@ function RepurchaseAlerts({
           />
         );
       })()}
+    </div>
+  );
+}
+
+function ManualAlertPage({
+  customers,
+  products,
+  sellers,
+  user,
+  onCreateAlert,
+}: {
+  customers: CustomerRow[];
+  products: ProductRow[];
+  sellers: SellerRow[];
+  user: CrmSessionUser;
+  onCreateAlert: (alert: AlertRow, note?: string) => Promise<void>;
+}) {
+  return (
+    <div className="space-y-5">
+      <PageTitle
+        eyebrow="Recompra manual"
+        title="Criar alerta"
+        description="Cadastre lembretes manuais sem misturar com a fila de alertas do dia."
+      />
+      <ManualAlertPanel
+        customers={customers}
+        products={products}
+        sellers={sellers}
+        user={user}
+        onCreateAlert={onCreateAlert}
+      />
     </div>
   );
 }
