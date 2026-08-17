@@ -460,8 +460,7 @@ export default function Home() {
   const [theme, setTheme] = useState<Theme>("light");
   const [manualCustomers, setManualCustomers] = useState<CustomerRow[]>([]);
   const [manualAlerts, setManualAlerts] = useState<AlertRow[]>([]);
-  const [productCampaigns, setProductCampaigns] = useState<ProductCampaign[]>([]);
-  const [productCampaignsLoaded, setProductCampaignsLoaded] = useState(false);
+  const [productCampaigns, setProductCampaigns] = useState<ProductCampaign[]>(() => readProductCampaigns());
   const [customerContactUpdates, setCustomerContactUpdates] = useState<Record<string, CustomerContactUpdate>>({});
   const [quickAction, setQuickAction] = useState<QuickAction | null>(null);
   const [dismissedNotificationIds, setDismissedNotificationIds] = useState<string[]>([]);
@@ -521,14 +520,8 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    setProductCampaigns(readProductCampaigns());
-    setProductCampaignsLoaded(true);
-  }, []);
-
-  useEffect(() => {
-    if (!productCampaignsLoaded) return;
     writeProductCampaigns(productCampaigns);
-  }, [productCampaigns, productCampaignsLoaded]);
+  }, [productCampaigns]);
 
   useEffect(() => {
     if (!user) return;
@@ -4714,7 +4707,7 @@ function CampaignsModule({
     }
 
     const campaign: ProductCampaign = {
-      id: editingCampaignId ?? `product-campaign-${Date.now()}`,
+      id: editingCampaignId ?? createProductCampaignId(),
       name: campaignName.trim() || selectedProductNames[0] || "Campanha de recompra",
       productIds: selectedProductIds,
       productQuery: selectedProductNames.join(", "),
@@ -4722,7 +4715,7 @@ function CampaignsModule({
       imageName: campaignImageName || undefined,
       imageDataUrl: campaignImageDataUrl || undefined,
       active: true,
-      createdAt: productCampaigns.find((item) => item.id === editingCampaignId)?.createdAt ?? new Date().toISOString(),
+      createdAt: productCampaigns.find((item) => item.id === editingCampaignId)?.createdAt ?? currentIsoTimestamp(),
     };
 
     onProductCampaignsChange([
@@ -4871,7 +4864,14 @@ function CampaignsModule({
             </div>
             {campaignImageDataUrl && (
               <div className="rounded-lg border border-blue-100 bg-white p-3">
-                <img src={campaignImageDataUrl} alt={campaignImageName || "Arte da campanha"} className="max-h-48 rounded-lg object-contain" />
+                <Image
+                  src={campaignImageDataUrl}
+                  alt={campaignImageName || "Arte da campanha"}
+                  width={420}
+                  height={240}
+                  unoptimized
+                  className="max-h-48 rounded-lg object-contain"
+                />
                 <p className="mt-2 text-xs font-semibold text-slate-500">{campaignImageName}</p>
               </div>
             )}
@@ -6988,9 +6988,12 @@ function RepurchaseAlerts({
 }) {
   const [queue, setQueue] = useState<"pendentes" | "contatados">("pendentes");
   const [filter, setFilter] = useState("todos");
-  const [repurchaseProductSearch, setRepurchaseProductSearch] = useState("");
-  const [repurchaseDaysFilter, setRepurchaseDaysFilter] = useState("todos");
-  const [repurchaseAlertFiltersLoaded, setRepurchaseAlertFiltersLoaded] = useState(false);
+  const [repurchaseProductSearch, setRepurchaseProductSearch] = useState(() =>
+    readLocalStorageString(REPURCHASE_ALERT_PRODUCT_FILTER_STORAGE_KEY),
+  );
+  const [repurchaseDaysFilter, setRepurchaseDaysFilter] = useState(() =>
+    readLocalStorageString(REPURCHASE_ALERT_DAYS_FILTER_STORAGE_KEY) || "todos",
+  );
   const [page, setPage] = useState(1);
   const [contactAlert, setContactAlert] = useState<AlertRow | null>(null);
   const [updatingAlertId, setUpdatingAlertId] = useState<string | null>(null);
@@ -7060,34 +7063,17 @@ function RepurchaseAlerts({
     return true;
   });
   const totalPages = Math.max(1, Math.ceil(filteredAlerts.length / pageSize));
-  const visibleAlerts = filteredAlerts.slice((page - 1) * pageSize, page * pageSize);
+  const currentPage = Math.min(page, totalPages);
+  const visibleAlerts = filteredAlerts.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   useEffect(() => {
-    try {
-      const storedDays = window.localStorage.getItem(REPURCHASE_ALERT_DAYS_FILTER_STORAGE_KEY);
-      const storedProduct = window.localStorage.getItem(REPURCHASE_ALERT_PRODUCT_FILTER_STORAGE_KEY);
-      if (storedDays) setRepurchaseDaysFilter(storedDays);
-      if (storedProduct) setRepurchaseProductSearch(storedProduct);
-    } catch {
-      // The filters still work for the current session when storage is blocked.
-    } finally {
-      setRepurchaseAlertFiltersLoaded(true);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!repurchaseAlertFiltersLoaded) return;
     try {
       window.localStorage.setItem(REPURCHASE_ALERT_DAYS_FILTER_STORAGE_KEY, repurchaseDaysFilter);
       window.localStorage.setItem(REPURCHASE_ALERT_PRODUCT_FILTER_STORAGE_KEY, repurchaseProductSearch);
     } catch {
       // Ignore storage failures; the in-memory filters remain active.
     }
-  }, [repurchaseDaysFilter, repurchaseProductSearch, repurchaseAlertFiltersLoaded]);
-
-  useEffect(() => {
-    setPage((current) => Math.min(current, totalPages));
-  }, [totalPages]);
+  }, [repurchaseDaysFilter, repurchaseProductSearch]);
 
   async function markAlertAsContacted(alert: AlertRow, customer?: CustomerRow) {
     if (updatingAlertId) return;
@@ -7303,14 +7289,14 @@ function RepurchaseAlerts({
         {totalPages > 1 && (
           <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-blue-100 pt-4">
             <p className="text-sm text-slate-500">
-              Exibindo {(page - 1) * pageSize + 1} a{" "}
-              {Math.min(page * pageSize, filteredAlerts.length)} de{" "}
+              Exibindo {(currentPage - 1) * pageSize + 1} a{" "}
+              {Math.min(currentPage * pageSize, filteredAlerts.length)} de{" "}
               {filteredAlerts.length} alertas
             </p>
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                disabled={page === 1}
+                disabled={currentPage === 1}
                 onClick={() => setPage((current) => Math.max(1, current - 1))}
                 className="rounded-lg border border-blue-100 bg-white px-3 py-2 text-sm font-medium text-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -7321,7 +7307,7 @@ function RepurchaseAlerts({
               </span>
               <button
                 type="button"
-                disabled={page === totalPages}
+                disabled={currentPage === totalPages}
                 onClick={() =>
                   setPage((current) => Math.min(totalPages, current + 1))
                 }
@@ -7897,6 +7883,7 @@ function findProductCampaignForAlert(alert: AlertRow, campaigns: ProductCampaign
 }
 
 function readProductCampaigns(): ProductCampaign[] {
+  if (typeof window === "undefined") return [];
   try {
     const raw = window.localStorage.getItem(PRODUCT_CAMPAIGNS_STORAGE_KEY);
     if (!raw) return [];
@@ -7927,11 +7914,29 @@ function readProductCampaigns(): ProductCampaign[] {
 }
 
 function writeProductCampaigns(campaigns: ProductCampaign[]) {
+  if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(PRODUCT_CAMPAIGNS_STORAGE_KEY, JSON.stringify(campaigns));
   } catch {
     // Large campaign images can exceed browser storage; keeping the UI usable is better than blocking the session.
   }
+}
+
+function readLocalStorageString(key: string) {
+  if (typeof window === "undefined") return "";
+  try {
+    return window.localStorage.getItem(key) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function createProductCampaignId() {
+  return `product-campaign-${Date.now()}`;
+}
+
+function currentIsoTimestamp() {
+  return new Date().toISOString();
 }
 
 function SellerPortfolioBySeller({
