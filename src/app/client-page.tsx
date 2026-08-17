@@ -144,6 +144,7 @@ type QuickAction = "manual-alert" | "manual-customer" | "opportunity" | "agenda"
 type ProductCampaign = {
   id: string;
   name: string;
+  productIds: string[];
   productQuery: string;
   messageTemplate: string;
   imageName?: string;
@@ -1520,6 +1521,7 @@ export default function Home() {
               <CampaignsModule
                 customers={appCustomers}
                 alerts={appAlerts}
+                products={scopedData.products}
                 user={user}
                 productCampaigns={productCampaigns}
                 onProductCampaignsChange={setProductCampaigns}
@@ -4627,6 +4629,7 @@ function ActivitiesModule({
 function CampaignsModule({
   customers,
   alerts,
+  products,
   user,
   productCampaigns,
   onProductCampaignsChange,
@@ -4636,6 +4639,7 @@ function CampaignsModule({
 }: {
   customers: CustomerRow[];
   alerts: AlertRow[];
+  products: ProductRow[];
   user: CrmSessionUser;
   productCampaigns: ProductCampaign[];
   onProductCampaignsChange: (campaigns: ProductCampaign[]) => void;
@@ -4648,9 +4652,10 @@ function CampaignsModule({
   onRegisterContact: (record: Omit<ContactRecord, "id">) => Promise<void>;
 }) {
   const campaignDefinitions = buildCampaignDefinitions(customers, alerts);
-  const repurchaseProductOptions = useMemo(() => buildRepurchaseProductOptions(alerts), [alerts]);
+  const configuredCampaignProducts = useMemo(() => buildConfiguredCampaignProducts(products), [products]);
   const [campaignName, setCampaignName] = useState("");
-  const [productQuery, setProductQuery] = useState("");
+  const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
+  const [productSearch, setProductSearch] = useState("");
   const [campaignMessage, setCampaignMessage] = useState(DEFAULT_WHATSAPP_MESSAGE_TEMPLATE);
   const [campaignImageName, setCampaignImageName] = useState("");
   const [campaignImageDataUrl, setCampaignImageDataUrl] = useState("");
@@ -4665,10 +4670,20 @@ function CampaignsModule({
     ? alerts.filter((alert) => alert.status === "pendente" && productCampaignMatchesAlert(selectedProductCampaign, alert))
     : [];
   const customerById = new Map(customers.map((customer) => [customer.id, customer]));
+  const productById = new Map(products.map((product) => [product.id, product]));
+  const normalizedProductSearch = normalizeManualAlertSearch(productSearch.trim());
+  const filteredConfiguredProducts = configuredCampaignProducts.filter((product) => {
+    if (!normalizedProductSearch) return true;
+    return normalizeManualAlertSearch(`${product.name} ${product.code} ${product.department}`).includes(normalizedProductSearch);
+  });
+  const selectedProductNames = selectedProductIds
+    .map((productId) => productById.get(productId)?.name)
+    .filter((name): name is string => Boolean(name));
 
   function resetCampaignForm() {
     setCampaignName("");
-    setProductQuery("");
+    setSelectedProductIds([]);
+    setProductSearch("");
     setCampaignMessage(DEFAULT_WHATSAPP_MESSAGE_TEMPLATE);
     setCampaignImageName("");
     setCampaignImageDataUrl("");
@@ -4678,7 +4693,8 @@ function CampaignsModule({
 
   function editCampaign(campaign: ProductCampaign) {
     setCampaignName(campaign.name);
-    setProductQuery(campaign.productQuery);
+    setSelectedProductIds(resolveCampaignProductIds(campaign, configuredCampaignProducts));
+    setProductSearch("");
     setCampaignMessage(campaign.messageTemplate);
     setCampaignImageName(campaign.imageName ?? "");
     setCampaignImageDataUrl(campaign.imageDataUrl ?? "");
@@ -4687,10 +4703,9 @@ function CampaignsModule({
   }
 
   function saveCampaign() {
-    const trimmedProduct = productQuery.trim();
     const trimmedMessage = campaignMessage.trim();
-    if (!trimmedProduct) {
-      setCampaignError("Informe o produto da campanha. Exemplo: SIMPARIC TRIO.");
+    if (!selectedProductIds.length) {
+      setCampaignError("Selecione pelo menos um item com regra configurada no Motor de Recompra.");
       return;
     }
     if (!trimmedMessage) {
@@ -4700,8 +4715,9 @@ function CampaignsModule({
 
     const campaign: ProductCampaign = {
       id: editingCampaignId ?? `product-campaign-${Date.now()}`,
-      name: campaignName.trim() || trimmedProduct,
-      productQuery: trimmedProduct,
+      name: campaignName.trim() || selectedProductNames[0] || "Campanha de recompra",
+      productIds: selectedProductIds,
+      productQuery: selectedProductNames.join(", "),
       messageTemplate: trimmedMessage,
       imageName: campaignImageName || undefined,
       imageDataUrl: campaignImageDataUrl || undefined,
@@ -4743,24 +4759,69 @@ function CampaignsModule({
                   className="mt-2 h-11 w-full rounded-lg border border-blue-100 bg-[#f8fbff] px-3 text-sm outline-none focus:border-cyan-400"
                 />
               </label>
-              <label className="block">
-                <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Produto do alerta</span>
-                <input
-                  value={productQuery}
-                  list="campaign-product-options"
-                  onChange={(event) => setProductQuery(event.target.value)}
-                  placeholder="SIMPARIC TRIO"
-                  className="mt-2 h-11 w-full rounded-lg border border-blue-100 bg-[#f8fbff] px-3 text-sm outline-none focus:border-cyan-400"
-                />
-                <datalist id="campaign-product-options">
-                  {repurchaseProductOptions.map((option) => (
-                    <option key={option.name} value={option.name}>
-                      {option.count} alerta(s)
-                    </option>
-                  ))}
-                </datalist>
-              </label>
+              <div className="block">
+                <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Itens da campanha</span>
+                <div className="mt-2 rounded-lg border border-blue-100 bg-[#f8fbff] p-2">
+                  <div className="mb-2 flex h-10 items-center gap-2 rounded-lg bg-white px-3">
+                    <Search size={16} className="shrink-0 text-slate-400" />
+                    <input
+                      value={productSearch}
+                      onChange={(event) => setProductSearch(event.target.value)}
+                      placeholder="Buscar item configurado"
+                      className="min-w-0 flex-1 bg-transparent text-sm outline-none"
+                    />
+                  </div>
+                  <div className="max-h-44 space-y-2 overflow-y-auto pr-1">
+                    {filteredConfiguredProducts.map((product) => {
+                      const checked = selectedProductIds.includes(product.id);
+                      return (
+                        <label
+                          key={product.id}
+                          className={`flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2 text-sm transition ${
+                            checked
+                              ? "border-cyan-300 bg-cyan-50 text-[#0753a6]"
+                              : "border-blue-50 bg-white text-slate-600 hover:border-cyan-200"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(event) => {
+                              setSelectedProductIds((current) =>
+                                event.target.checked
+                                  ? [...current, product.id]
+                                  : current.filter((id) => id !== product.id),
+                              );
+                            }}
+                            className="mt-1"
+                          />
+                          <span className="min-w-0">
+                            <span className="block truncate font-bold">{product.name}</span>
+                            <span className="mt-0.5 block text-xs text-slate-500">
+                              {product.code || "Sem codigo"} - {product.defaultRepurchaseDays} dias
+                            </span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                    {!filteredConfiguredProducts.length && (
+                      <p className="rounded-lg bg-white px-3 py-2 text-sm text-slate-500">
+                        Nenhum item com regra configurada encontrado.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
+            {selectedProductNames.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {selectedProductNames.map((name) => (
+                  <span key={name} className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-bold text-cyan-700">
+                    {name}
+                  </span>
+                ))}
+              </div>
+            )}
             <label className="block">
               <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Mensagem padrao</span>
               <textarea
@@ -4834,7 +4895,9 @@ function CampaignsModule({
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="truncate font-black text-[#123252]">{campaign.name}</p>
-                      <p className="mt-1 text-xs text-slate-500">{campaign.productQuery} - {campaignAlerts.length} alerta(s) pendente(s)</p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {formatCampaignProductNames(campaign, productById)} - {campaignAlerts.length} alerta(s) pendente(s)
+                      </p>
                       {campaign.imageName && <p className="mt-1 text-xs font-semibold text-cyan-700">Imagem: {campaign.imageName}</p>}
                     </div>
                     <span className={`rounded-full px-3 py-1 text-xs font-bold ${campaign.active ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
@@ -7517,6 +7580,7 @@ function buildManualAlertRow({
   return {
     id: `manual-alert-${customer.id}-${product.id}-${Date.now()}`,
     customerId: customer.id,
+    productId: product.id,
     product: product.name,
     client: customer.name,
     buyDate: customer.lastBuy,
@@ -7793,20 +7857,36 @@ function normalizeManualAlertSearch(value: string) {
     .replace(/[\u0300-\u036f]/g, "");
 }
 
-function buildRepurchaseProductOptions(alerts: AlertRow[]) {
-  const counts = new Map<string, { name: string; count: number }>();
-  for (const alert of alerts) {
-    const key = normalizeManualAlertSearch(alert.product.trim());
-    if (!key) continue;
-    const current = counts.get(key) ?? { name: alert.product, count: 0 };
-    current.count += 1;
-    counts.set(key, current);
-  }
+function buildConfiguredCampaignProducts(products: ProductRow[]) {
+  return products
+    .filter((product) => Boolean(product.defaultRepurchaseDays))
+    .sort((left, right) => left.name.localeCompare(right.name, "pt-BR"));
+}
 
-  return [...counts.values()].sort((left, right) => left.name.localeCompare(right.name, "pt-BR"));
+function resolveCampaignProductIds(campaign: ProductCampaign, products: ProductRow[]) {
+  if (campaign.productIds.length) return campaign.productIds;
+  const legacyQuery = normalizeManualAlertSearch(campaign.productQuery.trim());
+  if (!legacyQuery) return [];
+  return products
+    .filter((product) => normalizeManualAlertSearch(product.name).includes(legacyQuery))
+    .map((product) => product.id);
+}
+
+function formatCampaignProductNames(campaign: ProductCampaign, productById: Map<string, ProductRow>) {
+  const names = campaign.productIds
+    .map((productId) => productById.get(productId)?.name)
+    .filter((name): name is string => Boolean(name));
+
+  if (names.length === 0) return campaign.productQuery;
+  if (names.length <= 2) return names.join(", ");
+  return `${names.slice(0, 2).join(", ")} +${names.length - 2} item(ns)`;
 }
 
 function productCampaignMatchesAlert(campaign: ProductCampaign, alert: AlertRow) {
+  if (campaign.productIds.length) {
+    return Boolean(alert.productId && campaign.productIds.includes(alert.productId));
+  }
+
   const productQuery = normalizeManualAlertSearch(campaign.productQuery.trim());
   if (!productQuery) return false;
   return normalizeManualAlertSearch(alert.product).includes(productQuery);
@@ -7822,13 +7902,25 @@ function readProductCampaigns(): ProductCampaign[] {
     if (!raw) return [];
     const parsed = JSON.parse(raw) as ProductCampaign[];
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter((campaign) =>
-      campaign &&
-      typeof campaign.id === "string" &&
-      typeof campaign.name === "string" &&
-      typeof campaign.productQuery === "string" &&
-      typeof campaign.messageTemplate === "string",
-    );
+    return parsed.flatMap((campaign) => {
+      if (
+        !campaign ||
+        typeof campaign.id !== "string" ||
+        typeof campaign.name !== "string" ||
+        typeof campaign.productQuery !== "string" ||
+        typeof campaign.messageTemplate !== "string"
+      ) {
+        return [];
+      }
+
+      return [{
+        ...campaign,
+        productIds: Array.isArray(campaign.productIds)
+          ? campaign.productIds.filter((id): id is string => typeof id === "string")
+          : [],
+        active: campaign.active !== false,
+      }];
+    });
   } catch {
     return [];
   }

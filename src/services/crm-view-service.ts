@@ -43,6 +43,7 @@ export interface CustomerViewModel {
 export interface AlertViewModel {
   id: string;
   customerId: string;
+  productId?: string;
   product: string;
   client: string;
   buyDate: string;
@@ -152,6 +153,7 @@ export class CrmViewService {
       alerts: snapshot.alerts.map((alert) => ({
         id: alert.id,
         customerId: alert.customerId,
+        productId: alert.productId,
         product: alert.productName,
         client: alert.customerName,
         buyDate: formatDate(alert.purchaseDate),
