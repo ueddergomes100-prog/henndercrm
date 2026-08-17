@@ -140,6 +140,16 @@ type SaleItemRow = CrmSaleItem;
 type ProductRow = CrmProduct;
 type SellerRow = CrmSeller;
 type QuickAction = "manual-alert" | "manual-customer" | "opportunity" | "agenda" | "contact";
+type ProductCampaign = {
+  id: string;
+  name: string;
+  productQuery: string;
+  messageTemplate: string;
+  imageName?: string;
+  imageDataUrl?: string;
+  active: boolean;
+  createdAt: string;
+};
 const LIST_PAGE_SIZE = 20;
 const OPPORTUNITY_PAGE_SIZE = 20;
 const SESSION_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
@@ -149,6 +159,10 @@ const DASHBOARD_FULL_SNAPSHOT_DELAY_MS = 15 * 1000;
 const DASHBOARD_SNAPSHOT_TIMEOUT_MS = 30 * 1000;
 const FULL_SNAPSHOT_TIMEOUT_MS = 45 * 1000;
 const AUTOMATIC_CONTACT_FOLLOW_UP_DAYS = 7;
+const REPURCHASE_ALERT_DAYS_FILTER_STORAGE_KEY = "henndercrm-repurchase-alert-days-filter";
+const REPURCHASE_ALERT_PRODUCT_FILTER_STORAGE_KEY = "henndercrm-repurchase-alert-product-filter";
+const PRODUCT_CAMPAIGNS_STORAGE_KEY = "henndercrm-product-campaigns";
+const PRODUCT_CAMPAIGN_IMAGE_MAX_BYTES = 2 * 1024 * 1024;
 const DEFAULT_WHATSAPP_MESSAGE_TEMPLATE = [
   "{saudacao}! Tudo bem? Aqui é o {vendedor} do Shopping Rural 🤠.",
   "",
@@ -442,6 +456,8 @@ export default function Home() {
   const [theme, setTheme] = useState<Theme>("light");
   const [manualCustomers, setManualCustomers] = useState<CustomerRow[]>([]);
   const [manualAlerts, setManualAlerts] = useState<AlertRow[]>([]);
+  const [productCampaigns, setProductCampaigns] = useState<ProductCampaign[]>([]);
+  const [productCampaignsLoaded, setProductCampaignsLoaded] = useState(false);
   const [customerContactUpdates, setCustomerContactUpdates] = useState<Record<string, CustomerContactUpdate>>({});
   const [quickAction, setQuickAction] = useState<QuickAction | null>(null);
   const [dismissedNotificationIds, setDismissedNotificationIds] = useState<string[]>([]);
@@ -499,6 +515,16 @@ export default function Home() {
       controller.abort();
     };
   }, []);
+
+  useEffect(() => {
+    setProductCampaigns(readProductCampaigns());
+    setProductCampaignsLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!productCampaignsLoaded) return;
+    writeProductCampaigns(productCampaigns);
+  }, [productCampaigns, productCampaignsLoaded]);
 
   useEffect(() => {
     if (!user) return;
@@ -1442,6 +1468,7 @@ export default function Home() {
                 products={scopedData.products}
                 sellers={scopedData.sellers}
                 user={user}
+                productCampaigns={productCampaigns}
                 alertStatuses={alertStatuses}
                 onStatusChange={updateAlertStatus}
                 onRegisterContact={registerContact}
@@ -1485,6 +1512,8 @@ export default function Home() {
                 customers={appCustomers}
                 alerts={appAlerts}
                 user={user}
+                productCampaigns={productCampaigns}
+                onProductCampaignsChange={setProductCampaigns}
                 openProfile={openProfile}
                 onUpdateContact={updateCustomerContact}
                 onRegisterContact={registerContact}
@@ -4590,6 +4619,8 @@ function CampaignsModule({
   customers,
   alerts,
   user,
+  productCampaigns,
+  onProductCampaignsChange,
   openProfile,
   onUpdateContact,
   onRegisterContact,
@@ -4597,6 +4628,8 @@ function CampaignsModule({
   customers: CustomerRow[];
   alerts: AlertRow[];
   user: CrmSessionUser;
+  productCampaigns: ProductCampaign[];
+  onProductCampaignsChange: (campaigns: ProductCampaign[]) => void;
   openProfile: (customer: CustomerRow) => void;
   onUpdateContact: (
     customer: CustomerRow,
@@ -4606,15 +4639,251 @@ function CampaignsModule({
   onRegisterContact: (record: Omit<ContactRecord, "id">) => Promise<void>;
 }) {
   const campaignDefinitions = buildCampaignDefinitions(customers, alerts);
+  const repurchaseProductOptions = useMemo(() => buildRepurchaseProductOptions(alerts), [alerts]);
+  const [campaignName, setCampaignName] = useState("");
+  const [productQuery, setProductQuery] = useState("");
+  const [campaignMessage, setCampaignMessage] = useState(DEFAULT_WHATSAPP_MESSAGE_TEMPLATE);
+  const [campaignImageName, setCampaignImageName] = useState("");
+  const [campaignImageDataUrl, setCampaignImageDataUrl] = useState("");
+  const [editingCampaignId, setEditingCampaignId] = useState<string | null>(null);
+  const [campaignError, setCampaignError] = useState("");
   const [selectedCampaignId, setSelectedCampaignId] = useState(campaignDefinitions[0]?.id ?? "");
   const selectedCampaign =
     campaignDefinitions.find((campaign) => campaign.id === selectedCampaignId) ??
     campaignDefinitions[0];
+  const selectedProductCampaign = productCampaigns.find((campaign) => campaign.id === editingCampaignId) ?? productCampaigns[0];
+  const selectedProductCampaignAlerts = selectedProductCampaign
+    ? alerts.filter((alert) => alert.status === "pendente" && productCampaignMatchesAlert(selectedProductCampaign, alert))
+    : [];
+  const customerById = new Map(customers.map((customer) => [customer.id, customer]));
+
+  function resetCampaignForm() {
+    setCampaignName("");
+    setProductQuery("");
+    setCampaignMessage(DEFAULT_WHATSAPP_MESSAGE_TEMPLATE);
+    setCampaignImageName("");
+    setCampaignImageDataUrl("");
+    setEditingCampaignId(null);
+    setCampaignError("");
+  }
+
+  function editCampaign(campaign: ProductCampaign) {
+    setCampaignName(campaign.name);
+    setProductQuery(campaign.productQuery);
+    setCampaignMessage(campaign.messageTemplate);
+    setCampaignImageName(campaign.imageName ?? "");
+    setCampaignImageDataUrl(campaign.imageDataUrl ?? "");
+    setEditingCampaignId(campaign.id);
+    setCampaignError("");
+  }
+
+  function saveCampaign() {
+    const trimmedProduct = productQuery.trim();
+    const trimmedMessage = campaignMessage.trim();
+    if (!trimmedProduct) {
+      setCampaignError("Informe o produto da campanha. Exemplo: SIMPARIC TRIO.");
+      return;
+    }
+    if (!trimmedMessage) {
+      setCampaignError("Informe a mensagem padrao da campanha.");
+      return;
+    }
+
+    const campaign: ProductCampaign = {
+      id: editingCampaignId ?? `product-campaign-${Date.now()}`,
+      name: campaignName.trim() || trimmedProduct,
+      productQuery: trimmedProduct,
+      messageTemplate: trimmedMessage,
+      imageName: campaignImageName || undefined,
+      imageDataUrl: campaignImageDataUrl || undefined,
+      active: true,
+      createdAt: productCampaigns.find((item) => item.id === editingCampaignId)?.createdAt ?? new Date().toISOString(),
+    };
+
+    onProductCampaignsChange([
+      campaign,
+      ...productCampaigns.filter((item) => item.id !== campaign.id),
+    ]);
+    resetCampaignForm();
+  }
+
+  function deleteCampaign(id: string) {
+    onProductCampaignsChange(productCampaigns.filter((campaign) => campaign.id !== id));
+    if (editingCampaignId === id) resetCampaignForm();
+  }
+
+  function toggleCampaign(campaign: ProductCampaign) {
+    onProductCampaignsChange(productCampaigns.map((item) =>
+      item.id === campaign.id ? { ...item, active: !item.active } : item,
+    ));
+  }
 
   return (
     <div className="space-y-5">
-      <PageTitle eyebrow="Inteligencia" title="Campanhas" description="Publicos comerciais prontos para acao manual, sem disparo automatico de mensagens." />
-      <Panel title="Campanhas comerciais" icon={Sparkles} action={`${campaignDefinitions.length} modelos`}>
+      <PageTitle eyebrow="Inteligencia" title="Campanhas" description="Campanhas por produto integradas aos alertas de recompra." />
+      <Panel title="Campanha por produto" icon={Sparkles} action={`${productCampaigns.length} campanha(s)`}>
+        <div className="grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
+          <div className="space-y-3">
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="block">
+                <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Nome</span>
+                <input
+                  value={campaignName}
+                  onChange={(event) => setCampaignName(event.target.value)}
+                  placeholder="Promo SIMPARIC TRIO"
+                  className="mt-2 h-11 w-full rounded-lg border border-blue-100 bg-[#f8fbff] px-3 text-sm outline-none focus:border-cyan-400"
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Produto do alerta</span>
+                <input
+                  value={productQuery}
+                  list="campaign-product-options"
+                  onChange={(event) => setProductQuery(event.target.value)}
+                  placeholder="SIMPARIC TRIO"
+                  className="mt-2 h-11 w-full rounded-lg border border-blue-100 bg-[#f8fbff] px-3 text-sm outline-none focus:border-cyan-400"
+                />
+                <datalist id="campaign-product-options">
+                  {repurchaseProductOptions.map((option) => (
+                    <option key={option.name} value={option.name}>
+                      {option.count} alerta(s)
+                    </option>
+                  ))}
+                </datalist>
+              </label>
+            </div>
+            <label className="block">
+              <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Mensagem padrao</span>
+              <textarea
+                value={campaignMessage}
+                onChange={(event) => setCampaignMessage(event.target.value)}
+                rows={6}
+                className="mt-2 w-full rounded-lg border border-blue-100 bg-[#f8fbff] px-3 py-2 text-sm outline-none focus:border-cyan-400"
+              />
+            </label>
+            <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
+              <label className="block">
+                <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Arte da campanha</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (!file) return;
+                    if (file.size > PRODUCT_CAMPAIGN_IMAGE_MAX_BYTES) {
+                      setCampaignError("Use uma imagem com ate 2 MB para salvar a campanha neste computador.");
+                      event.currentTarget.value = "";
+                      return;
+                    }
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                      setCampaignImageName(file.name);
+                      setCampaignImageDataUrl(typeof reader.result === "string" ? reader.result : "");
+                      setCampaignError("");
+                    };
+                    reader.readAsDataURL(file);
+                  }}
+                  className="mt-2 block w-full rounded-lg border border-blue-100 bg-[#f8fbff] px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-[#0753a6] file:px-3 file:py-1.5 file:text-sm file:font-bold file:text-white"
+                />
+              </label>
+              {campaignImageDataUrl && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCampaignImageName("");
+                    setCampaignImageDataUrl("");
+                  }}
+                  className="h-11 rounded-lg border border-blue-100 bg-white px-3 text-sm font-bold text-[#0753a6] hover:bg-cyan-50"
+                >
+                  Remover imagem
+                </button>
+              )}
+            </div>
+            {campaignImageDataUrl && (
+              <div className="rounded-lg border border-blue-100 bg-white p-3">
+                <img src={campaignImageDataUrl} alt={campaignImageName || "Arte da campanha"} className="max-h-48 rounded-lg object-contain" />
+                <p className="mt-2 text-xs font-semibold text-slate-500">{campaignImageName}</p>
+              </div>
+            )}
+            {campaignError && <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{campaignError}</p>}
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={saveCampaign} className="h-11 rounded-lg bg-[#0753a6] px-4 text-sm font-bold text-white hover:bg-[#064987]">
+                {editingCampaignId ? "Salvar alteracao" : "Criar campanha"}
+              </button>
+              {editingCampaignId && (
+                <button type="button" onClick={resetCampaignForm} className="h-11 rounded-lg border border-blue-100 bg-white px-4 text-sm font-bold text-[#0753a6] hover:bg-cyan-50">
+                  Cancelar edicao
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="space-y-3">
+            {productCampaigns.map((campaign) => {
+              const campaignAlerts = alerts.filter((alert) => alert.status === "pendente" && productCampaignMatchesAlert(campaign, alert));
+              return (
+                <div key={campaign.id} className="rounded-lg border border-blue-100 bg-white p-3 shadow-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate font-black text-[#123252]">{campaign.name}</p>
+                      <p className="mt-1 text-xs text-slate-500">{campaign.productQuery} - {campaignAlerts.length} alerta(s) pendente(s)</p>
+                      {campaign.imageName && <p className="mt-1 text-xs font-semibold text-cyan-700">Imagem: {campaign.imageName}</p>}
+                    </div>
+                    <span className={`rounded-full px-3 py-1 text-xs font-bold ${campaign.active ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                      {campaign.active ? "Ativa" : "Pausada"}
+                    </span>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button type="button" onClick={() => editCampaign(campaign)} className="h-9 rounded-lg border border-blue-100 bg-white px-3 text-xs font-bold text-[#0753a6] hover:bg-cyan-50">
+                      Editar
+                    </button>
+                    <button type="button" onClick={() => toggleCampaign(campaign)} className="h-9 rounded-lg border border-blue-100 bg-white px-3 text-xs font-bold text-[#0753a6] hover:bg-cyan-50">
+                      {campaign.active ? "Pausar" : "Ativar"}
+                    </button>
+                    <button type="button" onClick={() => deleteCampaign(campaign.id)} className="h-9 rounded-lg border border-red-100 bg-red-50 px-3 text-xs font-bold text-red-700 hover:bg-red-100">
+                      Excluir
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+            {!productCampaigns.length && <EmptyState text="Crie uma campanha por produto para usar mensagem e imagem direto nos alertas." />}
+          </div>
+        </div>
+      </Panel>
+
+      <Panel title={selectedProductCampaign?.name ?? "Campanha integrada aos alertas"} icon={Bell} action={`${selectedProductCampaignAlerts.length} alertas`}>
+        {selectedProductCampaign ? (
+          <div className="space-y-3">
+            {selectedProductCampaignAlerts.slice(0, 12).map((alert) => {
+              const customer = customerById.get(alert.customerId);
+              if (!customer) return null;
+              return (
+                <div key={alert.id} className="grid gap-3 rounded-lg border border-blue-50 bg-white p-3 md:grid-cols-[1fr_auto] md:items-center">
+                  <button type="button" onClick={() => openProfile(customer)} className="min-w-0 text-left">
+                    <p className="truncate font-bold text-[#123252]">{customer.name}</p>
+                    <p className="mt-1 text-xs text-slate-500">{alert.product} - recompra prevista em {alert.recommended}</p>
+                  </button>
+                  <WhatsAppButton
+                    customer={customer}
+                    user={user}
+                    sellerName={alert.seller}
+                    repurchaseProduct={alert.product}
+                    campaign={selectedProductCampaign}
+                    onUpdateContact={onUpdateContact}
+                    onRegisterContact={onRegisterContact}
+                    compact
+                  />
+                </div>
+              );
+            })}
+            {!selectedProductCampaignAlerts.length && <EmptyState text="Nenhum alerta pendente bate com a campanha selecionada." />}
+          </div>
+        ) : (
+          <EmptyState text="Nenhuma campanha por produto criada ainda." />
+        )}
+      </Panel>
+
+      <Panel title="Publicos inteligentes" icon={UsersRound} action={`${campaignDefinitions.length} modelos`}>
         <div className="grid gap-4 xl:grid-cols-4">
           {campaignDefinitions.map((campaign) => (
             <button
@@ -6628,6 +6897,7 @@ function RepurchaseAlerts({
   products,
   sellers,
   user,
+  productCampaigns,
   alertStatuses,
   onStatusChange,
   onRegisterContact,
@@ -6639,6 +6909,7 @@ function RepurchaseAlerts({
   products: ProductRow[];
   sellers: SellerRow[];
   user: CrmSessionUser;
+  productCampaigns: ProductCampaign[];
   alertStatuses: Record<string, RepurchaseAlertStatus>;
   onStatusChange: (id: string, status: RepurchaseAlertStatus) => Promise<void>;
   onRegisterContact: (record: Omit<ContactRecord, "id">) => Promise<void>;
@@ -6651,11 +6922,44 @@ function RepurchaseAlerts({
 }) {
   const [queue, setQueue] = useState<"pendentes" | "contatados">("pendentes");
   const [filter, setFilter] = useState("todos");
+  const [repurchaseProductSearch, setRepurchaseProductSearch] = useState("");
+  const [repurchaseDaysFilter, setRepurchaseDaysFilter] = useState("todos");
+  const [repurchaseAlertFiltersLoaded, setRepurchaseAlertFiltersLoaded] = useState(false);
   const [page, setPage] = useState(1);
   const [contactAlert, setContactAlert] = useState<AlertRow | null>(null);
   const [updatingAlertId, setUpdatingAlertId] = useState<string | null>(null);
   const [actionError, setActionError] = useState("");
   const pageSize = 20;
+  const repurchaseProductOptions = useMemo(() => {
+    const counts = new Map<string, { name: string; count: number }>();
+    for (const alert of alerts) {
+      const key = normalizeManualAlertSearch(alert.product.trim());
+      if (!key) continue;
+      const current = counts.get(key) ?? { name: alert.product, count: 0 };
+      current.count += 1;
+      counts.set(key, current);
+    }
+
+    return [...counts.values()].sort((left, right) =>
+      left.name.localeCompare(right.name, "pt-BR"),
+    );
+  }, [alerts]);
+  const repurchaseDayOptions = useMemo(() => {
+    const counts = new Map<number, number>();
+    for (const alert of alerts) {
+      const days = parseRepurchaseDays(alert.days);
+      if (!days) continue;
+      counts.set(days, (counts.get(days) ?? 0) + 1);
+    }
+
+    return [...counts.entries()]
+      .sort(([left], [right]) => left - right)
+      .map(([days, count]) => ({
+        value: String(days),
+        label: `${days} dias`,
+        count,
+      }));
+  }, [alerts]);
   const queueAlerts = alerts.filter(
     (alert) =>
       (alertStatuses[alert.id] ?? alert.status) ===
@@ -6667,8 +6971,22 @@ function RepurchaseAlerts({
   const contactedCount = alerts.filter(
     (alert) => (alertStatuses[alert.id] ?? alert.status) === "contatado",
   ).length;
+  const activeProductCampaigns = productCampaigns.filter((campaign) => campaign.active);
+  const normalizedRepurchaseProductSearch = normalizeManualAlertSearch(repurchaseProductSearch.trim());
   const filteredAlerts = queueAlerts.filter((alert) => {
     const overdueDays = alertOverdueDays(alert.recommendedIso, crmReferenceDate);
+    if (
+      normalizedRepurchaseProductSearch &&
+      !normalizeManualAlertSearch(alert.product).includes(normalizedRepurchaseProductSearch)
+    ) {
+      return false;
+    }
+
+    const repurchaseDays = parseRepurchaseDays(alert.days);
+    const matchesRepurchaseDays =
+      repurchaseDaysFilter === "todos" ||
+      (repurchaseDays !== undefined && repurchaseDaysFilter === String(repurchaseDays));
+    if (!matchesRepurchaseDays) return false;
     if (filter === "hoje") return overdueDays === 0;
     if (filter === "ate7") return overdueDays >= 1 && overdueDays <= 7;
     if (filter === "8a30") return overdueDays >= 8 && overdueDays <= 30;
@@ -6677,6 +6995,33 @@ function RepurchaseAlerts({
   });
   const totalPages = Math.max(1, Math.ceil(filteredAlerts.length / pageSize));
   const visibleAlerts = filteredAlerts.slice((page - 1) * pageSize, page * pageSize);
+
+  useEffect(() => {
+    try {
+      const storedDays = window.localStorage.getItem(REPURCHASE_ALERT_DAYS_FILTER_STORAGE_KEY);
+      const storedProduct = window.localStorage.getItem(REPURCHASE_ALERT_PRODUCT_FILTER_STORAGE_KEY);
+      if (storedDays) setRepurchaseDaysFilter(storedDays);
+      if (storedProduct) setRepurchaseProductSearch(storedProduct);
+    } catch {
+      // The filters still work for the current session when storage is blocked.
+    } finally {
+      setRepurchaseAlertFiltersLoaded(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!repurchaseAlertFiltersLoaded) return;
+    try {
+      window.localStorage.setItem(REPURCHASE_ALERT_DAYS_FILTER_STORAGE_KEY, repurchaseDaysFilter);
+      window.localStorage.setItem(REPURCHASE_ALERT_PRODUCT_FILTER_STORAGE_KEY, repurchaseProductSearch);
+    } catch {
+      // Ignore storage failures; the in-memory filters remain active.
+    }
+  }, [repurchaseDaysFilter, repurchaseProductSearch, repurchaseAlertFiltersLoaded]);
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, totalPages));
+  }, [totalPages]);
 
   async function markAlertAsContacted(alert: AlertRow, customer?: CustomerRow) {
     if (updatingAlertId) return;
@@ -6750,6 +7095,58 @@ function RepurchaseAlerts({
           ))}
         </div>
         <div className="mb-4 flex flex-wrap gap-2">
+          <div className="flex h-11 min-w-[min(100%,22rem)] flex-1 items-center gap-2 rounded-lg border border-blue-100 bg-white px-3 text-sm text-[#0753a6] focus-within:border-cyan-400">
+            <Search size={17} className="shrink-0 text-slate-400" />
+            <label className="sr-only" htmlFor="repurchase-product-search">
+              Produto com recompra
+            </label>
+            <input
+              id="repurchase-product-search"
+              list="repurchase-product-options"
+              value={repurchaseProductSearch}
+              onChange={(event) => {
+                setRepurchaseProductSearch(event.target.value);
+                setPage(1);
+              }}
+              placeholder="Produto configurado, ex: SIMPARIC TRIO"
+              className="min-w-0 flex-1 bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400"
+            />
+            {repurchaseProductSearch && (
+              <button
+                type="button"
+                onClick={() => {
+                  setRepurchaseProductSearch("");
+                  setPage(1);
+                }}
+                className="rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                aria-label="Limpar produto"
+              >
+                <X size={15} />
+              </button>
+            )}
+            <datalist id="repurchase-product-options">
+              {repurchaseProductOptions.map((option) => (
+                <option key={option.name} value={option.name}>
+                  {option.count} alerta(s)
+                </option>
+              ))}
+            </datalist>
+          </div>
+          <FilterSelect
+            label="Ciclo de recompra"
+            value={repurchaseDaysFilter}
+            onChange={(value) => {
+              setRepurchaseDaysFilter(value);
+              setPage(1);
+            }}
+          >
+            <option value="todos">Todos os ciclos</option>
+            {repurchaseDayOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label} ({option.count})
+              </option>
+            ))}
+          </FilterSelect>
           {[
             ["todos", "Todos"],
             ["hoje", "Hoje"],
@@ -6784,6 +7181,7 @@ function RepurchaseAlerts({
             const customer = customers.find((item) => item.id === alert.customerId);
             const status = alertStatuses[alert.id] ?? alert.status;
             const overdueDays = alertOverdueDays(alert.recommendedIso, crmReferenceDate);
+            const campaign = findProductCampaignForAlert(alert, activeProductCampaigns);
 
             return (
               <div key={alert.id} className="rounded-lg border border-blue-100 bg-[#f8fbff] p-4 transition hover:bg-white hover:shadow-md">
@@ -6809,6 +7207,7 @@ function RepurchaseAlerts({
                         user={user}
                         sellerName={alert.seller}
                         repurchaseProduct={alert.product}
+                        campaign={campaign}
                         onUpdateContact={onUpdateContact}
                         onRegisterContact={onRegisterContact}
                         compact
@@ -7365,6 +7764,55 @@ function normalizeManualAlertSearch(value: string) {
     .toLocaleLowerCase("pt-BR")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
+}
+
+function buildRepurchaseProductOptions(alerts: AlertRow[]) {
+  const counts = new Map<string, { name: string; count: number }>();
+  for (const alert of alerts) {
+    const key = normalizeManualAlertSearch(alert.product.trim());
+    if (!key) continue;
+    const current = counts.get(key) ?? { name: alert.product, count: 0 };
+    current.count += 1;
+    counts.set(key, current);
+  }
+
+  return [...counts.values()].sort((left, right) => left.name.localeCompare(right.name, "pt-BR"));
+}
+
+function productCampaignMatchesAlert(campaign: ProductCampaign, alert: AlertRow) {
+  const productQuery = normalizeManualAlertSearch(campaign.productQuery.trim());
+  if (!productQuery) return false;
+  return normalizeManualAlertSearch(alert.product).includes(productQuery);
+}
+
+function findProductCampaignForAlert(alert: AlertRow, campaigns: ProductCampaign[]) {
+  return campaigns.find((campaign) => productCampaignMatchesAlert(campaign, alert));
+}
+
+function readProductCampaigns(): ProductCampaign[] {
+  try {
+    const raw = window.localStorage.getItem(PRODUCT_CAMPAIGNS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as ProductCampaign[];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((campaign) =>
+      campaign &&
+      typeof campaign.id === "string" &&
+      typeof campaign.name === "string" &&
+      typeof campaign.productQuery === "string" &&
+      typeof campaign.messageTemplate === "string",
+    );
+  } catch {
+    return [];
+  }
+}
+
+function writeProductCampaigns(campaigns: ProductCampaign[]) {
+  try {
+    window.localStorage.setItem(PRODUCT_CAMPAIGNS_STORAGE_KEY, JSON.stringify(campaigns));
+  } catch {
+    // Large campaign images can exceed browser storage; keeping the UI usable is better than blocking the session.
+  }
 }
 
 function SellerPortfolioBySeller({
@@ -10001,6 +10449,7 @@ function WhatsAppButton({
   user,
   sellerName,
   repurchaseProduct,
+  campaign,
   onUpdateContact,
   onRegisterContact,
   onContactIntent,
@@ -10011,6 +10460,7 @@ function WhatsAppButton({
   user?: CrmSessionUser;
   sellerName?: string;
   repurchaseProduct?: string;
+  campaign?: ProductCampaign;
   onUpdateContact?: (
     customer: CustomerRow,
     phone: string,
@@ -10023,13 +10473,16 @@ function WhatsAppButton({
   const [editingContact, setEditingContact] = useState(false);
   const responsibleName = resolveWhatsAppResponsibleName(user, customer, sellerName);
   const sellerFirstName = firstName(responsibleName);
-  const resolvedMessage = repurchaseProduct
+  const resolvedMessage = campaign
+    ? resolveCampaignWhatsAppMessage(campaign.messageTemplate, sellerFirstName, customer.name, repurchaseProduct)
+    : repurchaseProduct
     ? buildShoppingRuralRepurchaseMessage(sellerFirstName, repurchaseProduct)
     : resolvePersonalizedWhatsAppMessage(
         user?.whatsAppMessage || message || buildShoppingRuralWhatsAppMessage("{vendedor}"),
         sellerFirstName,
         customer.name,
       );
+  const hasCampaignImage = Boolean(campaign?.imageDataUrl);
   const phone = normalizeBrazilianWhatsAppNumber(customer.whatsapp);
 
   if (!phone) {
@@ -10070,6 +10523,7 @@ function WhatsAppButton({
         target="_blank"
         rel="noopener noreferrer"
         onClick={() => {
+          if (campaign?.imageDataUrl) downloadCampaignImage(campaign);
           onContactIntent?.(customer);
           recordAutomaticContactIntent(
             customer,
@@ -10080,14 +10534,25 @@ function WhatsAppButton({
           );
         }}
         aria-label={`Chamar ${customer.name} no WhatsApp`}
-        title={`Chamar ${customer.name} no WhatsApp`}
+        title={campaign ? `Chamar com campanha ${campaign.name}` : `Chamar ${customer.name} no WhatsApp`}
         className={`inline-flex items-center justify-center gap-2 rounded-lg bg-[#25d366] font-semibold text-white shadow-sm transition hover:bg-[#1ebe5d] focus-visible:outline-[#25d366] ${
           compact ? "h-10 w-10" : "h-11 px-4 text-sm"
         }`}
       >
         <MessageCircle size={compact ? 18 : 17} />
-        {!compact && <span>Chamar no WhatsApp</span>}
+        {!compact && <span>{campaign ? "Campanha WhatsApp" : "Chamar no WhatsApp"}</span>}
       </a>
+      {hasCampaignImage && (
+        <button
+          type="button"
+          onClick={() => campaign && downloadCampaignImage(campaign)}
+          aria-label={`Baixar arte da campanha ${campaign?.name ?? ""}`}
+          title="Baixar arte da campanha"
+          className="flex h-10 w-10 items-center justify-center rounded-lg border border-emerald-100 bg-emerald-50 text-emerald-700 transition hover:bg-emerald-100"
+        >
+          <Download size={15} />
+        </button>
+      )}
       {onUpdateContact && (
         <button
           type="button"
@@ -10223,6 +10688,32 @@ function resolvePersonalizedWhatsAppMessage(
     .replaceAll("{cliente}", firstName(customerName));
 }
 
+function resolveCampaignWhatsAppMessage(
+  template: string,
+  sellerName: string,
+  customerName: string,
+  productName?: string,
+) {
+  return resolvePersonalizedWhatsAppMessage(template, sellerName, customerName)
+    .replaceAll("{produto}", productName ? formatWhatsAppProductName(productName) : "");
+}
+
+function downloadCampaignImage(campaign: ProductCampaign) {
+  if (!campaign.imageDataUrl) return;
+  const link = document.createElement("a");
+  link.href = campaign.imageDataUrl;
+  link.download = campaign.imageName || `${safeFileName(campaign.name)}.png`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+function safeFileName(value: string) {
+  return normalizeManualAlertSearch(value)
+    .replace(/[^a-z0-9]+/gu, "-")
+    .replace(/^-|-$/gu, "") || "campanha";
+}
+
 function addDaysIso(date: Date, days: number) {
   const nextDate = new Date(date);
   nextDate.setDate(nextDate.getDate() + days);
@@ -10253,6 +10744,11 @@ function alertOverdueDays(expectedDate: string, referenceDate: string) {
   const reference = Date.parse(`${referenceDate}T12:00:00Z`);
   if (!Number.isFinite(expected) || !Number.isFinite(reference)) return 0;
   return Math.max(0, Math.round((reference - expected) / 86_400_000));
+}
+
+function parseRepurchaseDays(value: string) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 function CustomerContactModal({
