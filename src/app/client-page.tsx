@@ -6173,10 +6173,12 @@ function compareAgendaEvents(left: CrmAgendaEvent, right: CrmAgendaEvent) {
   return left.date.localeCompare(right.date) || left.time.localeCompare(right.time);
 }
 
-type RecoveryFilter = "todos" | "30-60" | "60-90" | "90-plus" | "sem-retorno";
+type RecoveryFilter = "todos" | "nao-clicados" | "clicados" | "30-60" | "60-90" | "90-plus" | "sem-retorno";
 
 const recoveryFilters: Array<{ id: RecoveryFilter; label: string }> = [
   { id: "todos", label: "Todos" },
+  { id: "nao-clicados", label: "Não clicados" },
+  { id: "clicados", label: "Já clicados" },
   { id: "30-60", label: "30 a 60 dias" },
   { id: "60-90", label: "60 a 90 dias" },
   { id: "90-plus", label: "+90 dias" },
@@ -6186,16 +6188,18 @@ const recoveryFilters: Array<{ id: RecoveryFilter; label: string }> = [
 function matchesRecoveryFilter(
   customer: CustomerRow,
   filter: RecoveryFilter,
-  contactedCustomerIds: Set<string>,
+  actionedCustomerIds: Set<string>,
   dueFollowUpCustomerIds: Set<string>,
 ) {
   if (filter === "todos") return true;
   const hasDueFollowUp = dueFollowUpCustomerIds.has(customer.id);
-  if (contactedCustomerIds.has(customer.id) && !hasDueFollowUp) return false;
+  if (filter === "nao-clicados") return !actionedCustomerIds.has(customer.id);
+  if (filter === "clicados") return actionedCustomerIds.has(customer.id) && !hasDueFollowUp;
+  if (actionedCustomerIds.has(customer.id) && !hasDueFollowUp) return false;
   if (filter === "30-60") return customer.days >= 30 && customer.days <= 60;
   if (filter === "60-90") return customer.days > 60 && customer.days <= 90;
   if (filter === "90-plus") return customer.days > 90;
-  return !contactedCustomerIds.has(customer.id) || hasDueFollowUp;
+  return !actionedCustomerIds.has(customer.id) || hasDueFollowUp;
 }
 
 function RecoveryCustomers({
@@ -6223,6 +6227,7 @@ function RecoveryCustomers({
   const [lastWhatsAppCustomer, setLastWhatsAppCustomer] = useState<CustomerRow | null>(null);
   const [contactCorrectionCustomer, setContactCorrectionCustomer] = useState<CustomerRow | null>(null);
   const [activeFilter, setActiveFilter] = useState<RecoveryFilter>("todos");
+  const [clickedCustomerIds, setClickedCustomerIds] = useState<string[]>([]);
   const [page, setPage] = useState(1);
   const inactiveCustomers = [...customers]
     .filter((customer) => customer.activityStatus !== "ativo")
@@ -6235,6 +6240,7 @@ function RecoveryCustomers({
       .filter((record) => record.outcome !== "invalid_number")
       .map((record) => record.customerId),
   );
+  const actionedCustomerIds = new Set([...contactedCustomerIds, ...clickedCustomerIds]);
   const dueFollowUpCustomerIds = new Set(
     agenda
       .filter(
@@ -6249,7 +6255,7 @@ function RecoveryCustomers({
     matchesRecoveryFilter(
       customer,
       activeFilter,
-      contactedCustomerIds,
+      actionedCustomerIds,
       dueFollowUpCustomerIds,
     ),
   );
@@ -6260,8 +6266,18 @@ function RecoveryCustomers({
     currentPage * LIST_PAGE_SIZE,
   );
   const pendingContactCustomers = queuedInactiveCustomers.filter(
-    (customer) => !contactedCustomerIds.has(customer.id),
+    (customer) => !actionedCustomerIds.has(customer.id),
   );
+  const clickedOrContactedCustomers = queuedInactiveCustomers.filter(
+    (customer) => actionedCustomerIds.has(customer.id),
+  );
+
+  function markCustomerAsClicked(customer: CustomerRow) {
+    setClickedCustomerIds((current) =>
+      current.includes(customer.id) ? current : [...current, customer.id],
+    );
+    setLastWhatsAppCustomer(customer);
+  }
 
   return (
     <div className="space-y-5">
@@ -6278,10 +6294,10 @@ function RecoveryCustomers({
           label="Casos acima de 90 dias"
           tone="red"
         />
-        <RecoveryMetric value={`${pendingContactCustomers.length}`} label="Sem contato ainda" tone="blue" />
+        <RecoveryMetric value={`${pendingContactCustomers.length}`} label="Não clicados" tone="blue" />
         <RecoveryMetric
-          value={`${agenda.filter(isOpenAutomaticFollowUp).length}`}
-          label="Retornos agendados"
+          value={`${clickedOrContactedCustomers.length}`}
+          label="Já clicados"
           tone="amber"
         />
       </div>
@@ -6351,6 +6367,25 @@ function RecoveryCustomers({
         <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
           {visibleInactiveCustomers.map((customer) => {
             const latestContact = contactRecords.find((record) => record.customerId === customer.id);
+            const wasClicked = clickedCustomerIds.includes(customer.id);
+            const actionStatus = latestContact
+              ? {
+                  label: "Contato registrado",
+                  className: "bg-emerald-100 text-emerald-800",
+                  icon: CheckCircle2,
+                }
+              : wasClicked
+                ? {
+                    label: "WhatsApp clicado",
+                    className: "bg-blue-100 text-blue-800",
+                    icon: MessageCircle,
+                  }
+                : {
+                    label: "Não clicado",
+                    className: "bg-orange-100 text-orange-800",
+                    icon: AlertTriangle,
+                  };
+            const ActionStatusIcon = actionStatus.icon;
 
             return (
               <article
@@ -6359,9 +6394,15 @@ function RecoveryCustomers({
               >
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <span className="inline-flex rounded-full bg-orange-100 px-2.5 py-1 text-xs font-bold text-orange-700">
-                      {customer.days} dias sem comprar
-                    </span>
+                    <div className="flex flex-wrap gap-2">
+                      <span className="inline-flex rounded-full bg-orange-100 px-2.5 py-1 text-xs font-bold text-orange-700">
+                        {customer.days} dias sem comprar
+                      </span>
+                      <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold ${actionStatus.className}`}>
+                        <ActionStatusIcon size={13} />
+                        {actionStatus.label}
+                      </span>
+                    </div>
                     <h2 className="mt-3 font-bold text-slate-900">{customer.name}</h2>
                     <p className="mt-1 text-xs text-slate-500">
                       Última compra em {customer.lastBuy} · {customer.city}
@@ -6400,7 +6441,7 @@ function RecoveryCustomers({
                     user={user}
                     onUpdateContact={onUpdateContact}
                     onRegisterContact={onRegisterContact}
-                    onContactIntent={setLastWhatsAppCustomer}
+                    onContactIntent={markCustomerAsClicked}
                   />
                 </div>
                 <div className="mt-2 grid grid-cols-2 gap-2">
