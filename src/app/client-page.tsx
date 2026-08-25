@@ -152,6 +152,18 @@ type ProductCampaign = {
   active: boolean;
   createdAt: string;
 };
+type DailySalesQueueCategory = "retorno" | "recompra" | "recuperacao";
+type DailySalesQueueFilter = "todos" | DailySalesQueueCategory;
+type DailySalesQueueItem = {
+  customer: CustomerRow;
+  category: DailySalesQueueCategory;
+  reason: string;
+  recommendation: string;
+  priority: "Urgente" | "Alta" | "Normal";
+  score: number;
+  alert?: AlertRow;
+  campaign?: ProductCampaign;
+};
 const LIST_PAGE_SIZE = 20;
 const OPPORTUNITY_PAGE_SIZE = 20;
 const SESSION_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
@@ -1380,6 +1392,7 @@ export default function Home() {
             {visibleView === "dashboard" && (
               <Dashboard
                 customers={appCustomers}
+                alerts={appAlerts}
                 openProfile={openProfile}
                 contactRecords={appContactRecords}
                 agenda={scopedData.agenda}
@@ -1391,6 +1404,7 @@ export default function Home() {
                 insights={dashboardInsights}
                 detailsLoading={!fullSnapshotReady}
                 user={user}
+                productCampaigns={productCampaigns}
                 onUpdateContact={updateCustomerContact}
                 onRegisterContact={registerContact}
               />
@@ -5914,6 +5928,7 @@ function EmptyState({ text }: { text: string }) {
 
 function Dashboard({
   customers,
+  alerts,
   openProfile,
   contactRecords,
   agenda,
@@ -5925,10 +5940,12 @@ function Dashboard({
   insights,
   detailsLoading,
   user,
+  productCampaigns,
   onUpdateContact,
   onRegisterContact,
 }: {
   customers: CustomerRow[];
+  alerts: AlertRow[];
   openProfile: (customer: CustomerRow) => void;
   contactRecords: ContactRecord[];
   agenda: CrmAgendaEvent[];
@@ -5940,6 +5957,7 @@ function Dashboard({
   insights?: CrmDashboardInsights;
   detailsLoading: boolean;
   user: CrmSessionUser;
+  productCampaigns: ProductCampaign[];
   onUpdateContact: (
     customer: CustomerRow,
     phone: string,
@@ -5947,10 +5965,24 @@ function Dashboard({
   ) => Promise<void>;
   onRegisterContact: (record: Omit<ContactRecord, "id">) => Promise<void>;
 }) {
+  const [dailyQueueFilter, setDailyQueueFilter] = useState<DailySalesQueueFilter>("todos");
+  const [showAllDailyQueue, setShowAllDailyQueue] = useState(false);
+  const [dailyQueueContactCustomer, setDailyQueueContactCustomer] = useState<CustomerRow | null>(null);
   const chartColors = getChartColors(theme);
-  const actionableCustomers = customers.filter(
-    (customer) => !hasFutureFollowUp(customer.id, agenda, crmReferenceDate),
+  const dailySalesQueue = buildDailySalesQueue(
+    customers,
+    alerts,
+    agenda,
+    contactRecords,
+    productCampaigns,
+    crmReferenceDate,
   );
+  const filteredDailySalesQueue = dailySalesQueue.filter(
+    (item) => dailyQueueFilter === "todos" || item.category === dailyQueueFilter,
+  );
+  const visibleDailySalesQueue = showAllDailyQueue
+    ? filteredDailySalesQueue
+    : filteredDailySalesQueue.slice(0, 6);
   const inactiveCustomers = [...customers]
     .filter((customer) => customer.activityStatus !== "ativo")
     .sort((a, b) => b.days - a.days);
@@ -6110,44 +6142,137 @@ function Dashboard({
           )}
         </Panel>
       </div>
-      <Panel title="Clientes para contatar hoje" icon={Phone} action="Ranking de prioridade">
-        <div className="grid gap-3">
-          {actionableCustomers.slice(0, 4).map((customer, index) => (
-            <div
-              key={customer.name}
-              className="grid gap-3 rounded-lg border border-blue-100 bg-[#f7fbff] p-4 text-left transition hover:border-cyan-400 hover:bg-white hover:shadow-md md:grid-cols-[42px_1.3fr_1fr_1fr_1fr_auto]"
+      <Panel
+        title="Fila inteligente do dia"
+        icon={Target}
+        action={`${dailySalesQueue.length} oportunidades priorizadas`}
+      >
+        <div className="mb-4 flex flex-wrap gap-2">
+          {([
+            ["todos", "Todas", dailySalesQueue.length],
+            ["retorno", "Retornos", dailySalesQueue.filter((item) => item.category === "retorno").length],
+            ["recompra", "Recompras", dailySalesQueue.filter((item) => item.category === "recompra").length],
+            ["recuperacao", "Recuperação", dailySalesQueue.filter((item) => item.category === "recuperacao").length],
+          ] as Array<[DailySalesQueueFilter, string, number]>).map(([value, label, count]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => {
+                setDailyQueueFilter(value);
+                setShowAllDailyQueue(false);
+              }}
+              className={`h-10 rounded-lg px-3 text-sm font-semibold transition ${
+                dailyQueueFilter === value
+                  ? "bg-[#0753a6] text-white"
+                  : "border border-blue-100 bg-white text-slate-600 hover:border-cyan-400 hover:bg-cyan-50"
+              }`}
             >
-              <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#0753a6] font-semibold text-white">
-                {index + 1}
-              </span>
-              <div>
-                <p className="font-semibold">{customer.name}</p>
-                <p className="text-sm text-slate-500">Última compra: {customer.lastBuy}</p>
-              </div>
-              <Metric label="Dias sem compra" value={`${customer.days} dias`} />
-              <Metric label="Probabilidade" value={`${customer.probability}%`} />
-              <Metric label="Valor potencial" value={customer.potential} />
-              <div className="flex items-center gap-2 md:justify-end">
-                <WhatsAppButton
-                  customer={customer}
-                  user={user}
-                  onUpdateContact={onUpdateContact}
-                  onRegisterContact={onRegisterContact}
-                  compact
-                />
-                <button
-                  type="button"
-                  onClick={() => openProfile(customer)}
-                  aria-label={`Abrir perfil de ${customer.name}`}
-                  className="flex h-10 w-10 items-center justify-center rounded-lg border border-blue-100 bg-white text-[#0753a6] transition hover:border-cyan-400 hover:bg-cyan-50"
-                >
-                  <ChevronRight size={20} />
-                </button>
-              </div>
-            </div>
+              {label} ({count})
+            </button>
           ))}
         </div>
+        <div className="grid gap-3">
+          {visibleDailySalesQueue.map((item, index) => {
+            const priorityClass = {
+              Urgente: "bg-red-100 text-red-700",
+              Alta: "bg-orange-100 text-orange-700",
+              Normal: "bg-blue-100 text-blue-700",
+            }[item.priority];
+            const categoryLabel = {
+              retorno: "Retorno",
+              recompra: "Recompra",
+              recuperacao: "Recuperação",
+            }[item.category];
+
+            return (
+              <div
+                key={item.customer.id}
+                className="grid gap-3 rounded-lg border border-blue-100 bg-[#f7fbff] p-4 text-left transition hover:border-cyan-400 hover:bg-white hover:shadow-md lg:grid-cols-[42px_minmax(0,1.15fr)_minmax(0,1.35fr)_minmax(0,1fr)_auto] lg:items-center"
+              >
+                <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#0753a6] font-semibold text-white">
+                  {index + 1}
+                </span>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="truncate font-semibold text-slate-900">{item.customer.name}</p>
+                    <span className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase ${priorityClass}`}>
+                      {item.priority}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {item.customer.days} dias sem compra · potencial {item.customer.potential}
+                  </p>
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                    {categoryLabel}
+                  </p>
+                  <p className="mt-1 text-sm font-semibold text-[#18334d]">{item.reason}</p>
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Ação recomendada</p>
+                  <p className="mt-1 text-sm text-slate-600">{item.recommendation}</p>
+                </div>
+                <div className="flex items-center gap-2 lg:justify-end">
+                  <WhatsAppButton
+                    customer={item.customer}
+                    user={user}
+                    sellerName={item.alert?.seller}
+                    repurchaseProduct={item.alert?.product}
+                    campaign={item.campaign}
+                    onUpdateContact={onUpdateContact}
+                    onRegisterContact={onRegisterContact}
+                    compact
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setDailyQueueContactCustomer(item.customer)}
+                    aria-label={`Registrar resultado do contato com ${item.customer.name}`}
+                    title="Registrar resultado"
+                    className="flex h-10 w-10 items-center justify-center rounded-lg border border-emerald-100 bg-white text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-50"
+                  >
+                    <CheckCircle2 size={18} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openProfile(item.customer)}
+                    aria-label={`Abrir perfil de ${item.customer.name}`}
+                    title="Abrir cliente"
+                    className="flex h-10 w-10 items-center justify-center rounded-lg border border-blue-100 bg-white text-[#0753a6] transition hover:border-cyan-400 hover:bg-cyan-50"
+                  >
+                    <ChevronRight size={20} />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+          {!visibleDailySalesQueue.length && (
+            <EmptyState text="Nenhuma oportunidade pendente neste filtro." />
+          )}
+        </div>
+        {filteredDailySalesQueue.length > 6 && (
+          <div className="mt-4 flex justify-center border-t border-blue-100 pt-4">
+            <button
+              type="button"
+              onClick={() => setShowAllDailyQueue((current) => !current)}
+              className="h-10 rounded-lg border border-blue-100 bg-white px-4 text-sm font-semibold text-[#0753a6] transition hover:border-cyan-400 hover:bg-cyan-50"
+            >
+              {showAllDailyQueue ? "Mostrar menos" : `Ver todas (${filteredDailySalesQueue.length})`}
+            </button>
+          </div>
+        )}
       </Panel>
+      {dailyQueueContactCustomer && (
+        <ContactOutcomeModal
+          customer={dailyQueueContactCustomer}
+          defaultResponsible={resolveWhatsAppResponsibleName(user, dailyQueueContactCustomer)}
+          onClose={() => setDailyQueueContactCustomer(null)}
+          onSave={async (record) => {
+            await onRegisterContact(record);
+            setDailyQueueContactCustomer(null);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -6167,6 +6292,175 @@ function hasFutureFollowUp(
       event.customerId === customerId &&
       event.date > referenceDate,
   );
+}
+
+function buildDailySalesQueue(
+  customers: CustomerRow[],
+  alerts: AlertRow[],
+  agenda: CrmAgendaEvent[],
+  contactRecords: ContactRecord[],
+  productCampaigns: ProductCampaign[],
+  referenceDate: string,
+) {
+  const latestContacts = new Map<string, ContactRecord>();
+  for (const record of contactRecords) {
+    const current = latestContacts.get(record.customerId);
+    if (
+      !current ||
+      normalizeContactDateIso(record.contactedAt) > normalizeContactDateIso(current.contactedAt)
+    ) {
+      latestContacts.set(record.customerId, record);
+    }
+  }
+
+  const dueFollowUps = new Map<string, CrmAgendaEvent>();
+  for (const event of agenda.filter(
+    (item) =>
+      isOpenAutomaticFollowUp(item) &&
+      Boolean(item.customerId) &&
+      item.date <= referenceDate,
+  )) {
+    const customerId = event.customerId as string;
+    const current = dueFollowUps.get(customerId);
+    if (!current || compareAgendaEvents(event, current) < 0) {
+      dueFollowUps.set(customerId, event);
+    }
+  }
+
+  const pendingAlerts = new Map<string, AlertRow>();
+  for (const alert of alerts.filter(
+    (item) => item.status === "pendente" && item.recommendedIso <= referenceDate,
+  )) {
+    const current = pendingAlerts.get(alert.customerId);
+    if (!current || dailyQueueAlertScore(alert, referenceDate) > dailyQueueAlertScore(current, referenceDate)) {
+      pendingAlerts.set(alert.customerId, alert);
+    }
+  }
+
+  const activeCampaigns = productCampaigns.filter((campaign) => campaign.active);
+  const queue = customers.flatMap((customer): DailySalesQueueItem[] => {
+    const dueFollowUp = dueFollowUps.get(customer.id);
+    const alert = pendingAlerts.get(customer.id);
+    const latestContact = latestContacts.get(customer.id);
+    const contactAge = latestContact
+      ? crmDateDistanceDays(normalizeContactDateIso(latestContact.contactedAt), referenceDate)
+      : undefined;
+    const inactive = customer.activityStatus !== "ativo";
+    const recoveryReady = inactive && isRecoveryContactDue(latestContact, contactAge);
+
+    if (!dueFollowUp && !alert && !recoveryReady) return [];
+    if (!dueFollowUp && hasFutureFollowUp(customer.id, agenda, referenceDate)) return [];
+
+    if (dueFollowUp) {
+      const overdueDays = crmDateDistanceDays(dueFollowUp.date, referenceDate);
+      return [{
+        customer,
+        category: "retorno",
+        reason: overdueDays > 0
+          ? `Retorno atrasado há ${overdueDays} dia(s)`
+          : "Retorno combinado para hoje",
+        recommendation: alert
+          ? `Retomar a conversa sobre ${alert.product}`
+          : "Retomar a conversa e registrar o resultado",
+        priority: overdueDays > 0 ? "Urgente" : "Alta",
+        score: 5_000 + overdueDays * 50 + Math.round(customer.potentialValue / 10),
+        alert,
+        campaign: alert ? findProductCampaignForAlert(alert, activeCampaigns) : undefined,
+      }];
+    }
+
+    if (alert) {
+      const overdueDays = alertOverdueDays(alert.recommendedIso, referenceDate);
+      const campaign = findProductCampaignForAlert(alert, activeCampaigns);
+      return [{
+        customer,
+        category: "recompra",
+        reason: overdueDays > 0
+          ? `Recompra de ${alert.product} atrasada há ${overdueDays} dia(s)`
+          : `Recompra de ${alert.product} prevista para hoje`,
+        recommendation: campaign
+          ? `Enviar a campanha ${campaign.name}`
+          : `Oferecer nova compra de ${alert.product}`,
+        priority: overdueDays >= 8 || alert.priorityCode === "alta" ? "Urgente" : "Alta",
+        score: dailyQueueAlertScore(alert, referenceDate) + Math.round(customer.potentialValue / 10),
+        alert,
+        campaign,
+      }];
+    }
+
+    const recoveryReason = dailyQueueRecoveryReason(latestContact, contactAge);
+    return [{
+      customer,
+      category: "recuperacao",
+      reason: recoveryReason.reason,
+      recommendation: recoveryReason.recommendation,
+      priority: customer.days > 90 || customer.potentialValue >= 500 ? "Alta" : "Normal",
+      score:
+        1_000 +
+        customer.days * 5 +
+        customer.probability * 2 +
+        Math.round(customer.potentialValue / 10),
+    }];
+  });
+
+  return queue
+    .sort((left, right) => right.score - left.score || right.customer.days - left.customer.days)
+    .slice(0, 20);
+}
+
+function dailyQueueAlertScore(alert: AlertRow, referenceDate: string) {
+  const priorityScore = { alta: 600, media: 350, baixa: 150 }[alert.priorityCode];
+  return 3_000 + priorityScore + alertOverdueDays(alert.recommendedIso, referenceDate) * 30;
+}
+
+function crmDateDistanceDays(from: string, to: string) {
+  const fromTime = Date.parse(`${from.slice(0, 10)}T12:00:00Z`);
+  const toTime = Date.parse(`${to.slice(0, 10)}T12:00:00Z`);
+  if (!Number.isFinite(fromTime) || !Number.isFinite(toTime)) return 0;
+  return Math.max(0, Math.round((toTime - fromTime) / 86_400_000));
+}
+
+function isRecoveryContactDue(record: ContactRecord | undefined, contactAge: number | undefined) {
+  if (!record || contactAge === undefined) return true;
+  return {
+    invalid_number: true,
+    no_answer: contactAge >= 3,
+    interested: contactAge >= 7,
+    follow_up: contactAge >= 1,
+    not_interested: contactAge >= 30,
+  }[record.outcome];
+}
+
+function dailyQueueRecoveryReason(record: ContactRecord | undefined, contactAge: number | undefined) {
+  if (!record || contactAge === undefined) {
+    return {
+      reason: "Cliente ainda não recebeu contato no CRM",
+      recommendation: "Fazer o primeiro contato",
+    };
+  }
+
+  return {
+    invalid_number: {
+      reason: "WhatsApp marcado como inválido",
+      recommendation: "Corrigir o número antes do contato",
+    },
+    no_answer: {
+      reason: `Cliente não respondeu há ${contactAge} dia(s)`,
+      recommendation: "Fazer uma nova tentativa",
+    },
+    interested: {
+      reason: `Cliente demonstrou interesse há ${contactAge} dia(s)`,
+      recommendation: "Retomar a proposta comercial",
+    },
+    follow_up: {
+      reason: `Cliente pediu retorno há ${contactAge} dia(s)`,
+      recommendation: "Confirmar a necessidade atual",
+    },
+    not_interested: {
+      reason: `Última negativa foi há ${contactAge} dia(s)`,
+      recommendation: "Tentar uma nova abordagem",
+    },
+  }[record.outcome];
 }
 
 function compareAgendaEvents(left: CrmAgendaEvent, right: CrmAgendaEvent) {
