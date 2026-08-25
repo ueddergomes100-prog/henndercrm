@@ -230,8 +230,13 @@ async function denyUnauthorizedChange(
     return Response.json({ error: "Usuario sem vendedor vinculado." }, { status: 403 });
   }
 
-  const snapshot = await new SupabaseCrmSnapshotRepository().getSnapshot();
-  const workspace = await repository.getWorkspace();
+  const snapshot = await getCachedCrmSnapshot();
+  const needsWorkspace =
+    command.action === "update_agenda" ||
+    command.action === "delete_agenda" ||
+    command.action === "update_opportunity" ||
+    command.action === "delete_opportunity";
+  const workspace = needsWorkspace ? await repository.getWorkspace() : undefined;
   const allowedSellerId = resolveSnapshotSellerId(user.sellerId, snapshot);
   let assignedSellerId: string | undefined;
 
@@ -266,14 +271,14 @@ async function denyUnauthorizedChange(
       break;
     case "update_agenda":
     case "delete_agenda":
-      assignedSellerId = workspace.agenda.find((event) => event.id === command.id)?.sellerId;
+      assignedSellerId = workspace?.agenda.find((event) => event.id === command.id)?.sellerId;
       break;
     case "create_opportunity":
       assignedSellerId = command.opportunity.sellerId;
       break;
     case "update_opportunity":
     case "delete_opportunity":
-      assignedSellerId = workspace.opportunities.find(
+      assignedSellerId = workspace?.opportunities.find(
         (item) => item.id === command.id,
       )?.sellerId;
       break;

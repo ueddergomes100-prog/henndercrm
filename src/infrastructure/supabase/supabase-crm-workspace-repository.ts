@@ -362,33 +362,35 @@ export class SupabaseCrmWorkspaceRepository implements ICrmWorkspaceRepository {
     const whatsapp = input.whatsapp.trim() || phone;
     if (!phone && !whatsapp) throw new Error("Informe um telefone ou WhatsApp valido.");
 
-    const rows = await this.client.update<ClientContactRow>(
-      "crm_clientes",
-      { id: input.customerId },
-      {
-        telefone: phone || whatsapp,
-        celular: whatsapp || phone,
-        whatsapp: whatsapp || phone,
-      },
-    );
+    const [rows, automaticContact] = await Promise.all([
+      this.client.update<ClientContactRow>(
+        "crm_clientes",
+        { id: input.customerId },
+        {
+          telefone: phone || whatsapp,
+          celular: whatsapp || phone,
+          whatsapp: whatsapp || phone,
+        },
+      ),
+      input.retryWhatsApp
+        ? this.findAutomaticContactToday(
+            input.customerId,
+            "whatsapp",
+            input.sellerId,
+          )
+        : Promise.resolve(undefined),
+    ]);
     const row = rows[0];
     if (!row) throw new Error("Cliente nao encontrado no Supabase.");
 
     const invalidatedContactIds: string[] = [];
-    if (input.retryWhatsApp) {
-      const automaticContact = await this.findAutomaticContactToday(
-        row.id,
-        "whatsapp",
-        input.sellerId,
+    if (automaticContact) {
+      await this.client.update(
+        "crm_historico_contatos",
+        { id: automaticContact.id },
+        { resultado: "atualizar_cadastro" },
       );
-      if (automaticContact) {
-        await this.client.update(
-          "crm_historico_contatos",
-          { id: automaticContact.id },
-          { resultado: "atualizar_cadastro" },
-        );
-        invalidatedContactIds.push(automaticContact.id);
-      }
+      invalidatedContactIds.push(automaticContact.id);
     }
 
     return {

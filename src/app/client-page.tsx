@@ -175,6 +175,7 @@ const FULL_SNAPSHOT_TIMEOUT_MS = 45 * 1000;
 const AUTOMATIC_CONTACT_FOLLOW_UP_DAYS = 7;
 const REPURCHASE_ALERT_DAYS_FILTER_STORAGE_KEY = "henndercrm-repurchase-alert-days-filter";
 const REPURCHASE_ALERT_PRODUCT_FILTER_STORAGE_KEY = "henndercrm-repurchase-alert-product-filter";
+const REPURCHASE_ALERT_CONTACT_FILTER_STORAGE_KEY = "henndercrm-repurchase-alert-contact-filter";
 const PRODUCT_CAMPAIGNS_STORAGE_KEY = "henndercrm-product-campaigns";
 const PRODUCT_CAMPAIGN_IMAGE_MAX_BYTES = 2 * 1024 * 1024;
 const DEFAULT_WHATSAPP_MESSAGE_TEMPLATE = [
@@ -1159,15 +1160,39 @@ export default function Home() {
           .map((record) => String(record.id))
       : [];
 
-    const update: CustomerContactUpdate = customer.id.startsWith("manual-customer-")
-      ? {
-          customerId: customer.id,
-          customerName: customer.name,
-          phone: rawPhone.trim(),
-          whatsapp: rawPhone.trim(),
-          invalidatedContactIds: localInvalidatedContactIds,
-        }
-      : await mutateWorkspace<CustomerContactUpdate>({
+    const optimisticUpdate: CustomerContactUpdate = {
+      customerId: customer.id,
+      customerName: customer.name,
+      phone: rawPhone.trim(),
+      whatsapp: rawPhone.trim(),
+      invalidatedContactIds: localInvalidatedContactIds,
+    };
+    const rollbackUpdate: CustomerContactUpdate = {
+      customerId: customer.id,
+      customerName: customer.name,
+      phone: customer.phone,
+      whatsapp: customer.whatsapp,
+    };
+
+    function applyContactUpdate(update: CustomerContactUpdate) {
+      setCustomerContactUpdates((current) => ({
+        ...current,
+        [customer.id]: update,
+      }));
+      setManualCustomers((current) =>
+        current.map((item) => (item.id === customer.id ? patchCustomerContact(item, update) : item)),
+      );
+      setSelectedCustomer((current) =>
+        current?.id === customer.id ? patchCustomerContact(current, update) : current,
+      );
+    }
+
+    applyContactUpdate(optimisticUpdate);
+
+    let update = optimisticUpdate;
+    try {
+      if (!customer.id.startsWith("manual-customer-")) {
+        update = await mutateWorkspace<CustomerContactUpdate>({
           action: "update_customer_contact",
           contact: {
             customerId: customer.id,
@@ -1177,6 +1202,12 @@ export default function Home() {
             retryWhatsApp: options.retryWhatsApp,
           },
         });
+        applyContactUpdate(update);
+      }
+    } catch (error) {
+      applyContactUpdate(rollbackUpdate);
+      throw error;
+    }
 
     const invalidatedContactIds = new Set(update.invalidatedContactIds ?? []);
     if (invalidatedContactIds.size) {
@@ -1189,17 +1220,6 @@ export default function Home() {
       );
     }
     if (options.retryWhatsApp) clearAutomaticContactIntent(customer.id);
-
-    setCustomerContactUpdates((current) => ({
-      ...current,
-      [customer.id]: update,
-    }));
-    setManualCustomers((current) =>
-      current.map((item) => (item.id === customer.id ? patchCustomerContact(item, update) : item)),
-    );
-    setSelectedCustomer((current) =>
-      current?.id === customer.id ? patchCustomerContact(current, update) : current,
-    );
   };
 
   const changeTheme = (nextTheme: Theme) => {
@@ -1476,6 +1496,8 @@ export default function Home() {
               <RepurchaseAlerts
                 alerts={appAlerts}
                 customers={appCustomers}
+                contactRecords={appContactRecords}
+                agenda={scopedData.agenda}
                 user={user}
                 productCampaigns={productCampaigns}
                 alertStatuses={alertStatuses}
@@ -6479,6 +6501,13 @@ const recoveryFilters: Array<{ id: RecoveryFilter; label: string }> = [
   { id: "sem-retorno", label: "Sem retorno" },
 ];
 
+function readStoredRecoveryFilter(storageKey: string): RecoveryFilter {
+  const stored = readLocalStorageString(storageKey);
+  return recoveryFilters.some((filter) => filter.id === stored)
+    ? stored as RecoveryFilter
+    : "todos";
+}
+
 function matchesRecoveryFilter(
   customer: CustomerRow,
   filter: RecoveryFilter,
@@ -7301,6 +7330,8 @@ function CustomerProfile({
 function RepurchaseAlerts({
   alerts,
   customers,
+  contactRecords,
+  agenda,
   user,
   productCampaigns,
   alertStatuses,
@@ -7310,6 +7341,8 @@ function RepurchaseAlerts({
 }: {
   alerts: AlertRow[];
   customers: CustomerRow[];
+  contactRecords: ContactRecord[];
+  agenda: CrmAgendaEvent[];
   user: CrmSessionUser;
   productCampaigns: ProductCampaign[];
   alertStatuses: Record<string, RepurchaseAlertStatus>;
@@ -7329,6 +7362,10 @@ function RepurchaseAlerts({
   const [repurchaseDaysFilter, setRepurchaseDaysFilter] = useState(() =>
     readLocalStorageString(REPURCHASE_ALERT_DAYS_FILTER_STORAGE_KEY) || "todos",
   );
+  const [contactFilter, setContactFilter] = useState<RecoveryFilter>(() =>
+    readStoredRecoveryFilter(REPURCHASE_ALERT_CONTACT_FILTER_STORAGE_KEY),
+  );
+  const [clickedCustomerIds, setClickedCustomerIds] = useState<string[]>([]);
   const [page, setPage] = useState(1);
   const [contactAlert, setContactAlert] = useState<AlertRow | null>(null);
   const [updatingAlertId, setUpdatingAlertId] = useState<string | null>(null);
@@ -7376,8 +7413,38 @@ function RepurchaseAlerts({
     (alert) => (alertStatuses[alert.id] ?? alert.status) === "contatado",
   ).length;
   const activeProductCampaigns = productCampaigns.filter((campaign) => campaign.active);
+  const customerById = new Map(customers.map((customer) => [customer.id, customer]));
+  const contactedCustomerIds = new Set(
+    contactRecords
+      .filter((record) => record.outcome !== "invalid_number")
+      .map((record) => record.customerId),
+  );
+  const actionedCustomerIds = new Set([...contactedCustomerIds, ...clickedCustomerIds]);
+  const dueFollowUpCustomerIds = new Set(
+    agenda
+      .filter(
+        (event) =>
+          isOpenAutomaticFollowUp(event) &&
+          Boolean(event.customerId) &&
+          event.date <= crmReferenceDate,
+      )
+      .map((event) => event.customerId as string),
+  );
   const normalizedRepurchaseProductSearch = normalizeManualAlertSearch(repurchaseProductSearch.trim());
   const filteredAlerts = queueAlerts.filter((alert) => {
+    const customer = customerById.get(alert.customerId);
+    if (
+      contactFilter !== "todos" &&
+      (!customer ||
+        !matchesRecoveryFilter(
+          customer,
+          contactFilter,
+          actionedCustomerIds,
+          dueFollowUpCustomerIds,
+        ))
+    ) {
+      return false;
+    }
     const overdueDays = alertOverdueDays(alert.recommendedIso, crmReferenceDate);
     if (
       normalizedRepurchaseProductSearch &&
@@ -7405,10 +7472,11 @@ function RepurchaseAlerts({
     try {
       window.localStorage.setItem(REPURCHASE_ALERT_DAYS_FILTER_STORAGE_KEY, repurchaseDaysFilter);
       window.localStorage.setItem(REPURCHASE_ALERT_PRODUCT_FILTER_STORAGE_KEY, repurchaseProductSearch);
+      window.localStorage.setItem(REPURCHASE_ALERT_CONTACT_FILTER_STORAGE_KEY, contactFilter);
     } catch {
       // Ignore storage failures; the in-memory filters remain active.
     }
-  }, [repurchaseDaysFilter, repurchaseProductSearch]);
+  }, [contactFilter, repurchaseDaysFilter, repurchaseProductSearch]);
 
   async function markAlertAsContacted(alert: AlertRow, customer?: CustomerRow) {
     if (updatingAlertId) return;
@@ -7473,6 +7541,30 @@ function RepurchaseAlerts({
               {label}
             </button>
           ))}
+        </div>
+        <div className="mb-4 rounded-xl border border-orange-100 bg-orange-50/45 p-3">
+          <p className="mb-2 text-xs font-bold uppercase tracking-wide text-orange-700">
+            Acompanhamento do contato
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {recoveryFilters.map((contactOption) => (
+              <button
+                key={contactOption.id}
+                type="button"
+                onClick={() => {
+                  setContactFilter(contactOption.id);
+                  setPage(1);
+                }}
+                className={`h-10 rounded-lg px-3 text-sm font-semibold transition ${
+                  contactFilter === contactOption.id
+                    ? "bg-orange-600 text-white"
+                    : "border border-orange-100 bg-white text-slate-600 hover:border-orange-300"
+                }`}
+              >
+                {contactOption.label}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="mb-4 flex flex-wrap gap-2">
           <div className="flex h-11 min-w-[min(100%,22rem)] flex-1 items-center gap-2 rounded-lg border border-blue-100 bg-white px-3 text-sm text-[#0753a6] focus-within:border-cyan-400">
@@ -7562,6 +7654,20 @@ function RepurchaseAlerts({
             const status = alertStatuses[alert.id] ?? alert.status;
             const overdueDays = alertOverdueDays(alert.recommendedIso, crmReferenceDate);
             const campaign = findProductCampaignForAlert(alert, activeProductCampaigns);
+            const latestContact = contactRecords.find(
+              (record) =>
+                record.customerId === alert.customerId &&
+                record.outcome !== "invalid_number",
+            );
+            const hasDueFollowUp = dueFollowUpCustomerIds.has(alert.customerId);
+            const wasClicked = clickedCustomerIds.includes(alert.customerId);
+            const contactStatus = hasDueFollowUp
+              ? { label: "Retorno vencido", className: "bg-red-100 text-red-700" }
+              : latestContact
+                ? { label: "Contato registrado", className: "bg-emerald-100 text-emerald-700" }
+                : wasClicked
+                  ? { label: "WhatsApp clicado", className: "bg-blue-100 text-blue-700" }
+                  : { label: "Não clicado", className: "bg-orange-100 text-orange-700" };
 
             return (
               <div key={alert.id} className="rounded-lg border border-blue-100 bg-[#f8fbff] p-4 transition hover:bg-white hover:shadow-md">
@@ -7577,9 +7683,14 @@ function RepurchaseAlerts({
                   />
                 </div>
                 <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-blue-100 pt-3">
-                  <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600">
-                    Status: {status.replace("_", " ")}
-                  </span>
+                  <div className="flex flex-wrap gap-2">
+                    <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600">
+                      Status: {status.replace("_", " ")}
+                    </span>
+                    <span className={`rounded-full px-3 py-1 text-xs font-semibold ${contactStatus.className}`}>
+                      {contactStatus.label}
+                    </span>
+                  </div>
                   <div className="flex flex-wrap gap-2">
                     {customer && (
                       <WhatsAppButton
@@ -7590,6 +7701,13 @@ function RepurchaseAlerts({
                         campaign={campaign}
                         onUpdateContact={onUpdateContact}
                         onRegisterContact={onRegisterContact}
+                        onContactIntent={(contactCustomer) =>
+                          setClickedCustomerIds((current) =>
+                            current.includes(contactCustomer.id)
+                              ? current
+                              : [...current, contactCustomer.id],
+                          )
+                        }
                         compact
                       />
                     )}
