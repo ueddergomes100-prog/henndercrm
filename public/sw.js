@@ -1,4 +1,7 @@
-const CACHE_NAME = "hennder-crm-static-v4";
+// v5: icones regerados a partir da logo oficial da Hennder Company. Subir esta
+// versao e obrigatorio ao trocar qualquer asset da lista abaixo — o activate
+// apaga os caches antigos, senao o navegador continua servindo os icones velhos.
+const CACHE_NAME = "hennder-crm-static-v5";
 const STATIC_ASSETS = [
   "/manifest.webmanifest",
   "/apple-touch-icon.png",

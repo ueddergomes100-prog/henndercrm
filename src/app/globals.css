@@ -3,6 +3,88 @@
 :root {
   --background: #02040a;
   --foreground: #f8fafc;
+
+  /* Identidade Hennder Company — extraida da logo oficial.
+     Roxo #7a35e8 e grafite #252935 sao as duas cores da marca. */
+  --brand-purple-50: #f5f0fe;
+  --brand-purple-100: #e9ddfd;
+  --brand-purple-200: #d2bcfa;
+  --brand-purple-300: #b795f6;
+  --brand-purple-400: #9a68f1;
+  --brand-purple-500: #7a35e8;
+  --brand-purple-600: #6827cd;
+  --brand-purple-700: #541ea6;
+  --brand-purple-800: #3f1780;
+  --brand-purple-900: #2b1057;
+
+  --brand-ink-950: #0b0713;
+  --brand-ink-900: #110c1d;
+  --brand-ink-800: #181227;
+  --brand-ink-700: #221a36;
+  --brand-ink-600: #2e2445;
+  --brand-graphite: #252935;
+
+  /* ---- Paleta de dados ----
+     Derivada por enumeracao e medida com o validador do metodo dataviz.
+     Documentada em brand-source/paleta-dados.md. A ORDEM dos slots e o
+     mecanismo de seguranca para daltonismo: nao reordene sem revalidar.
+     Pior par adjacente: ΔE 9.1 (CVD) / 19.6 (visao normal). */
+  --series-1: #7a35e8; /* violeta — a cor da marca */
+  --series-2: #eb6834; /* laranja */
+  --series-3: #1baf7a; /* turquesa */
+  --series-4: #eda100; /* amarelo */
+  --series-5: #e87ba4; /* magenta */
+  --series-6: #008300; /* verde */
+  --series-7: #2a78d6; /* azul */
+  --series-8: #e34948; /* vermelho */
+
+  /* Sequencial (magnitude) na hue da marca */
+  --seq-100: #fab5ff;
+  --seq-200: #df97ff;
+  --seq-300: #c073ff;
+  --seq-400: #a34cff;
+  --seq-500: #850aff;
+  --seq-600: #6700e0;
+  --seq-700: #4d00b7;
+
+  /* Status — escala reservada. Nunca vira "serie 4"; sempre com icone + rotulo. */
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #d03b3b;
+
+  /* Superficie e tinta do grafico */
+  --chart-surface: #ffffff;
+  --chart-plane: #faf8fe;
+  --chart-ink: #161122;
+  --chart-ink-2: #4a4363;
+  --chart-muted: #6f6788;
+  --chart-grid: #ece7f5;
+  --chart-axis: #cfc7de;
+  --chart-diverging-mid: #f1eff6;
+}
+
+/* Steps do modo escuro: mesmas oito familias, mesma ordem, re-escalonadas para a
+   superficie escura. Medido: adjacente ΔE 8.4 (CVD) / 19.3 (visao normal),
+   todos os slots >= 3:1 sobre #181227. */
+[data-theme="dark"] {
+  --series-1: #8a53ee;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #0a9b0a;
+  --series-7: #3987e5;
+  --series-8: #e66767;
+
+  --chart-surface: #181227;
+  --chart-plane: #110c1d;
+  --chart-ink: #f5f0fe;
+  --chart-ink-2: #c4bad8;
+  --chart-muted: #9b8fb5;
+  --chart-grid: #2a2140;
+  --chart-axis: #3a2f55;
+  --chart-diverging-mid: #2e2445;
 }
 
 [data-theme="dark"] {
@@ -33,7 +115,7 @@ body::before {
   inset: 0;
   z-index: -1;
   background:
-    linear-gradient(135deg, rgba(4, 29, 64, 0.98) 0%, rgba(6, 53, 108, 0.94) 48%, rgba(2, 4, 10, 1) 100%);
+    linear-gradient(135deg, rgba(43, 16, 87, 0.98) 0%, rgba(84, 30, 166, 0.9) 48%, rgba(11, 7, 19, 1) 100%);
   content: "";
 }
 
@@ -52,18 +134,44 @@ button:focus-visible,
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
-  outline: 3px solid rgba(34, 211, 238, 0.32);
+  outline: 3px solid rgba(154, 104, 241, 0.45);
   outline-offset: 2px;
 }
 
-.crm-sidebar::before {
-  position: absolute;
-  inset: 0;
-  z-index: -1;
+/* O gradiente fica no proprio elemento, nao num ::before absoluto.
+   O menu e um container de rolagem: um pseudo-elemento com inset:0 rola junto
+   com o conteudo e, ao descer a lista, sai de vista e revela o fundo cru por
+   baixo. Como background do elemento ele fica preso a caixa e cobre sempre. */
+.crm-sidebar {
   background:
-    radial-gradient(circle at 12% 8%, rgba(34, 211, 238, 0.24), transparent 22%),
-    linear-gradient(180deg, #0753a6 0%, #063d7c 52%, #082f63 100%);
-  content: "";
+    radial-gradient(circle at 12% 8%, rgba(154, 104, 241, 0.26), transparent 24%),
+    linear-gradient(180deg, #2b1057 0%, #1f0c40 52%, #150a2c 100%)
+    #1f0c40 !important;
+}
+
+/* Barra de rolagem propria: a padrao do sistema entra clara e larga demais
+   contra o roxo escuro. Vale para o menu do desktop e o gaveta do mobile. */
+.crm-sidebar {
+  scrollbar-color: rgba(154, 104, 241, 0.55) transparent;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+.crm-sidebar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.crm-sidebar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.crm-sidebar::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(154, 104, 241, 0.55);
+}
+
+.crm-sidebar::-webkit-scrollbar-thumb:hover {
+  background: rgba(183, 149, 246, 0.75);
 }
 
 .crm-sidebar > div:first-of-type p:first-child {
@@ -71,86 +179,189 @@ textarea:focus-visible {
 }
 
 .crm-sidebar > div:first-of-type p:last-child {
-  color: #dbeafe;
+  color: #c4bad8;
 }
 
 .crm-mobile-sidebar {
   -webkit-overflow-scrolling: touch;
-  scrollbar-color: rgba(191, 219, 254, 0.58) transparent;
-  scrollbar-gutter: stable;
-  scrollbar-width: thin;
-}
-
-.crm-mobile-sidebar::-webkit-scrollbar {
-  width: 6px;
-}
-
-.crm-mobile-sidebar::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.crm-mobile-sidebar::-webkit-scrollbar-thumb {
-  border-radius: 999px;
-  background: rgba(191, 219, 254, 0.52);
 }
 
 .crm-kpi {
   border: 1px solid rgba(255, 255, 255, 0.18);
 }
 
-.crm-kpi-1 {
-  background: linear-gradient(135deg, #5b35c9, #7048dc);
+/* Os quatro primeiros KPIs sao um gradiente de saude da carteira
+   (ativo -> atencao -> risco -> perdido), entao vestem a escala de STATUS, nao
+   slots categoricos: a cor precisa dizer "bom/ruim", e um cliente em risco nunca
+   pode aparecer em verde. Os dois ultimos sao metricas neutras e ficam na marca.
+   Todos os gradientes passam 4.5:1 com o texto branco nas duas pontas. */
+.crm-kpi-1 { /* clientes ativos — good */
+  background: linear-gradient(135deg, #0b6b2e, #12833a);
+  box-shadow: 0 10px 28px rgba(11, 107, 46, 0.24);
 }
 
-.crm-kpi-2 {
-  background: linear-gradient(135deg, #1056a7, #0874c8);
+.crm-kpi-2 { /* em atencao — warning */
+  background: linear-gradient(135deg, #8a5600, #a86800);
+  box-shadow: 0 10px 28px rgba(138, 86, 0, 0.24);
 }
 
-.crm-kpi-3 {
-  background: linear-gradient(135deg, #ea580c, #f59e0b);
-  box-shadow: 0 10px 28px rgba(234, 88, 12, 0.24);
+.crm-kpi-3 { /* em risco — serious */
+  background: linear-gradient(135deg, #a33f18, #c2521f);
+  box-shadow: 0 10px 28px rgba(163, 63, 24, 0.24);
 }
 
-.crm-kpi-4 {
-  background: linear-gradient(135deg, #08a99e, #16c786);
+.crm-kpi-4 { /* clientes perdidos — critical */
+  background: linear-gradient(135deg, #8f1f1f, #ab2828);
+  box-shadow: 0 10px 28px rgba(143, 31, 31, 0.24);
 }
 
-.crm-kpi-5 {
-  background: linear-gradient(135deg, #084f9d, #1179bf);
+.crm-kpi-5 { /* potencial perdido — metrica neutra */
+  background: linear-gradient(135deg, #541ea6, #7a35e8);
+  box-shadow: 0 10px 28px rgba(84, 30, 166, 0.28);
 }
 
-.crm-kpi-6 {
-  background: linear-gradient(135deg, #0b9fb0, #14bd8a);
+.crm-kpi-6 { /* qualidade da base — metrica neutra */
+  background: linear-gradient(135deg, #3f1780, #6827cd);
+  box-shadow: 0 10px 28px rgba(63, 23, 128, 0.26);
 }
 
+/* ===========================================================================
+   Remapeamento da cor de marca legada.
+   O sistema nasceu em azul/ciano porque a logo oficial ainda nao existia. Essas
+   classes carregavam o papel de MARCA, entao sao remapeadas para o roxo.
+   Verde, ambar e vermelho ficam intactos de proposito: sao cores de STATUS,
+   com significado reservado, e nunca devem seguir o tema.
+   Escopado em .crm-app para nao vazar para a tela de login.
+   =========================================================================== */
+
+/* -- superficies -- */
+.crm-app .bg-blue-50,
+.crm-app .bg-cyan-50,
+.crm-app .bg-cyan-50\/70,
+.crm-app .bg-\[\#f8fbff\],
+.crm-app .bg-\[\#f1f8ff\],
+.crm-app .bg-\[\#f3f8fd\],
+.crm-app .bg-\[\#f5faff\],
+.crm-app .bg-\[\#f7fbff\],
+.crm-app .bg-\[\#e7f4ff\] {
+  background-color: #f7f3fe;
+}
+
+.crm-app .bg-blue-100,
+.crm-app .bg-cyan-100 {
+  background-color: #e9ddfd;
+}
+
+.crm-app .bg-cyan-400 {
+  background-color: var(--brand-purple-500);
+}
+
+.crm-app .hover\:bg-cyan-50:hover,
+.crm-app .hover\:bg-cyan-50\/60:hover,
+.crm-app .hover\:bg-blue-50:hover {
+  background-color: #f5f0fe;
+}
+
+.crm-app .hover\:bg-cyan-300:hover {
+  background-color: var(--brand-purple-300);
+}
+
+/* -- texto -- */
+.crm-app .text-\[\#0753a6\],
+.crm-app .text-blue-700,
+.crm-app .text-blue-800,
+.crm-app .text-cyan-600,
+.crm-app .text-cyan-700,
+.crm-app .text-cyan-800,
+.crm-app .text-cyan-900 {
+  color: var(--brand-purple-700);
+}
+
+.crm-app .text-\[\#123252\],
+.crm-app .text-\[\#18334d\] {
+  color: #1d1730;
+}
+
+.crm-app .text-blue-100,
+.crm-app .text-cyan-100,
+.crm-app .text-cyan-200\/80 {
+  color: var(--brand-purple-200);
+}
+
+/* -- bordas e divisores -- */
+.crm-app .border-blue-50,
+.crm-app .divide-blue-50 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #f0eafb;
+}
+
+.crm-app .border-blue-100,
+.crm-app .border-cyan-100,
+.crm-app .divide-blue-100 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #e4dcf3;
+}
+
+.crm-app .border-blue-200,
+.crm-app .border-cyan-200 {
+  border-color: var(--brand-purple-200);
+}
+
+.crm-app .border-cyan-300,
+.crm-app .border-cyan-300\/25 {
+  border-color: var(--brand-purple-300);
+}
+
+.crm-app .border-cyan-400,
+.crm-app .border-cyan-500 {
+  border-color: var(--brand-purple-400);
+}
+
+.crm-app .hover\:border-cyan-200:hover,
+.crm-app .hover\:border-cyan-300:hover,
+.crm-app .hover\:border-cyan-400:hover {
+  border-color: var(--brand-purple-400);
+}
+
+.crm-app .focus\:border-cyan-400:focus,
+.crm-app .focus\:border-cyan-500:focus {
+  border-color: var(--brand-purple-500);
+}
+
+.crm-app .ring-cyan-100 {
+  --tw-ring-color: var(--brand-purple-100);
+}
+
+.crm-app .ring-cyan-400 {
+  --tw-ring-color: var(--brand-purple-400);
+}
+
+/* O escuro tambem e da marca: nada de preto neutro — a base carrega um leve
+   viés violeta, coerente com o roxo, e a superficie do grafico e a mesma
+   #181227 contra a qual a paleta foi validada. */
 [data-theme="dark"] .crm-app {
-  background: #030303 !important;
-  color: #f8fafc;
+  background: var(--brand-ink-950) !important;
+  color: #f5f0fe;
 }
 
 [data-theme="dark"] .crm-content {
-  background: linear-gradient(145deg, #040404 0%, #080808 54%, #0b0b0d 100%) !important;
+  background: linear-gradient(145deg, #0b0713 0%, #100b1c 54%, #150f24 100%) !important;
 }
 
 [data-theme="dark"] .crm-topbar {
-  border-color: rgba(64, 64, 64, 0.78) !important;
-  background: rgba(7, 7, 8, 0.97) !important;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.48);
+  border-color: rgba(122, 53, 232, 0.28) !important;
+  background: rgba(17, 12, 29, 0.97) !important;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.52);
   backdrop-filter: blur(18px);
 }
 
 [data-theme="dark"] .crm-sidebar {
-  background: #050506 !important;
-}
-
-[data-theme="dark"] .crm-sidebar::before {
   background:
-    radial-gradient(circle at 12% 8%, rgba(255, 255, 255, 0.06), transparent 24%),
-    linear-gradient(180deg, #0d0d0f 0%, #070707 52%, #030303 100%);
+    radial-gradient(circle at 12% 8%, rgba(154, 104, 241, 0.14), transparent 26%),
+    linear-gradient(180deg, #180f2c 0%, #110b1f 52%, #0b0713 100%)
+    #110b1f !important;
 }
 
 [data-theme="dark"] .crm-quick-actions-menu {
-  border-color: #292929 !important;
+  border-color: #2a2140 !important;
   background: #101012 !important;
   color: #f8fafc !important;
 }
@@ -168,7 +379,7 @@ textarea:focus-visible {
 [data-theme="dark"] .crm-app .bg-white,
 [data-theme="dark"] .crm-app .bg-white\/72,
 [data-theme="dark"] .crm-app .bg-white\/95 {
-  background-color: #101012 !important;
+  background-color: var(--chart-surface) !important;
 }
 
 [data-theme="dark"] .crm-app .bg-white\/10,
@@ -190,14 +401,14 @@ textarea:focus-visible {
 
 [data-theme="dark"] .crm-app .bg-blue-100,
 [data-theme="dark"] .crm-app .bg-cyan-100 {
-  background-color: rgba(34, 211, 238, 0.16) !important;
+  background-color: rgba(122, 53, 232, 0.22) !important;
 }
 
 [data-theme="dark"] .crm-app .bg-\[\#e7f4ff\],
 [data-theme="dark"] .crm-app .bg-blue-50,
 [data-theme="dark"] .crm-app .bg-cyan-50,
 [data-theme="dark"] .crm-app .bg-cyan-50\/70 {
-  background-color: rgba(34, 211, 238, 0.1) !important;
+  background-color: rgba(122, 53, 232, 0.14) !important;
 }
 
 [data-theme="dark"] .crm-app .bg-orange-50,
@@ -244,16 +455,14 @@ textarea:focus-visible {
   color: #8b8b8f !important;
 }
 
-[data-theme="dark"] .crm-app .text-\[\#0753a6\] {
-  color: #67e8f9 !important;
-}
-
-[data-theme="dark"] .crm-app .text-blue-700 {
-  color: #93c5fd !important;
-}
-
-[data-theme="dark"] .crm-app .text-cyan-700 {
-  color: #67e8f9 !important;
+[data-theme="dark"] .crm-app .text-\[\#0753a6\],
+[data-theme="dark"] .crm-app .text-blue-700,
+[data-theme="dark"] .crm-app .text-blue-800,
+[data-theme="dark"] .crm-app .text-cyan-600,
+[data-theme="dark"] .crm-app .text-cyan-700,
+[data-theme="dark"] .crm-app .text-cyan-800,
+[data-theme="dark"] .crm-app .text-cyan-900 {
+  color: var(--brand-purple-300) !important;
 }
 
 [data-theme="dark"] .crm-app .text-orange-700,
@@ -277,12 +486,12 @@ textarea:focus-visible {
 [data-theme="dark"] .crm-app .border-blue-100,
 [data-theme="dark"] .crm-app .border-blue-200,
 [data-theme="dark"] .crm-app .border-slate-200 {
-  border-color: #292929 !important;
+  border-color: #2a2140 !important;
 }
 
 [data-theme="dark"] .crm-app .divide-blue-50 > :not([hidden]) ~ :not([hidden]),
 [data-theme="dark"] .crm-app .divide-blue-100 > :not([hidden]) ~ :not([hidden]) {
-  border-color: #292929 !important;
+  border-color: #2a2140 !important;
 }
 
 [data-theme="dark"] .crm-app .border-orange-100,
@@ -292,8 +501,12 @@ textarea:focus-visible {
   border-color: rgba(245, 158, 11, 0.3) !important;
 }
 
-[data-theme="dark"] .crm-app .border-cyan-200 {
-  border-color: rgba(34, 211, 238, 0.3) !important;
+[data-theme="dark"] .crm-app .border-cyan-100,
+[data-theme="dark"] .crm-app .border-cyan-200,
+[data-theme="dark"] .crm-app .border-cyan-300,
+[data-theme="dark"] .crm-app .border-cyan-400,
+[data-theme="dark"] .crm-app .border-cyan-500 {
+  border-color: rgba(154, 104, 241, 0.42) !important;
 }
 
 [data-theme="dark"] .crm-app .hover\:bg-white:hover,
@@ -434,29 +647,31 @@ textarea:focus-visible {
   gap: 0.5rem;
 }
 
+/* Fallback exibido quando o lottie nao carrega. Acompanha as cores do proprio
+   lottie (roxo da marca) para a falha nao denunciar um tema diferente. */
 .app-loading-fallback span {
   width: 0.5rem;
   height: 1.75rem;
   border-radius: 0.25rem;
-  background: #67e8f9;
+  background: var(--brand-purple-400);
   animation: app-loading-fallback 900ms ease-in-out infinite alternate;
 }
 
 .app-loading-fallback span:nth-child(2) {
   height: 2.5rem;
-  background: #34d399;
+  background: var(--brand-purple-500);
   animation-delay: 120ms;
 }
 
 .app-loading-fallback span:nth-child(3) {
-  background: #60a5fa;
+  background: var(--brand-purple-300);
   animation-delay: 240ms;
 }
 
 .crm-auth-screen {
   position: relative;
   isolation: isolate;
-  background: #0b0f12;
+  background: var(--brand-ink-950);
 }
 
 .crm-auth-screen::before {
@@ -464,39 +679,40 @@ textarea:focus-visible {
   inset: 0;
   z-index: -1;
   background:
-    linear-gradient(115deg, rgba(103, 232, 249, 0.04) 0 1px, transparent 1px 22px),
-    linear-gradient(205deg, rgba(52, 211, 153, 0.035) 0 1px, transparent 1px 28px),
-    #0b0f12;
+    linear-gradient(115deg, rgba(154, 104, 241, 0.055) 0 1px, transparent 1px 22px),
+    linear-gradient(205deg, rgba(122, 53, 232, 0.045) 0 1px, transparent 1px 28px),
+    radial-gradient(900px circle at 18% 12%, rgba(84, 30, 166, 0.28), transparent 68%),
+    var(--brand-ink-950);
   content: "";
 }
 
 .crm-auth-card {
   min-height: min(720px, calc(100svh - 2rem));
-  background: #14181b;
-  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.42);
+  background: var(--brand-ink-900);
+  box-shadow: 0 28px 80px rgba(11, 7, 19, 0.62);
 }
 
 .crm-auth-panel {
   --crm-auth-glow-x: 50%;
   --crm-auth-glow-y: 36%;
   background:
-    radial-gradient(260px circle at var(--crm-auth-glow-x) var(--crm-auth-glow-y), rgba(99, 121, 188, 0.34), transparent 70%),
-    linear-gradient(140deg, #20242d 0%, #181c21 52%, #14191c 100%);
+    radial-gradient(260px circle at var(--crm-auth-glow-x) var(--crm-auth-glow-y), rgba(122, 53, 232, 0.4), transparent 70%),
+    linear-gradient(140deg, #241a3d 0%, #191230 52%, #120d22 100%);
 }
 
 .crm-auth-panel::after {
   position: absolute;
   inset: 0;
-  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.035) 48%, transparent 100%);
+  background: linear-gradient(90deg, transparent 0%, rgba(183, 149, 246, 0.06) 48%, transparent 100%);
   content: "";
   opacity: 0.5;
   pointer-events: none;
 }
 
 .crm-auth-brand > div > div:first-child {
-  border-color: rgba(165, 243, 252, 0.34);
-  background: linear-gradient(135deg, #10213a, #154d68);
-  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.28);
+  border-color: rgba(183, 149, 246, 0.34);
+  background: linear-gradient(135deg, #2b1057, #541ea6);
+  box-shadow: 0 14px 32px rgba(11, 7, 19, 0.38);
 }
 
 .crm-auth-field {
@@ -512,7 +728,7 @@ textarea:focus-visible {
   left: 1px;
   height: 1px;
   border-radius: 999px;
-  background: radial-gradient(48px circle at var(--crm-auth-field-x) 0, rgba(241, 245, 249, 0.95), rgba(165, 243, 252, 0.4) 28%, transparent 72%);
+  background: radial-gradient(48px circle at var(--crm-auth-field-x) 0, rgba(245, 240, 254, 0.95), rgba(154, 104, 241, 0.55) 28%, transparent 72%);
   content: "";
   opacity: 0;
   pointer-events: none;
@@ -542,33 +758,34 @@ textarea:focus-visible {
   align-items: center;
   justify-content: center;
   border-radius: 6px;
-  color: #94a3b8;
+  color: #9b8fb5;
   transition: background-color 160ms ease, color 160ms ease;
 }
 
 .crm-auth-icon-button:hover {
-  background: rgba(148, 163, 184, 0.12);
-  color: #e2e8f0;
+  background: rgba(154, 104, 241, 0.16);
+  color: var(--brand-purple-100);
 }
 
 .crm-auth-submit {
   position: relative;
   overflow: hidden;
-  background: #24465e;
-  box-shadow: 0 14px 32px rgba(13, 34, 48, 0.32);
+  background: linear-gradient(135deg, var(--brand-purple-500) 0%, var(--brand-purple-600) 100%);
+  box-shadow: 0 14px 32px rgba(84, 30, 166, 0.42);
 }
 
 .crm-auth-submit::before {
   position: absolute;
   inset: 0;
-  background: linear-gradient(100deg, transparent 18%, rgba(255, 255, 255, 0.16) 49%, transparent 76%);
+  background: linear-gradient(100deg, transparent 18%, rgba(255, 255, 255, 0.22) 49%, transparent 76%);
   content: "";
   transform: translateX(-115%);
   transition: transform 520ms ease;
 }
 
 .crm-auth-submit:hover:not(:disabled) {
-  background: #2b5875;
+  background: linear-gradient(135deg, var(--brand-purple-400) 0%, var(--brand-purple-500) 100%);
+  box-shadow: 0 16px 38px rgba(122, 53, 232, 0.5);
 }
 
 .crm-auth-submit:hover:not(:disabled)::before {
@@ -581,21 +798,35 @@ textarea:focus-visible {
 }
 
 .crm-auth-media {
-  background: #0b0f12;
+  background: var(--brand-ink-950);
+}
+
+/* Tinge o mockup com o roxo da marca preservando a luminancia,
+   para a arte nao destoar da identidade. */
+.crm-auth-media::before {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: var(--brand-purple-500);
+  content: "";
+  mix-blend-mode: color;
+  opacity: 0.5;
+  pointer-events: none;
 }
 
 .crm-auth-media::after {
+  z-index: 2;
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(90deg, rgba(17, 24, 27, 0.55) 0%, rgba(17, 24, 27, 0.16) 28%, rgba(2, 6, 10, 0.36) 100%),
-    linear-gradient(180deg, rgba(2, 6, 10, 0.08), rgba(2, 6, 10, 0.54));
+    linear-gradient(90deg, rgba(17, 12, 29, 0.5) 0%, rgba(24, 18, 39, 0.06) 32%, rgba(11, 7, 19, 0.26) 100%),
+    radial-gradient(620px circle at 74% 24%, rgba(154, 104, 241, 0.2), transparent 72%);
   content: "";
 }
 
 .crm-auth-media img {
   animation: crm-auth-media-enter 0.65s ease-out both;
-  filter: saturate(0.76) contrast(1.06);
+  filter: saturate(1) contrast(1.03) brightness(1.04);
 }
 
 @keyframes app-loading-fallback {

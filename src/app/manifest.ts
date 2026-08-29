@@ -13,8 +13,8 @@ export default function manifest(): MetadataRoute.Manifest {
     display: "standalone",
     display_override: ["standalone", "minimal-ui"],
     orientation: "portrait",
-    background_color: "#02040a",
-    theme_color: "#041d40",
+    background_color: "#0b0713",
+    theme_color: "#2b1057",
     categories: ["business", "productivity"],
     prefer_related_applications: false,
     icons: [

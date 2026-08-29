@@ -93,7 +93,8 @@ function buildDashboardInsights(snapshot: CrmSnapshot): CrmDashboardInsights {
     );
   }
 
-  const colors = ["#16a34a", "#0f766e", "#f59e0b", "#2563eb"];
+  // Slots categoricos na ordem validada (brand-source/paleta-dados.md).
+  const colors = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--series-4)"];
   const grandTotal = [...categoryTotals.values()].reduce((total, value) => total + value, 0) || 1;
   const categoryData = [...categoryTotals.entries()]
     .sort((left, right) => right[1] - left[1])

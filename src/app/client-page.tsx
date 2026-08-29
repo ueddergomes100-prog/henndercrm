@@ -212,11 +212,13 @@ const crmResultsVisualTokens = {
   "--destructive": "light-dark(var(--color-red-700), var(--color-red-400))",
   "--ring": "var(--primary)",
 } as CSSProperties & Record<`--${string}`, string>;
+// Slots categoricos na ordem validada (ver brand-source/paleta-dados.md).
+// Atribuidos em sequencia e nunca ciclados: uma 9a serie vira "Outros".
 const crmResultsMixColors = [
-  "var(--primary)",
-  "var(--accent)",
-  "var(--secondary)",
-  "var(--muted-foreground)",
+  "var(--series-1)",
+  "var(--series-2)",
+  "var(--series-3)",
+  "var(--series-4)",
 ] as const;
 type ChatMessage = {
   id: string;
@@ -2628,7 +2630,7 @@ function LoginScreen({
 
   return (
     <main className="crm-auth-screen flex min-h-svh items-center overflow-x-hidden p-4 text-white sm:p-6">
-      <div className="crm-auth-card mx-auto grid w-full max-w-6xl overflow-hidden rounded-lg border border-white/10 shadow-2xl lg:grid-cols-[minmax(0,0.96fr)_minmax(0,1.04fr)]">
+      <div className="crm-auth-card mx-auto grid w-full max-w-6xl overflow-hidden rounded-lg border border-[#7a35e8]/20 shadow-2xl lg:grid-cols-[minmax(0,0.96fr)_minmax(0,1.04fr)]">
         <section
           className="crm-auth-panel relative flex min-h-[calc(100svh-2rem)] items-center overflow-hidden px-6 py-10 sm:px-10 lg:min-h-[620px] lg:px-14 xl:px-16"
           style={panelStyle}
@@ -2642,14 +2644,22 @@ function LoginScreen({
         >
           <div className="relative z-10 mx-auto w-full max-w-[370px]">
             <div className="crm-auth-brand">
-              <LogoMark />
-              <p className="mt-9 text-xs font-semibold uppercase tracking-[0.18em] text-cyan-100/68">
+              <Image
+                src="/brand/hennder-lockup-light.png"
+                alt="Hennder Company"
+                width={960}
+                height={170}
+                priority
+                unoptimized
+                className="h-auto w-[248px] max-w-full sm:w-[276px]"
+              />
+              <p className="mt-9 text-xs font-semibold uppercase tracking-[0.18em] text-[#b795f6]/75">
                 Acesso ao painel comercial
               </p>
-              <h1 className="mt-3 text-4xl font-semibold leading-tight text-[#edf2f7] sm:text-[2.7rem]">
+              <h1 className="mt-3 text-4xl font-semibold leading-tight text-[#f5f0fe] sm:text-[2.7rem]">
                 Hennder CRM
               </h1>
-              <p className="mt-3 max-w-sm text-[15px] leading-6 text-slate-300">
+              <p className="mt-3 max-w-sm text-[15px] leading-6 text-[#c4bad8]">
                 Inteligência comercial para transformar relacionamento em novas vendas.
               </p>
             </div>
@@ -2727,8 +2737,8 @@ function LoginScreen({
               )}
             </form>
             {!isProduction && (
-              <div className="mt-5 hidden border-l border-cyan-200/30 pl-3 text-xs leading-5 text-slate-400 sm:block">
-                <p className="font-semibold text-slate-200">Acessos locais de desenvolvimento</p>
+              <div className="mt-5 hidden border-l border-[#7a35e8]/45 pl-3 text-xs leading-5 text-[#9b8fb5] sm:block">
+                <p className="font-semibold text-[#d2bcfa]">Acessos locais de desenvolvimento</p>
                 <p>Administrador: admin@henndercrm.local / Admin@123</p>
                 <p>Supervisor: supervisor@henndercrm.local / Supervisor@123</p>
                 <p>Vendedor: vendedor@henndercrm.local / Vendedor@123</p>
@@ -2787,9 +2797,9 @@ function LoginInput({
         setPointerX(((event.clientX - bounds.left) / bounds.width) * 100);
       }}
     >
-      <span className="mb-2 block text-sm font-medium text-slate-200">{label}</span>
+      <span className="mb-2 block text-sm font-medium text-[#ded7ec]">{label}</span>
       <span className="relative block">
-        <span className="pointer-events-none absolute left-4 top-1/2 z-10 -translate-y-1/2 text-slate-500">
+        <span className="pointer-events-none absolute left-4 top-1/2 z-10 -translate-y-1/2 text-[#7b6f95]">
           {icon}
         </span>
         <input
@@ -2803,9 +2813,9 @@ function LoginInput({
           aria-invalid={hasError}
           aria-describedby={hasError ? "login-error" : undefined}
           required
-          className={`h-12 w-full rounded-[7px] border bg-[#111519] py-3 pl-11 text-sm text-slate-100 outline-none transition placeholder:text-slate-600 focus:bg-[#141a1f] ${
+          className={`h-12 w-full rounded-[7px] border bg-[#120d20] py-3 pl-11 text-sm text-[#f0ecf9] outline-none transition placeholder:text-[#6a5f85] focus:bg-[#181129] ${
             trailing ? "pr-12" : "pr-4"
-          } ${hasError ? "border-red-300/55" : "border-[#2e3740] focus:border-cyan-200/70"}`}
+          } ${hasError ? "border-red-300/55" : "border-[#2e2445] focus:border-[#9a68f1]/80"}`}
         />
         {trailing && <span className="absolute right-1.5 top-1/2 z-10 -translate-y-1/2">{trailing}</span>}
       </span>
@@ -2871,8 +2881,8 @@ function Sidebar({
                     }}
                     className={`flex min-h-11 w-full items-start gap-3 rounded-lg px-3 py-3 text-left text-sm font-medium transition ${
                       active
-                        ? "bg-white text-[#084d9f] shadow-lg shadow-blue-950/20"
-                        : "text-blue-100 hover:bg-white/10 hover:text-white"
+                        ? "bg-white text-[#541ea6] shadow-lg shadow-[#150a2c]/40"
+                        : "text-[#c9bfe0] hover:bg-white/10 hover:text-white"
                     }`}
                   >
                     <Icon size={18} className="mt-0.5 shrink-0" />
@@ -2907,7 +2917,7 @@ function Sidebar({
     <>
       <aside
         aria-label="Menu principal"
-        className="crm-sidebar sticky top-0 z-20 hidden h-screen w-64 shrink-0 flex-col overflow-y-auto overscroll-contain border-r border-white/10 bg-[#083d80] px-3 py-4 text-white shadow-none lg:flex"
+        className="crm-sidebar sticky top-0 z-20 hidden h-screen w-64 shrink-0 flex-col overflow-y-auto overscroll-contain border-r border-[#7a35e8]/20 bg-[#1f0c40] px-3 py-4 text-white shadow-none lg:flex"
       >
         {renderSidebarContent(false)}
       </aside>
@@ -2933,7 +2943,7 @@ function Sidebar({
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: "-104%" }}
             transition={{ type: "spring", stiffness: 360, damping: 36, mass: 0.82 }}
-            className="crm-sidebar crm-mobile-sidebar fixed inset-y-0 left-0 z-40 flex h-screen h-[100dvh] w-[min(18rem,calc(100vw-1.25rem))] max-w-[18rem] flex-col overflow-y-auto overscroll-contain border-r border-white/10 bg-[#083d80] px-3 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-[calc(1rem+env(safe-area-inset-top))] text-white shadow-2xl shadow-blue-950/25 touch-pan-y lg:hidden"
+            className="crm-sidebar crm-mobile-sidebar fixed inset-y-0 left-0 z-40 flex h-screen h-[100dvh] w-[min(18rem,calc(100vw-1.25rem))] max-w-[18rem] flex-col overflow-y-auto overscroll-contain border-r border-[#7a35e8]/20 bg-[#1f0c40] px-3 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-[calc(1rem+env(safe-area-inset-top))] text-white shadow-2xl shadow-[#2b1057]/50 touch-pan-y lg:hidden"
           >
             {renderSidebarContent(true)}
           </motion.aside>
@@ -3077,7 +3087,7 @@ function Topbar({
   }
 
   return (
-    <header className="crm-topbar sticky top-0 z-20 border-b border-blue-700/30 bg-[#0753a6] text-white shadow-[0_4px_18px_rgba(6,61,128,0.18)]">
+    <header className="crm-topbar sticky top-0 z-20 border-b border-[#7a35e8]/30 bg-[#2b1057] text-white shadow-[0_4px_18px_rgba(43,16,87,0.22)]">
       <div className="mx-auto flex h-16 max-w-[1560px] items-center justify-between px-4 sm:px-5 lg:px-6">
         <div className="flex items-center gap-3">
           <button
@@ -3089,7 +3099,7 @@ function Topbar({
             <Menu size={21} />
           </button>
           <div ref={searchRef} className="relative hidden w-[390px] md:block">
-            <div className="flex h-11 items-center gap-2 rounded-xl border border-white/20 bg-white/10 px-3 text-sm text-white shadow-inner shadow-blue-950/10 transition focus-within:border-cyan-200 focus-within:bg-white/15 focus-within:shadow-lg">
+            <div className="flex h-11 items-center gap-2 rounded-xl border border-white/20 bg-white/10 px-3 text-sm text-white shadow-inner shadow-[#150a2c]/25 transition focus-within:border-[#b795f6] focus-within:bg-white/15 focus-within:shadow-lg">
               <Search size={17} className="shrink-0 text-cyan-100" />
               <input
                 value={customerSearch}
@@ -3586,20 +3596,20 @@ function CrmResults({
                     />
                     <Bar
                       dataKey="recuperado"
-                      fill="var(--secondary)"
-                      radius={[6, 6, 2, 2]}
+                      fill="var(--series-1)"
+                      radius={[4, 4, 0, 0]}
                       maxBarSize={34}
                     />
                     <Bar
                       dataKey="influenciado"
-                      fill="var(--primary)"
-                      radius={[6, 6, 2, 2]}
+                      fill="var(--series-2)"
+                      radius={[4, 4, 0, 0]}
                       maxBarSize={34}
                     />
                     <Bar
                       dataKey="relacionamento"
-                      fill="var(--muted-foreground)"
-                      radius={[6, 6, 2, 2]}
+                      fill="var(--series-3)"
+                      radius={[4, 4, 0, 0]}
                       maxBarSize={34}
                     />
                   </BarChart>
@@ -6014,6 +6024,9 @@ function Dashboard({
   const dashboardKpis = buildDashboardKpis(customers);
   const scopedTrend = insights?.repurchaseTrend ?? buildRepurchaseTrendForSales(sales);
   const scopedCategoryData = insights?.categoryData ?? buildCategoryDataForItems(saleItems, products);
+  // Ter linhas nao basta: se todas somam zero a rosca sai sem nenhum setor
+  // desenhado. Nesse caso o certo e explicar a ausencia, nao mostrar um vazio mudo.
+  const hasCategoryData = scopedCategoryData.some((item) => item.value > 0);
 
   return (
     <div className="space-y-5">
@@ -6029,7 +6042,7 @@ function Dashboard({
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: index * 0.04 }}
-            className={`crm-kpi crm-kpi-${index + 1} rounded-xl p-4 text-white shadow-[0_10px_24px_rgba(13,74,145,0.16)]`}
+            className={`crm-kpi crm-kpi-${index + 1} rounded-xl p-4 text-white`}
           >
             <div className="flex items-start justify-between">
               <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/16 text-white">
@@ -6044,16 +6057,18 @@ function Dashboard({
           </motion.div>
         ))}
       </div>
-      <section className="overflow-hidden rounded-xl border border-orange-200 bg-white shadow-[0_8px_24px_rgba(194,65,12,0.09)]">
-        <div className="flex flex-col gap-4 bg-gradient-to-r from-orange-600 to-amber-500 px-5 py-4 text-white lg:flex-row lg:items-center lg:justify-between">
+      <section className="overflow-hidden rounded-xl border border-[#e0dcec] bg-white shadow-[0_8px_24px_rgba(43,16,87,0.08)]">
+        <div className="relative flex flex-col gap-4 bg-gradient-to-r from-[#2b1057] via-[#3a1670] to-[#4a1d8f] px-5 py-4 text-white lg:flex-row lg:items-center lg:justify-between">
+          {/* Barra de status: a urgencia entra como acento, nao como fundo inteiro. */}
+          <span aria-hidden="true" className="absolute inset-y-0 left-0 w-1 bg-[var(--status-serious)]" />
           <div className="flex items-start gap-3">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-white/18">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[var(--status-serious)]/18 text-[#ffb894]">
               <AlertTriangle size={23} />
             </div>
             <div>
-              <p className="text-xs font-bold uppercase tracking-[0.16em] text-orange-50">Atenção comercial</p>
+              <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#ffb894]">Atenção comercial</p>
               <h2 className="mt-1 text-xl font-bold">{inactiveCustomers.length} clientes estão sem comprar</h2>
-              <p className="mt-1 text-sm text-orange-50/90">
+              <p className="mt-1 text-sm text-[#d6cce9]">
                 Veja os casos mais urgentes e acesse a central para acompanhar todos os retornos.
               </p>
             </div>
@@ -6074,7 +6089,7 @@ function Dashboard({
             <button
               type="button"
               onClick={openRecovery}
-              className="h-12 rounded-lg bg-white px-4 text-sm font-bold text-orange-700 shadow-sm transition hover:bg-orange-50"
+              className="h-12 rounded-lg bg-white px-4 text-sm font-bold text-[#541ea6] shadow-sm transition hover:bg-[#f5f0fe]"
             >
               Abrir central
             </button>
@@ -6110,32 +6125,45 @@ function Dashboard({
       </section>
       <div className="grid gap-5 xl:grid-cols-[1.25fr_0.75fr]">
         <Panel title="Evolução de recompra" icon={LineChart}>
+          {/* Duas series exigem legenda: a identidade nunca pode depender so da cor. */}
+          <ChartLegend
+            items={[
+              { label: "Recompra", color: "var(--series-1)" },
+              { label: "Recuperados", color: "var(--series-2)" },
+            ]}
+          />
           <div className="h-80">
             <MeasuredChart>
               {({ width, height }) => (
                   <AreaChart width={width} height={height} data={scopedTrend}>
                   <defs>
                     <linearGradient id="repurchase" x1="0" x2="0" y1="0" y2="1">
-                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.32} />
-                      <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                      <stop offset="5%" stopColor="var(--series-1)" stopOpacity={0.26} />
+                      <stop offset="95%" stopColor="var(--series-1)" stopOpacity={0} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke={chartColors.grid} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={chartColors.grid} vertical={false} />
                   <XAxis dataKey="mes" tickLine={false} axisLine={false} tick={{ fill: chartColors.text }} />
                   <YAxis tickLine={false} axisLine={false} tick={{ fill: chartColors.text }} />
                   <Tooltip contentStyle={chartColors.tooltip} />
-                  <Area type="monotone" dataKey="recompra" stroke="#059669" strokeWidth={3} fill="url(#repurchase)" />
-                  <Area type="monotone" dataKey="recuperados" stroke="#2563eb" strokeWidth={3} fill="transparent" />
+                  <Area type="monotone" dataKey="recompra" stroke="var(--series-1)" strokeWidth={2} fill="url(#repurchase)" />
+                  <Area type="monotone" dataKey="recuperados" stroke="var(--series-2)" strokeWidth={2} fill="transparent" />
                 </AreaChart>
               )}
             </MeasuredChart>
           </div>
         </Panel>
         <Panel title="Categorias recorrentes" icon={PieChart}>
-          {detailsLoading && !scopedCategoryData.length ? (
+          {detailsLoading && !hasCategoryData ? (
             <div className="min-h-80">
               <AppInlineLoading label="Finalizando categorias recorrentes" />
             </div>
+          ) : !hasCategoryData ? (
+            <ChartEmptyState
+              icon={PieChart}
+              title="Sem valor por categoria"
+              detail="Os itens vendidos estão sem valor estimado, então não há distribuição para calcular. Assim que os valores chegarem, o gráfico aparece aqui."
+            />
           ) : (
             <>
               <div className="h-80">
@@ -6155,7 +6183,7 @@ function Dashboard({
               <div className="grid grid-cols-2 gap-2">
                 {scopedCategoryData.map((item) => (
                   <div key={item.name} className="flex items-center gap-2 text-sm text-slate-600">
-                    <span className="h-2.5 w-2.5 rounded-full" style={{ background: item.color }} />
+                    <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: item.color }} />
                     {item.name}
                   </div>
                 ))}
@@ -9663,7 +9691,7 @@ function Reports({
                 <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fill: chartColors.text }} />
                 <YAxis tickLine={false} axisLine={false} tick={{ fill: chartColors.text }} />
                 <Tooltip contentStyle={chartColors.tooltip} />
-                <Bar dataKey="value" radius={[8, 8, 0, 0]} fill="#0f766e" />
+                <Bar dataKey="value" radius={[4, 4, 0, 0]} fill="var(--series-1)" />
               </BarChart>
             )}
           </MeasuredChart>
@@ -9864,14 +9892,15 @@ function MeasuredChart({
 function getChartColors(theme: Theme) {
   const dark = theme === "dark";
 
+  // Cromo recessivo: grade e eixo nunca competem com os dados.
   return {
-    grid: dark ? "#2d2d31" : "#e2e8f0",
-    text: dark ? "#a3a3a3" : "#64748b",
+    grid: dark ? "#2a2140" : "#ece7f5",
+    text: dark ? "#9b8fb5" : "#6f6788",
     tooltip: {
-      backgroundColor: dark ? "#101012" : "#ffffff",
-      borderColor: dark ? "#2f2f33" : "#dbeafe",
+      backgroundColor: dark ? "#181227" : "#ffffff",
+      borderColor: dark ? "#3a2f55" : "#e4dcf3",
       borderRadius: 10,
-      color: dark ? "#f8fafc" : "#0f172a",
+      color: dark ? "#f5f0fe" : "#161122",
     },
   };
 }
@@ -10624,7 +10653,7 @@ function buildCategoryDataForItems(items: SaleItemRow[], products: ProductRow[])
     totals.set(department, (totals.get(department) ?? 0) + item.estimatedValue);
   }
 
-  const colors = ["#16a34a", "#0f766e", "#f59e0b", "#2563eb"];
+  const colors = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--series-4)"];
   const grandTotal = [...totals.values()].reduce((total, value) => total + value, 0) || 1;
 
   return [...totals.entries()]
@@ -11393,17 +11422,64 @@ function ChatBubble({ role, text }: { role: "user" | "ai"; text: string }) {
   );
 }
 
+/** Legenda de series. Obrigatoria sempre que um grafico tem 2+ series: a
+ *  identidade nunca pode depender apenas da cor. */
+function ChartLegend({ items }: { items: Array<{ label: string; color: string }> }) {
+  return (
+    <ul className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+      {items.map((item) => (
+        <li key={item.label} className="flex items-center gap-1.5 text-xs font-medium text-[var(--chart-ink-2,#4a4363)]">
+          <span
+            aria-hidden="true"
+            className="h-2.5 w-2.5 shrink-0 rounded-[3px]"
+            style={{ background: item.color }}
+          />
+          {item.label}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Estado vazio de grafico: explica a ausencia e diz o que fazer, em vez de
+ *  deixar um eixo em branco no lugar. */
+function ChartEmptyState({
+  icon: Icon,
+  title,
+  detail,
+}: {
+  icon: typeof PieChart;
+  title: string;
+  detail: string;
+}) {
+  return (
+    <div className="flex min-h-80 flex-col items-center justify-center gap-3 px-6 text-center">
+      <span className="flex size-11 items-center justify-center rounded-xl bg-[#f0eafb] text-[#7a35e8]">
+        <Icon size={21} aria-hidden="true" />
+      </span>
+      <p className="text-sm font-semibold text-slate-700">{title}</p>
+      <p className="max-w-xs text-xs leading-5 text-slate-500">{detail}</p>
+    </div>
+  );
+}
+
 function LogoMark({ compact = false }: { compact?: boolean }) {
   return (
     <div className="flex items-center gap-3">
-      <div className="relative flex h-11 w-11 items-center justify-center overflow-hidden rounded-xl border border-cyan-300/70 bg-gradient-to-br from-[#041d40] via-[#06356c] to-[#0753a6] text-white shadow-lg shadow-blue-950/20">
-        <span className="absolute -right-5 -top-5 h-16 w-16 rounded-full bg-cyan-300/25 blur-sm" />
-        <span className="absolute bottom-2 left-2 right-2 h-1 rounded-full bg-cyan-300" />
-        <span className="relative z-10 text-2xl font-black leading-none tracking-tight drop-shadow-sm">H</span>
+      <div className="relative flex h-11 w-11 items-center justify-center overflow-hidden rounded-xl border border-[#9a68f1]/45 bg-gradient-to-br from-[#2b1057] via-[#3f1780] to-[#541ea6] shadow-lg shadow-[#2b1057]/40">
+        <span className="absolute -right-5 -top-5 h-16 w-16 rounded-full bg-[#9a68f1]/30 blur-sm" />
+        <Image
+          src="/brand/hennder-symbol-light.png"
+          alt=""
+          width={512}
+          height={341}
+          unoptimized
+          className="relative z-10 h-auto w-[30px]"
+        />
       </div>
       <div>
         <p className={`font-semibold ${compact ? "text-slate-950" : "text-white"}`}>Hennder CRM</p>
-        <p className={`text-xs ${compact ? "text-slate-500" : "text-emerald-50/60"}`}>Inteligência Comercial e Recompra</p>
+        <p className={`text-xs ${compact ? "text-slate-500" : "text-[#c4bad8]"}`}>Inteligência Comercial e Recompra</p>
       </div>
     </div>
   );

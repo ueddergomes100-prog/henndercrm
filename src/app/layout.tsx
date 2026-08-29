@@ -28,7 +28,7 @@ export const metadata: Metadata = {
   other: {
     "apple-mobile-web-app-capable": "yes",
     "mobile-web-app-capable": "yes",
-    "msapplication-TileColor": "#041d40",
+    "msapplication-TileColor": "#2b1057",
     "msapplication-tap-highlight": "no",
   },
   icons: {
@@ -49,7 +49,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#041d40",
+  themeColor: "#2b1057",
 };
 
 export default function RootLayout({
