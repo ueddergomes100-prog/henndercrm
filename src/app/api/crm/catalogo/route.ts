@@ -1,7 +1,5 @@
-import { cookies } from "next/headers";
 import { SupabaseRestClient } from "@/infrastructure/supabase/supabase-rest-client";
 import { buildCatalogSearchFilter } from "@/lib/catalog-search";
-import { CRM_SESSION_COOKIE, readSessionToken } from "@/lib/crm-auth";
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 50;
@@ -26,10 +24,6 @@ type LegacyProductRow = {
 };
 
 export async function GET(request: Request) {
-  const cookieStore = await cookies();
-  const user = readSessionToken(cookieStore.get(CRM_SESSION_COOKIE)?.value);
-  if (!user) return Response.json({ error: "Sessao expirada." }, { status: 401 });
-
   const url = new URL(request.url);
   const page = positiveInteger(url.searchParams.get("page"), 1);
   const pageSize = Math.min(

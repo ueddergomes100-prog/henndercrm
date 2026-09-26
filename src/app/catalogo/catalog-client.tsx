@@ -37,7 +37,7 @@ type CatalogResponse = {
   error?: string;
 };
 
-export default function CatalogClient({ userName }: { userName: string }) {
+export default function CatalogClient() {
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [page, setPage] = useState(1);
@@ -115,7 +115,7 @@ export default function CatalogClient({ userName }: { userName: string }) {
               className="h-9 w-auto object-contain"
             />
           </div>
-          <p className="truncate text-sm font-semibold text-[#6f6788]">{userName}</p>
+          <p className="truncate text-sm font-semibold text-[#6f6788]">Consulta pública</p>
         </div>
       </header>
 
