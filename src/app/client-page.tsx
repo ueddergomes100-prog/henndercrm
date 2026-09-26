@@ -31,6 +31,7 @@ import {
   Pencil,
   Phone,
   PieChart,
+  PackageSearch,
   Plus,
   RefreshCcw,
   Search,
@@ -2901,6 +2902,14 @@ function Sidebar({
           </div>
         ))}
       </nav>
+      <a
+        href="/catalogo"
+        className="mt-5 flex min-h-11 shrink-0 items-center gap-3 rounded-lg border border-white/15 px-3 py-3 text-sm font-semibold text-[#c9bfe0] transition hover:bg-white/10 hover:text-white"
+        onClick={() => setMobileOpen(false)}
+      >
+        <PackageSearch size={18} className="shrink-0" />
+        <span>Catálogo de estoque</span>
+      </a>
       <div className="mt-8 shrink-0 rounded-xl border border-cyan-300/25 bg-white/10 p-4">
         <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-cyan-400 text-[#06356c]">
           <Sparkles size={18} />

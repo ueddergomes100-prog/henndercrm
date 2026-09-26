@@ -66,6 +66,21 @@ export class SupabaseRestClient {
     return [firstPage.data, ...pages].flat();
   }
 
+  async selectPage<T>(
+    table: string,
+    query: Record<string, QueryValue> = {},
+  ): Promise<{ data: T[]; total: number }> {
+    const result = await this.requestWithMetadata<T[]>(table, {
+      query,
+      prefer: "count=exact",
+    });
+
+    return {
+      data: result.data,
+      total: readContentRangeTotal(result.headers.get("content-range")) ?? result.data.length,
+    };
+  }
+
   async insert<T>(table: string, rows: unknown[], returnRepresentation = true): Promise<T[]> {
     return this.request<T[]>(table, {
       method: "POST",

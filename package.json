@@ -17,7 +17,8 @@
     "test": "node --test scripts/*.test.mjs",
     "sync:uniplus": "node scripts/hennder-sync.mjs --dry-run",
     "sync:uniplus:apply": "node scripts/hennder-sync.mjs --apply",
-    "sync:uniplus:auto": "node scripts/hennder-sync.mjs --since auto --apply",
+    "sync:uniplus:auto": "node scripts/hennder-sync.mjs --since auto --apply && node scripts/hennder-catalog-sync.mjs --apply",
+    "sync:uniplus:catalogo": "node scripts/hennder-catalog-sync.mjs --apply",
     "sync:uniplus:reconcile": "node scripts/hennder-sync-reconcile.mjs",
     "notifications:dispatch": "node scripts/dispatch-crm-notifications.mjs"
   },
